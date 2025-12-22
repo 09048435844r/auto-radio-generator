@@ -1,0 +1,24 @@
+# Configuration & Validation
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+python-dotenv>=1.0.0
+PyYAML>=6.0.0
+
+# Script Generation - Gemini
+google-genai>=1.0.0
+
+# Script Generation - Perplexity (OpenAI互換API)
+openai>=1.0.0
+
+# Audio Processing
+pydub>=0.25.1
+numpy>=1.24.0
+
+# HTTP Client (VOICEVOX API用)
+httpx>=0.27.0
+
+# Utilities
+rich>=13.0.0
+
+# Web UI
+gradio>=4.0.0

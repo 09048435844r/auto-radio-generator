@@ -1,0 +1,280 @@
+"""VOICEVOX APIを使用した音声合成クライアント"""
+import asyncio
+import textwrap
+import wave
+from io import BytesIO
+from pathlib import Path
+from datetime import timedelta
+from typing import Optional
+
+import httpx
+from pydub import AudioSegment
+from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn
+
+from core.interfaces import IAudioSynthesizer, SynthesisResult, ChapterMarker
+from core.models import Script, AppConfig
+
+console = Console()
+
+
+class VoicevoxClient(IAudioSynthesizer):
+    """VOICEVOX Local APIを使用した音声合成
+    
+    ローカルで起動しているVOICEVOXエンジンに接続します。
+    """
+    
+    def __init__(self, config: AppConfig):
+        super().__init__(config)
+        self.base_url = config.env.voicevox_base_url
+        self.speakers = config.yaml.audio_synthesizer.speakers
+        self.audio_config = config.yaml.audio_synthesizer
+    
+    async def check_engine_status(self) -> bool:
+        """VOICEVOXエンジンの状態を確認"""
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(f"{self.base_url}/version", timeout=5.0)
+                if response.status_code == 200:
+                    version = response.text.strip('"')
+                    console.print(f"[green]✓ VOICEVOX エンジン接続成功[/green] v{version}")
+                    return True
+        except Exception as e:
+            console.print(f"[red]✗ VOICEVOX エンジンに接続できません: {e}[/red]")
+            console.print(f"[yellow]  → {self.base_url} でエンジンが起動しているか確認してください[/yellow]")
+        return False
+    
+    async def synthesize(self, script: Script, output_dir: Path, speed_scale_override: Optional[float] = None) -> SynthesisResult:
+        """台本から音声を合成
+        
+        Args:
+            script: 台本データ
+            output_dir: 出力ディレクトリ
+            speed_scale_override: UIからの話速指定（優先される）
+        """
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # UIからの指定がconfigより優先
+        speed_scale = speed_scale_override if speed_scale_override is not None else self.audio_config.speed_scale
+        
+        # 一時ディレクトリ
+        temp_dir = output_dir / "temp_phrases"
+        temp_dir.mkdir(exist_ok=True)
+        
+        phrase_data = []  # (音声セグメント, 開始時間, 終了時間, テキスト, 話者ID)
+        chapters: list[ChapterMarker] = []  # YouTubeチャプター情報
+        current_time_ms = 0
+        pause_ms = self.audio_config.pause_between_phrases_ms
+        
+        console.print(f"[cyan]音声合成中...[/cyan] {len(script.dialogue)} フレーズ")
+        
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console
+        ) as progress:
+            task = progress.add_task("合成中...", total=len(script.dialogue))
+            
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                for i, line in enumerate(script.dialogue):
+                    # セクション開始を検出してチャプターを記録
+                    # Note: 冒頭に2秒の無音が追加されるため、チャプタータイムスタンプを2秒オフセット
+                    if line.section:
+                        chapter_title = self._get_chapter_title(line.section, line.text)
+                        pre_roll_offset_sec = 2.0  # 冒頭の無音時間（秒）
+                        adjusted_time_sec = (current_time_ms / 1000.0) + pre_roll_offset_sec
+                        chapters.append(ChapterMarker(
+                            start_time_sec=adjusted_time_sec,
+                            title=chapter_title,
+                            section_id=line.section
+                        ))
+                        console.print(f"[yellow]  ▶ チャプター: {chapter_title} @ {adjusted_time_sec:.1f}s[/yellow]")
+                    
+                    # 話者IDからVOICEVOX speaker_idを取得
+                    speaker_id = getattr(self.speakers, line.speaker_id, self.speakers.main)
+                    
+                    # デバッグ: 話者情報を表示
+                    console.print(f"[dim]  [{i+1}] {line.speaker_id} → VOICEVOX ID: {speaker_id}[/dim]")
+                    
+                    # 音声合成
+                    audio_data = await self._synthesize_phrase(
+                        client, line.text, speaker_id, speed_scale
+                    )
+                    
+                    # AudioSegmentに変換
+                    audio_segment = AudioSegment.from_wav(BytesIO(audio_data))
+                    duration_ms = len(audio_segment)
+                    
+                    # タイミング情報を記録（話者IDも含める）
+                    start_time = current_time_ms
+                    end_time = current_time_ms + duration_ms
+                    phrase_data.append((audio_segment, start_time, end_time, line.text, line.speaker_id))
+                    
+                    current_time_ms = end_time + pause_ms
+                    progress.update(task, advance=1, description=f"合成中... {i+1}/{len(script.dialogue)}")
+        
+        # 音声を結合
+        console.print("[cyan]音声ファイルを結合中...[/cyan]")
+        combined_audio = self._combine_audio(phrase_data, pause_ms)
+        
+        # 冒頭と末尾に無音を追加（演出強化）
+        console.print("[cyan]冒頭・末尾に無音を追加中...[/cyan]")
+        pre_roll = AudioSegment.silent(duration=2000)   # 冒頭2秒の無音
+        post_roll = AudioSegment.silent(duration=5000)  # 末尾5秒の無音
+        combined_audio = pre_roll + combined_audio + post_roll
+        
+        # 音声ファイルを保存
+        audio_path = output_dir / "combined_audio.wav"
+        combined_audio.export(str(audio_path), format="wav")
+        
+        # ASS字幕を生成（話者ごとに色分け）
+        subtitle_path = output_dir / "subtitles.ass"
+        self._generate_ass(phrase_data, subtitle_path)
+        
+        total_duration_sec = len(combined_audio) / 1000.0
+        
+        console.print(f"[green]✓ 音声合成完了[/green] 総時間: {total_duration_sec:.1f}秒")
+        
+        # 一時ファイルを削除
+        for f in temp_dir.glob("*.wav"):
+            f.unlink()
+        temp_dir.rmdir()
+        
+        return SynthesisResult(
+            audio_path=audio_path,
+            subtitle_path=subtitle_path,
+            total_duration_sec=total_duration_sec,
+            chapters=chapters
+        )
+    
+    async def _synthesize_phrase(
+        self,
+        client: httpx.AsyncClient,
+        text: str,
+        speaker_id: int,
+        speed_scale: float
+    ) -> bytes:
+        """１フレーズの音声を合成"""
+        # 音声クエリを生成
+        query_response = await client.post(
+            f"{self.base_url}/audio_query",
+            params={"text": text, "speaker": speaker_id}
+        )
+        query_response.raise_for_status()
+        query = query_response.json()
+        
+        # 音声パラメータを設定（speed_scaleは引数から受け取る）
+        query["speedScale"] = speed_scale
+        query["pitchScale"] = self.audio_config.pitch_scale
+        query["intonationScale"] = self.audio_config.intonation_scale
+        query["volumeScale"] = self.audio_config.volume_scale
+        
+        # 音声を合成
+        synthesis_response = await client.post(
+            f"{self.base_url}/synthesis",
+            params={"speaker": speaker_id},
+            json=query
+        )
+        synthesis_response.raise_for_status()
+        
+        return synthesis_response.content
+    
+    def _combine_audio(
+        self,
+        phrase_data: list,
+        pause_ms: int
+    ) -> AudioSegment:
+        """音声セグメントを結合"""
+        if not phrase_data:
+            return AudioSegment.silent(duration=1000)
+        
+        # 無音セグメント
+        pause = AudioSegment.silent(duration=pause_ms)
+        
+        # 結合（話者ID追加に対応）
+        combined = phrase_data[0][0]
+        for item in phrase_data[1:]:
+            segment = item[0]  # 最初の要素が音声セグメント
+            combined += pause + segment
+        
+        return combined
+    
+    def _generate_ass(self, phrase_data: list, output_path: Path) -> None:
+        """ASS形式の字幕ファイルを生成（話者ごとに色分け）
+        
+        Note: 冒頭に2秒の無音が追加されているため、字幕タイミングを2秒オフセット
+        """
+        pre_roll_offset_ms = 2000  # 冒頭の無音時間
+        
+        # ASSヘッダー
+        header = """[Script Info]
+Title: Auto Radio Subtitles
+ScriptType: v4.00+
+WrapStyle: 0
+PlayResX: 1920
+PlayResY: 1080
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Main,Meiryo,60,&H0055FF55,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,3,2,2,10,10,50,1
+Style: Sub,Meiryo,60,&H00FFFFFF,&H000000FF,&H00CC99FF,&H80000000,0,0,0,0,100,100,0,0,1,3,2,2,10,10,50,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+        
+        lines = [header]
+        
+        for _, start_ms, end_ms, text, speaker_id in phrase_data:
+            # 冒頭の無音分をオフセット
+            adjusted_start_ms = start_ms + pre_roll_offset_ms
+            adjusted_end_ms = end_ms + pre_roll_offset_ms
+            
+            start_time = self._ms_to_ass_time(adjusted_start_ms)
+            end_time = self._ms_to_ass_time(adjusted_end_ms)
+            
+            # 話者IDに応じてスタイルを選択
+            style = "Main" if speaker_id == "main" else "Sub"
+            
+            # 長いテキストを自動折り返し（スマホ最適化: 大きいフォントに合わせて短く）
+            wrapped_text = "\\N".join(textwrap.wrap(text, width=17))
+            
+            lines.append(f"Dialogue: 0,{start_time},{end_time},{style},,0,0,0,,{wrapped_text}\n")
+        
+        output_path.write_text("".join(lines), encoding="utf-8")
+    
+    @staticmethod
+    def _ms_to_ass_time(ms: int) -> str:
+        """ミリ秒をASS形式の時間文字列に変換"""
+        td = timedelta(milliseconds=ms)
+        total_seconds = int(td.total_seconds())
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        seconds = total_seconds % 60
+        centiseconds = (ms % 1000) // 10
+        return f"{hours:01d}:{minutes:02d}:{seconds:02d}.{centiseconds:02d}"
+    
+    def _get_chapter_title(self, section_id: str, text: str) -> str:
+        """セクションIDからチャプタータイトルを生成"""
+        # セクションIDのマッピング
+        section_titles = {
+            "intro": "オープニング",
+            "main": "本題",
+            "news_1": "ニュース1",
+            "news_2": "ニュース2",
+            "news_3": "ニュース3",
+            "listener_mail": "リスナーメール",
+            "ending": "エンディング",
+        }
+        
+        base_title = section_titles.get(section_id, section_id)
+        
+        # news_N の場合、セリフから見出しを抽出（最初の30文字まで）
+        if section_id.startswith("news_"):
+            headline = text[:30].replace('\n', ' ')
+            if len(text) > 30:
+                headline += "..."
+            return f"{base_title}: {headline}"
+        
+        return base_title

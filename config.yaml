@@ -1,0 +1,129 @@
+# =============================================================================
+# 自動ラジオ動画生成システム - 設定ファイル
+# =============================================================================
+
+# リサーチ設定（Perplexity API）
+researcher:
+  model: "sonar-pro"
+  max_tokens: 2048
+  # リサーチモード定義
+  modes:
+    debate:
+      name: "ディベート"
+      description: "賛成・反対の両論を調査し、議論のポイントを整理"
+      system_prompt: |
+        あなたは議論の専門家です。与えられたテーマについて以下を調査してください：
+        - 賛成派の主な主張と根拠（3つ以上）
+        - 反対派の主な主張と根拠（3つ以上）
+        - 議論の争点となるポイント
+        - 専門家や有識者の見解
+        結果は日本語で、箇条書きで整理して出力してください。
+    voices:
+      name: "世間の声"
+      description: "SNSの反応や一般的な意見、ユーモアを収集"
+      system_prompt: |
+        あなたはSNSアナリストです。与えられたテーマについて以下を調査してください：
+        - Twitter/Xでの一般的な反応やトレンド
+        - 面白い意見やユーモアのある投稿
+        - 世代別・属性別の意見の違い
+        - ネットスラングやミームがあれば紹介
+        結果は日本語で、カジュアルな口調で出力してください。
+    trivia:
+      name: "トリビア"
+      description: "あまり知られていない事実や歴史的背景を調査"
+      system_prompt: |
+        あなたは雑学の専門家です。与えられたテーマについて以下を調査してください：
+        - 意外と知られていない事実（5つ以上）
+        - 歴史的な背景や由来
+        - 関連する面白いエピソード
+        - 専門家でも意見が分かれるポイント
+        結果は日本語で、「へぇ〜」と言いたくなるような形式で出力してください。
+    weekly_digest:
+      name: "今週のまとめ"
+      description: "直近1週間の重要ニュースをトップ3形式でまとめる"
+      system_prompt: |
+        Topic: {topic}
+        Target Period: This Week (Last 7 days) from today.
+
+        このトピックに関連する「直近1週間以内の重要な出来事」を**トップ3つ**選定し、レポートを作成してください。
+        ラジオ番組で紹介するため、以下のフォーマットを厳守してください。
+
+        ---
+        ### News 1: [見出し]
+        - **事実 (The Facts)**: 5W1H（いつ、どこで、誰が、何をしたか）を具体的に。
+        - **背景 (Context)**: なぜこれが今話題なのか？ これまでの経緯。
+        - **影響 (Impact)**: 今後どうなるか？ ユーザーや業界へのメリット・デメリット。
+        - **反応 (Reactions)**: SNSや専門家の具体的な反応。
+
+        ### News 2: [見出し]
+        (同上のフォーマット)
+
+        ### News 3: [見出し]
+        (同上のフォーマット)
+        ---
+
+# 台本生成エンジン設定
+script_generator:
+  # 使用するモデル
+  gemini:
+    model: "gemini-2.5-pro"
+    fallback_model: "gemini-2.0-flash"
+    max_tokens: 8192
+  
+  # 台本の構成比率（合計100%）
+  structure:
+    main_topic_ratio: 70      # 本題（リサーチ結果を基にした議論）
+    listener_mail_ratio: 20   # リスナーメールコーナー（架空）
+    ending_ratio: 10          # エンディング
+
+# 音声合成設定
+audio_synthesizer:
+  # 話者ID設定 (VOICEVOX)
+  # speaker_id一覧: https://voicevox.hiroshiba.jp/
+  speakers:
+    main: 3      # ずんだもん（ノーマル）
+    sub: 2       # 四国めたん（ノーマル）
+  
+  # 音声設定
+  speed_scale: 1.1
+  pitch_scale: 0.0
+  intonation_scale: 1.0
+  volume_scale: 1.0
+  
+  # フレーズ間の無音時間（ミリ秒）
+  pause_between_phrases_ms: 500
+
+# 動画生成設定
+video_renderer:
+  # 出力設定
+  output_resolution: "1920x1080"
+  output_fps: 30
+  output_codec: "libx264"
+  output_audio_codec: "aac"
+  output_audio_bitrate: "192k"
+  
+  # BGM設定
+  bgm_volume: 0.15           # BGM音量 (0.0 - 1.0)
+  bgm_fade_in_sec: 3.0       # フェードイン時間（秒）
+  bgm_fade_out_sec: 3.0      # フェードアウト時間（秒）
+  
+  # 音声スペクトラム可視化
+  enable_spectrum: true      # スペクトラム表示を有効化
+  spectrum_color: "0x00FF88" # スペクトラムの色（緑系）
+  spectrum_mode: "cline"     # 表示モード: line, cline, bar
+
+# パス設定
+paths:
+  assets_dir: "assets"
+  output_dir: "output"
+  background_image: "assets/backgrounds/default.png"
+  bgm_file: "assets/bgm/default.mp3"
+
+# パーソナリティ設定（プロンプト用）
+personalities:
+  main:
+    name: "ずんだもん"
+    description: "語尾は『〜なのだ』。好奇心旺盛だが少し抜けている。難しい専門用語は噛み砕いて話す。テンション高め。"
+  sub:
+    name: "めたん"
+    description: "語尾は『〜わよ』『〜かしら』。冷静沈着なお嬢様。ずんだもんのボケに対して鋭くツッコミを入れる。博識。"
