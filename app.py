@@ -67,7 +67,7 @@ def generate_video(
     speed_scale: float,
     enable_spectrum: bool,
     progress=gr.Progress()
-) -> tuple[str | None, str, str, str]:
+) -> tuple[str | None, str, str, str, str]:
     """動画生成を実行
     
     Args:
@@ -82,11 +82,11 @@ def generate_video(
         progress: Gradio進捗バー
     
     Returns:
-        (動画パス, ログ出力, コストレポート, メタデータ)
+        (動画パス, ログ出力, コストレポート, タイトル, 概要欄)
     """
     # 入力検証
     if not theme or not theme.strip():
-        return None, "エラー: テーマを入力してください。", "", ""
+        return None, "エラー: テーマを入力してください。", "", "", ""
     
     # ログをクリア
     clear_logs()
@@ -137,14 +137,15 @@ def generate_video(
         
         # コストレポートとメタデータ
         cost_report = result.cost_report if result.cost_report else ""
-        metadata_content = result.metadata_content if result.metadata_content else ""
+        formatted_title = result.formatted_title if result.formatted_title else ""
+        formatted_description = result.formatted_description if result.formatted_description else ""
         
-        return str(result.video_path), get_logs(), cost_report, metadata_content
+        return str(result.video_path), get_logs(), cost_report, formatted_title, formatted_description
     else:
         error_msg = result.error_message or "不明なエラーが発生しました"
         append_log("")
         append_log(f"❌ 生成失敗: {error_msg}")
-        return None, get_logs(), "", ""
+        return None, get_logs(), "", "", ""
 
 
 def create_ui() -> gr.Blocks:
@@ -307,12 +308,16 @@ def create_ui() -> gr.Blocks:
                 
                 # メタデータ表示エリア
                 gr.Markdown("### 📝 YouTubeメタデータ")
-                metadata_output = gr.TextArea(
-                    label="メタデータ（タイトル、説明、チャプター）",
+                title_output = gr.Textbox(
+                    label="タイトル (コピー用)",
                     placeholder="生成完了後に表示されます",
-                    lines=10,
-                    max_lines=15,
-                    interactive=False
+                    interactive=True
+                )
+                description_output = gr.Textbox(
+                    label="概要欄・チャプター (一括コピー用)",
+                    placeholder="生成完了後に表示されます",
+                    lines=15,
+                    interactive=True
                 )
         
         # フッター
@@ -379,7 +384,7 @@ def create_ui() -> gr.Blocks:
                 speed_slider,
                 spectrum_checkbox
             ],
-            outputs=[video_output, log_output, cost_output, metadata_output],
+            outputs=[video_output, log_output, cost_output, title_output, description_output],
             show_progress="full"
         )
     

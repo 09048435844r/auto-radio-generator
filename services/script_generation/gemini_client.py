@@ -216,6 +216,7 @@ class GeminiClient(IScriptGenerator):
 ```json
 {{
   "title": "番組タイトル（テーマを反映した魅力的なタイトル）",
+  "thumbnail_title": "サムネイル用の短い釣りタイトル（10〜15文字以内のキャッチコピー。例: 「血糖値の新常識」「朝食の魔法」など）",
   "description": "番組の概要（YouTube説明文用、SEOを意識して関連キーワードを自然に盛り込み、動画の内容を興味深く詳細に要約すること。500文字程度を目安に）",
   "dialogue": [
     {{"speaker_id": "main", "text": "セリフ内容", "section": "intro"}},

@@ -61,6 +61,8 @@ class WorkflowResult:
     cost_report: str = ""
     # メタデータ情報
     metadata_content: str = ""
+    formatted_title: str = ""  # 日付入りタイトル（コピー用）
+    formatted_description: str = ""  # 概要欄・チャプター結合版（コピー用）
 
 
 @dataclass
@@ -206,6 +208,11 @@ async def generate_video_workflow(
             return WorkflowResult(success=False, error_message=error)
         progress(0.05, "前提条件OK")
         
+        # 出力ディレクトリを準備（リサーチ結果保存のため早期に作成）
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_base = root / config.yaml.paths.output_dir / timestamp
+        output_base.mkdir(parents=True, exist_ok=True)
+        
         # ========== Phase 1: リサーチ (5-20%) ==========
         research_data = None
         if overrides.enable_research and overrides.research_mode:
@@ -213,40 +220,93 @@ async def generate_video_workflow(
             log(f"\n== リサーチ ==")
             log(f"テーマ: {theme}")
             log(f"モード: {overrides.research_mode}")
+            log(f"[DEBUG] enable_research: {overrides.enable_research}")
+            log(f"[DEBUG] research_mode: {overrides.research_mode}")
             
             research_start = time.time()
             try:
                 researcher = create_researcher(config)
                 research_data = await researcher.research(theme, overrides.research_mode)
                 
+                log(f"[DEBUG] リサーチAPI呼び出し完了")
+                log(f"[DEBUG] research_data is None: {research_data is None}")
+                
                 # Usage記録
-                if research_data.usage:
+                if research_data and research_data.usage:
                     total_usage.perplexity = research_data.usage
                 
                 total_usage.research_duration_sec = time.time() - research_start
-                log(f"✓ リサーチ完了: {len(research_data.content)}文字 ({total_usage.research_duration_sec:.1f}秒)")
                 
-                # リサーチ結果をJSONで保存
-                research_path = output_base / "research.json"
-                research_path.parent.mkdir(parents=True, exist_ok=True)
+                if research_data:
+                    log(f"✓ リサーチ完了: {len(research_data.content)}文字 ({total_usage.research_duration_sec:.1f}秒)")
+                else:
+                    log(f"⚠ リサーチデータがNullです")
                 
-                # dataclassを辞書に変換
+                progress(0.20, "リサーチ完了")
+                
+            except Exception as e:
+                log(f"⚠ リサーチスキップ（エラー）: {e}")
+                import traceback
+                log(f"[DEBUG] Traceback: {traceback.format_exc()}")
+        else:
+            log(f"[DEBUG] リサーチスキップ条件:")
+            log(f"[DEBUG]   enable_research: {overrides.enable_research}")
+            log(f"[DEBUG]   research_mode: {overrides.research_mode}")
+            progress(0.20, "リサーチスキップ")
+        
+        # リサーチ結果をJSONで保存（リサーチブロックの外で実行）
+        if research_data:
+            try:
                 from dataclasses import asdict
                 import json
                 
+                log(f"[DEBUG] research.json保存処理開始")
+                log(f"[DEBUG] research_data type: {type(research_data)}")
+                log(f"[DEBUG] output_base: {output_base}")
+                
+                research_path = output_base / "research.json"
+                research_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                log(f"[DEBUG] 保存先パス: {research_path}")
+                log(f"[DEBUG] ディレクトリ存在: {research_path.parent.exists()}")
+                
                 research_dict = asdict(research_data)
-                # usageフィールドも辞書化
+                log(f"[DEBUG] dataclass→dict変換完了")
+                
+                # usageは既にasdict()により辞書化済み
                 if research_dict.get('usage'):
-                    research_dict['usage'] = asdict(research_dict['usage'])
+                    log(f"[DEBUG] usage type: {type(research_dict['usage'])}")
+                    log(f"[DEBUG] usage辞書化済み（asdict()により自動変換）")
                 
-                research_path.write_text(json.dumps(research_dict, ensure_ascii=False, indent=2), encoding="utf-8")
-                log(f"✓ リサーチ結果保存: {research_path.name}")
+                json_str = json.dumps(research_dict, ensure_ascii=False, indent=2)
+                log(f"[DEBUG] JSON文字列化完了 ({len(json_str)} 文字)")
                 
-                progress(0.20, "リサーチ完了")
-            except Exception as e:
-                log(f"⚠ リサーチスキップ（エラー）: {e}")
+                research_path.write_text(json_str, encoding="utf-8")
+                log(f"✓ リサーチ結果保存: {research_path}")
+                log(f"[DEBUG] ファイルサイズ: {research_path.stat().st_size} bytes")
+                
+                # Markdownレポートも保存（人間が読みやすい形式）
+                report_path = output_base / "research_report.md"
+                report_content = f"""# リサーチレポート
+
+**テーマ**: {research_data.topic}
+**モード**: {research_data.mode}
+**生成日時**: {datetime.now().strftime('%Y年%m月%d日 %H:%M:%S')}
+
+---
+
+{research_data.content}
+"""
+                report_path.write_text(report_content, encoding="utf-8")
+                log(f"✓ リサーチレポート保存: {report_path}")
+                log(f"[DEBUG] レポートサイズ: {report_path.stat().st_size} bytes")
+                
+            except Exception as save_error:
+                log(f"⚠ リサーチ結果保存エラー: {save_error}")
+                import traceback
+                log(f"[DEBUG] Traceback: {traceback.format_exc()}")
         else:
-            progress(0.20, "リサーチスキップ")
+            log(f"[DEBUG] research_dataがNullのため保存スキップ")
         
         # ========== Phase 2: 台本生成 (20-35%) ==========
         progress(0.20, "台本を生成中...")
@@ -267,9 +327,7 @@ async def generate_video_workflow(
         log(f"タイトル: {script.title}")
         progress(0.35, "台本生成完了")
         
-        # 出力ディレクトリを準備
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_base = root / config.yaml.paths.output_dir / timestamp
+        # 音声出力ディレクトリを準備
         audio_output_dir = output_base / "audio"
         video_output_path = output_base / "videos" / f"radio_{timestamp}.mp4"
         
@@ -344,11 +402,34 @@ async def generate_video_workflow(
         # メタデータの内容を読み込んでUIへ渡す
         metadata_content = metadata_path.read_text(encoding="utf-8")
         
+        # 日付入りタイトルと概要欄結合版を生成
+        creation_date = datetime.now().strftime("%Y.%m.%d")
+        formatted_title = f"{script.title} ({creation_date}制作)"
+        
+        # チャプターリストを生成
+        chapter_lines = []
+        if synthesis_result.chapters:
+            for chapter in synthesis_result.chapters:
+                total_seconds = int(chapter.start_time_sec)
+                minutes = total_seconds // 60
+                seconds = total_seconds % 60
+                timestamp = f"{minutes:02d}:{seconds:02d}"
+                chapter_lines.append(f"{timestamp} {chapter.title}")
+        
+        # 概要欄結合（チャプター + 概要文 + ハッシュタグ）
+        formatted_description_parts = []
+        if chapter_lines:
+            formatted_description_parts.append("\n".join(chapter_lines))
+        formatted_description_parts.append(script.description)
+        formatted_description_parts.append("#ずんだもん #VOICEVOX #AI #ラジオ")
+        formatted_description = "\n\n".join(formatted_description_parts)
+        
         # サムネイル画像を生成
         thumbnail_generator = ThumbnailGenerator()
         thumbnail_path = output_base / "thumbnail.png"
         thumbnail_generator.generate(
             title=script.title,
+            thumbnail_title=script.thumbnail_title,
             background_path=background_image,
             output_path=thumbnail_path
         )
@@ -378,7 +459,9 @@ async def generate_video_workflow(
             usage=total_usage,
             cost=cost,
             cost_report=cost_report,
-            metadata_content=metadata_content
+            metadata_content=metadata_content,
+            formatted_title=formatted_title,
+            formatted_description=formatted_description
         )
         
     except Exception as e:

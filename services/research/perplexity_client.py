@@ -95,18 +95,28 @@ class PerplexityResearcher(IResearcher):
     
     def _get_default_system_prompt(self, mode: ResearchMode) -> str:
         """デフォルトのシステムプロンプトを取得"""
+        # 全モード共通のMarkdown出力指示
+        markdown_instruction = """
+
+【出力形式の厳守】
+- 出力は必ずMarkdown形式で行ってください。
+- 重要なポイントは箇条書き（Bullet points）を使用してください。
+- トピックごとに見出し（### または ####）を付けて区切ってください。
+- ベタ書きの長文は避け、視認性を高めてください。
+- 段落間には適切な改行を入れてください。"""
+        
         prompts = {
             "debate": """あなたは議論の専門家です。与えられたテーマについて、
 賛成・反対両方の視点から調査し、議論のポイントを整理してください。
-結果は日本語で出力してください。""",
+結果は日本語で出力してください。""" + markdown_instruction,
             
             "voices": """あなたはSNSアナリストです。与えられたテーマについて、
 一般の人々の反応や意見、面白いコメントを調査してください。
-結果は日本語でカジュアルに出力してください。""",
+結果は日本語でカジュアルに出力してください。""" + markdown_instruction,
             
             "trivia": """あなたは雑学の専門家です。与えられたテーマについて、
 あまり知られていない事実や歴史的背景を調査してください。
-結果は日本語で「へぇ〜」と言いたくなるような形式で出力してください。""",
+結果は日本語で「へぇ〜」と言いたくなるような形式で出力してください。""" + markdown_instruction,
             
             "weekly_digest": """あなたはニュースキュレーターです。
 与えられたトピックに関連する「直近1週間以内の重要な出来事」をトップ3つ選定してください。
@@ -122,7 +132,7 @@ class PerplexityResearcher(IResearcher):
 (同上のフォーマット)
 
 ### News 3: [見出し]
-(同上のフォーマット)"""
+(同上のフォーマット)""" + markdown_instruction
         }
         return prompts.get(mode, prompts["trivia"])
     

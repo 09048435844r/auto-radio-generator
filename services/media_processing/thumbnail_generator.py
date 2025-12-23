@@ -1,7 +1,7 @@
 """YouTubeサムネイル画像生成サービス"""
 from pathlib import Path
 from typing import Optional
-
+from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 from rich.console import Console
 
@@ -50,6 +50,7 @@ class ThumbnailGenerator:
         title: str,
         background_path: Path,
         output_path: Path,
+        thumbnail_title: str = "",
         darken_factor: float = 0.5,
         blur_radius: int = 3
     ) -> Path:
@@ -59,14 +60,18 @@ class ThumbnailGenerator:
             title: 動画タイトル
             background_path: 背景画像のパス
             output_path: 出力先パス
+            thumbnail_title: サムネイル用の短い釣りタイトル（なければtitleを使用）
             darken_factor: 背景を暗くする係数 (0.0-1.0, 小さいほど暗い)
             blur_radius: ブラー半径 (0で無効)
         
         Returns:
             Path: 生成されたサムネイル画像のパス
         """
+        # 釣りタイトルがなければ通常のtitleを使用
+        display_title = thumbnail_title if thumbnail_title else title
+        
         console.print(f"[cyan]サムネイル画像を生成中...[/cyan]")
-        console.print(f"  タイトル: {title}")
+        console.print(f"  タイトル: {display_title}")
         console.print(f"  背景: {background_path.name}")
         
         # 1. 背景画像を読み込み、リサイズ
@@ -76,7 +81,10 @@ class ThumbnailGenerator:
         background = self._apply_effects(background, darken_factor, blur_radius)
         
         # 3. タイトルテキストを描画
-        thumbnail = self._draw_title_text(background, title)
+        thumbnail = self._draw_title_text(background, display_title)
+        
+        # 4. 日付バッジを描画
+        thumbnail = self._draw_date_badge(thumbnail)
         
         # 4. 保存
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -150,7 +158,7 @@ class ThumbnailGenerator:
         return img
     
     def _draw_title_text(self, img: Image.Image, title: str) -> Image.Image:
-        """タイトルテキストを画像に描画（動的サイズ調整）
+        """タイトルテキストを画像に描画（センターセーフ方式：1:1トリミング対応）
         
         Args:
             img: ベース画像
@@ -159,30 +167,75 @@ class ThumbnailGenerator:
         Returns:
             Image.Image: テキスト描画後の画像
         """
+        import textwrap
         draw = ImageDraw.Draw(img)
         
-        # 安全マージン：画像幅の90%を最大幅とする
-        max_text_width = int(self.THUMBNAIL_WIDTH * 0.9)
+        # センターセーフ方式：画像の高さ(720)の90%を最大幅とする
+        # これにより、1:1トリミング時も文字が中央に収まる
+        max_text_width = int(self.THUMBNAIL_HEIGHT * 0.9)  # 720 * 0.9 = 648px
+        max_text_height = int(self.THUMBNAIL_HEIGHT * 0.8)
         
-        # PM提供の_get_fitted_fontを使用して最適なフォントを取得
-        # フォントパスは最初に見つかったものを使用
+        # フォントパスを取得
         font_path = self.font_paths[0] if self.font_paths else None
-        if font_path:
-            font = self._get_fitted_font(draw, title, font_path, max_text_width, max_size=120, min_size=40)
-        else:
-            # フォントパスがない場合はデフォルトフォント
+        if not font_path:
             font = ImageFont.load_default()
+            lines = [title]
+        else:
+            # タイトルを1行あたり10～12文字で強制改行
+            lines = textwrap.wrap(title, width=12)
+            if not lines:
+                lines = [title]
+            
+            # 初期フォントサイズを180（極大）に設定
+            current_size = 180
+            min_size = 40
+            font = None
+            
+            # テキスト全体が画像内に収まるまでサイズを縮小
+            while current_size >= min_size:
+                try:
+                    font = ImageFont.truetype(str(font_path), current_size)
+                except OSError:
+                    font = ImageFont.load_default()
+                    break
+                
+                # 全行のバウンディングボックスを計算
+                total_width = 0
+                total_height = 0
+                line_heights = []
+                
+                for line in lines:
+                    bbox = draw.textbbox((0, 0), line, font=font)
+                    line_width = bbox[2] - bbox[0]
+                    line_height = bbox[3] - bbox[1]
+                    total_width = max(total_width, line_width)
+                    line_heights.append(line_height)
+                
+                # 行間はフォントサイズの20%
+                line_spacing = int(current_size * 0.2)
+                total_height = sum(line_heights) + line_spacing * (len(lines) - 1)
+                
+                # 幅と高さが両方とも収まればOK
+                if total_width <= max_text_width and total_height <= max_text_height:
+                    break
+                
+                # 収まらない場合はサイズを下げて再試行
+                current_size -= 5
+            
+            # 最小サイズでも入らない場合は最小サイズを使用
+            if current_size < min_size:
+                font = ImageFont.truetype(str(font_path), min_size)
         
-        # タイトルを適切に改行
-        lines = self._wrap_text(title, font, max_width=max_text_width)
-        
-        # テキストの全体サイズを計算
+        # 最終的な行高と総高を再計算
         line_heights = []
         for line in lines:
             bbox = draw.textbbox((0, 0), line, font=font)
             line_heights.append(bbox[3] - bbox[1])
         
-        total_height = sum(line_heights) + (len(lines) - 1) * 20  # 行間20px
+        # 行間はフォントサイズに応じて調整
+        font_size = font.size if hasattr(font, 'size') else 60
+        line_spacing = int(font_size * 0.2)
+        total_height = sum(line_heights) + line_spacing * (len(lines) - 1)
         
         # 中央配置の開始Y座標
         y = (self.THUMBNAIL_HEIGHT - total_height) // 2
@@ -384,3 +437,79 @@ class ThumbnailGenerator:
         
         # メインテキストを描画
         draw.text((x, y), text, font=font, fill=fill_color)
+    
+    def _draw_date_badge(self, img: Image.Image) -> Image.Image:
+        """セーフエリア内の右上に日付バッジを描画（1:1トリミング対応）
+        
+        Args:
+            img: ベース画像
+        
+        Returns:
+            Image.Image: バッジ描画後の画像
+        """
+        draw = ImageDraw.Draw(img)
+        
+        # 現在の日付を取得
+        current_date = datetime.now().strftime("%Y.%m.%d制作")
+        
+        # フォント設定
+        font_size = 45
+        font = None
+        for font_path in self.font_paths:
+            try:
+                font = ImageFont.truetype(str(font_path), font_size)
+                break
+            except Exception:
+                continue
+        
+        if not font:
+            font = ImageFont.load_default()
+        
+        # テキストサイズを計測
+        bbox = draw.textbbox((0, 0), current_date, font=font)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+        
+        # バッジの位置とサイズ
+        margin = 50
+        padding_x = 20
+        padding_y = 15
+        badge_width = text_width + padding_x * 2
+        badge_height = text_height + padding_y * 2
+        
+        # センターセーフ方式：セーフエリア(720x720)内の右上に配置
+        # セーフエリアの右端 = (画像幅 / 2) + (セーフエリア幅 / 2)
+        safe_zone_width = self.THUMBNAIL_HEIGHT  # 720px
+        safe_zone_right = (self.THUMBNAIL_WIDTH // 2) + (safe_zone_width // 2)
+        badge_x = safe_zone_right - badge_width - margin
+        badge_y = margin
+        
+        # 角丸長方形の背景を描画
+        badge_rect = [
+            badge_x,
+            badge_y,
+            badge_x + badge_width,
+            badge_y + badge_height
+        ]
+        
+        # 背景色（赤）
+        draw.rounded_rectangle(
+            badge_rect,
+            radius=10,
+            fill="#CC0000",
+            outline=None
+        )
+        
+        # テキストを中央に配置
+        text_x = badge_x + padding_x
+        text_y = badge_y + padding_y
+        
+        # 白文字で描画
+        draw.text(
+            (text_x, text_y),
+            current_date,
+            font=font,
+            fill="#FFFFFF"
+        )
+        
+        return img

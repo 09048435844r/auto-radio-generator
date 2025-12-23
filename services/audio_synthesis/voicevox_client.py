@@ -217,8 +217,8 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Main,Meiryo,60,&H0055FF55,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,3,2,2,10,10,50,1
-Style: Sub,Meiryo,60,&H00FFFFFF,&H000000FF,&H00CC99FF,&H80000000,0,0,0,0,100,100,0,0,1,3,2,2,10,10,50,1
+Style: Main,Meiryo,105,&H0055FF55,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,6,2,2,10,10,30,1
+Style: Sub,Meiryo,105,&H00FFFFFF,&H000000FF,&H00CC99FF,&H80000000,0,0,0,0,100,100,0,0,1,6,2,2,10,10,30,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -237,8 +237,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             # 話者IDに応じてスタイルを選択
             style = "Main" if speaker_id == "main" else "Sub"
             
-            # 長いテキストを自動折り返し（スマホ最適化: 大きいフォントに合わせて短く）
-            wrapped_text = "\\N".join(textwrap.wrap(text, width=17))
+            # 長いテキストを自動折り返し（限界設定: 画面端ギリギリまで拡大）
+            wrapped_text = "\\N".join(textwrap.wrap(text, width=18))
             
             lines.append(f"Dialogue: 0,{start_time},{end_time},{style},,0,0,0,,{wrapped_text}\n")
         

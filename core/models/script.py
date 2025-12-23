@@ -22,6 +22,10 @@ class Script(BaseModel):
     title: str = Field(
         description="YouTube動画のタイトル案"
     )
+    thumbnail_title: str = Field(
+        default="",
+        description="サムネイル用の短い釣りタイトル（10〜15文字以内のキャッチコピー）"
+    )
     description: str = Field(
         description="YouTubeの概要欄・ハッシュタグ案"
     )
