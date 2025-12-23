@@ -4,21 +4,22 @@ pydantic-settings>=2.0.0
 python-dotenv>=1.0.0
 PyYAML>=6.0.0
 
-# Script Generation - Gemini
-google-genai>=1.0.0
-
-# Script Generation - Perplexity (OpenAI互換API)
-openai>=1.0.0
+# AI APIs
+google-genai>=1.0.0      # Gemini API (台本生成)
+openai>=1.0.0            # Perplexity API (リサーチ、OpenAI互換)
 
 # Audio Processing
-pydub>=0.25.1
-numpy>=1.24.0
+pydub>=0.25.1            # 音声ファイル操作
+numpy>=1.24.0            # 音声データ処理
 
-# HTTP Client (VOICEVOX API用)
-httpx>=0.27.0
+# Image Processing
+Pillow>=10.0.0           # サムネイル生成
 
-# Utilities
-rich>=13.0.0
+# HTTP Client
+httpx>=0.27.0            # VOICEVOX API通信
+
+# CLI & Utilities
+rich>=13.0.0             # コンソール出力装飾
 
 # Web UI
-gradio>=4.0.0
+gradio>=4.0.0            # ブラウザベースUI
