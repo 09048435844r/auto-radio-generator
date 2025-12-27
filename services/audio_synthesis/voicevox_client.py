@@ -237,12 +237,42 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             # 話者IDに応じてスタイルを選択
             style = "Main" if speaker_id == "main" else "Sub"
             
-            # 長いテキストを自動折り返し（限界設定: 画面端ギリギリまで拡大）
-            wrapped_text = "\\N".join(textwrap.wrap(text, width=18))
+            # BudouXで自然な改行位置を取得（限界設定: 画面端ギリギリまで拡大）
+            from budoux import load_default_japanese_parser
+            parser = load_default_japanese_parser()
+            chunks = parser.parse(text)
+            wrapped_text = self._wrap_subtitle_budoux(chunks, max_chars=18)
             
             lines.append(f"Dialogue: 0,{start_time},{end_time},{style},,0,0,0,,{wrapped_text}\n")
         
         output_path.write_text("".join(lines), encoding="utf-8")
+    
+    @staticmethod
+    def _wrap_subtitle_budoux(chunks: list[str], max_chars: int = 18) -> str:
+        """文節区切りされたチャンクを指定文字数で折り返す
+        
+        Args:
+            chunks: BudouXで分割された文節リスト
+            max_chars: 1行あたりの最大文字数
+        
+        Returns:
+            str: ASS形式の改行コード（\\N）で区切られたテキスト
+        """
+        lines = []
+        current_line = ""
+        
+        for chunk in chunks:
+            test_line = current_line + chunk
+            if len(test_line) <= max_chars or not current_line:
+                current_line = test_line
+            else:
+                lines.append(current_line)
+                current_line = chunk
+        
+        if current_line:
+            lines.append(current_line)
+        
+        return "\\N".join(lines)
     
     @staticmethod
     def _ms_to_ass_time(ms: int) -> str:

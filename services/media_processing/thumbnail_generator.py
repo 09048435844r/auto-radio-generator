@@ -167,7 +167,7 @@ class ThumbnailGenerator:
         Returns:
             Image.Image: テキスト描画後の画像
         """
-        import textwrap
+        from budoux import load_default_japanese_parser
         draw = ImageDraw.Draw(img)
         
         # センターセーフ方式：画像の高さ(720)の90%を最大幅とする
@@ -181,8 +181,10 @@ class ThumbnailGenerator:
             font = ImageFont.load_default()
             lines = [title]
         else:
-            # タイトルを1行あたり10～12文字で強制改行
-            lines = textwrap.wrap(title, width=12)
+            # BudouXで自然な改行位置を取得
+            parser = load_default_japanese_parser()
+            chunks = parser.parse(title)
+            lines = self._wrap_text_budoux(chunks, max_text_width, font_path)
             if not lines:
                 lines = [title]
             
@@ -258,6 +260,40 @@ class ThumbnailGenerator:
             y += line_height + 20  # 次の行へ
         
         return img
+    
+    def _wrap_text_budoux(self, chunks: list[str], max_width: int, font_path: Path) -> list[str]:
+        """文節区切りされたチャンクを指定幅で折り返す
+        
+        Args:
+            chunks: BudouXで分割された文節リスト
+            max_width: 最大幅（ピクセル）
+            font_path: フォントパス
+        
+        Returns:
+            list[str]: 折り返された行のリスト
+        """
+        # 仮のフォントサイズで計測（後で調整される）
+        test_font = ImageFont.truetype(str(font_path), 100)
+        draw = ImageDraw.Draw(Image.new('RGB', (1, 1)))
+        
+        lines = []
+        current_line = ""
+        
+        for chunk in chunks:
+            test_line = current_line + chunk
+            bbox = draw.textbbox((0, 0), test_line, font=test_font)
+            line_width = bbox[2] - bbox[0]
+            
+            if line_width <= max_width or not current_line:
+                current_line = test_line
+            else:
+                lines.append(current_line)
+                current_line = chunk
+        
+        if current_line:
+            lines.append(current_line)
+        
+        return lines
     
     def _calculate_optimal_font_size(
         self,
