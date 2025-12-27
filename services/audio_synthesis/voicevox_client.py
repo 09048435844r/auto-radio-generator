@@ -217,8 +217,8 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Main,Meiryo,105,&H0055FF55,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,6,2,2,10,10,30,1
-Style: Sub,Meiryo,105,&H00FFFFFF,&H000000FF,&H00CC99FF,&H80000000,0,0,0,0,100,100,0,0,1,6,2,2,10,10,30,1
+Style: Main,Meiryo,105,&H0055FF55,&H000000FF,&H00000000,&H80000000,0,0,0,0,100,100,0,0,1,6,2,2,20,20,30,1
+Style: Sub,Meiryo,105,&H00FFFFFF,&H000000FF,&H00CC99FF,&H80000000,0,0,0,0,100,100,0,0,1,6,2,2,20,20,30,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -241,14 +241,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             from budoux import load_default_japanese_parser
             parser = load_default_japanese_parser()
             chunks = parser.parse(text)
-            wrapped_text = self._wrap_subtitle_budoux(chunks, max_chars=18)
+            wrapped_text = self._wrap_subtitle_budoux(chunks, max_chars=28)
             
             lines.append(f"Dialogue: 0,{start_time},{end_time},{style},,0,0,0,,{wrapped_text}\n")
         
         output_path.write_text("".join(lines), encoding="utf-8")
     
     @staticmethod
-    def _wrap_subtitle_budoux(chunks: list[str], max_chars: int = 18) -> str:
+    def _wrap_subtitle_budoux(chunks: list[str], max_chars: int = 28) -> str:
         """文節区切りされたチャンクを指定文字数で折り返す
         
         Args:

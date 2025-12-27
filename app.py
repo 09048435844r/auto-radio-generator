@@ -17,7 +17,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import gradio as gr
-from workflow import UIOverrides, run_workflow_sync, WorkflowResult, scan_assets
+from workflow import UIOverrides, run_workflow_sync, WorkflowResult, scan_assets, create_script_generator, load_config
+from core.models import Script
+from core.interfaces import ResearchResult
+import json
 
 
 # ログメッセージを蓄積するためのグローバル変数
@@ -90,7 +93,7 @@ def generate_video(
     
     # ログをクリア
     clear_logs()
-    append_log("自動ラジオ動画生成システム v2.1")
+    append_log("自動ラジオ動画生成システム v3.0")
     append_log("=" * 40)
     
     # リサーチモードを変換
@@ -148,6 +151,87 @@ def generate_video(
         return None, get_logs(), "", "", ""
 
 
+def generate_script_from_research(
+    research_text: str,
+    theme: str,
+    progress=gr.Progress()
+) -> str:
+    """リサーチ結果から台本を生成
+    
+    Args:
+        research_text: Perplexity等のリサーチ結果
+        theme: テーマ/タイトル
+    
+    Returns:
+        生成された台本（JSON形式）
+    """
+    # 入力検証
+    if not research_text or not research_text.strip():
+        return "エラー: リサーチ結果を入力してください。"
+    
+    if not theme or not theme.strip():
+        return "エラー: テーマ/タイトルを入力してください。"
+    
+    try:
+        # ログをクリア
+        clear_logs()
+        append_log("台本生成ツール v3.0")
+        append_log("=" * 40)
+        append_log("リサーチ結果から台本を生成します...")
+        
+        progress(0.2, desc="設定を読み込み中...")
+        
+        # 設定を読み込み
+        config = load_config(PROJECT_ROOT)
+        script_generator = create_script_generator(config)
+        
+        progress(0.4, desc="リサーチデータを処理中...")
+        
+        # リサーチ結果を作成（簡易的な実装）
+        research_result = ResearchResult(
+            topic=theme.strip(),
+            summary=research_text.strip()[:500] + "..." if len(research_text) > 500 else research_text.strip(),
+            key_points=research_text.strip().split('\n')[:10],  # 行をリストとして分割
+            sources=["手動入力"],
+            mode="manual"
+        )
+        
+        progress(0.6, desc="台本を生成中...")
+        
+        # 台本を生成
+        script = script_generator.generate(theme.strip(), research_result)
+        
+        progress(0.9, desc="結果を整形中...")
+        
+        # 台本をJSON形式に変換
+        script_dict = {
+            "title": script.title,
+            "total_duration_estimate": script.total_duration_estimate,
+            "dialogue": [
+                {
+                    "section": line.section,
+                    "speaker_id": line.speaker_id,
+                    "text": line.text,
+                    "emotion": line.emotion,
+                    "notes": line.notes
+                }
+                for line in script.dialogue
+            ]
+        }
+        
+        append_log("✓ 台本生成が完了しました！")
+        append_log(f"タイトル: {script.title}")
+        append_log(f"セリフ数: {len(script.dialogue)}")
+        append_log(f"推定時間: {script.total_duration_estimate}秒")
+        
+        return json.dumps(script_dict, ensure_ascii=False, indent=2)
+        
+    except Exception as e:
+        error_msg = f"台本生成中にエラーが発生しました: {str(e)}"
+        append_log(f"❌ {error_msg}")
+        return error_msg
+
+
 def create_ui() -> gr.Blocks:
     """Gradio UIを作成"""
     
@@ -155,176 +239,230 @@ def create_ui() -> gr.Blocks:
     assets = get_asset_choices()
     
     with gr.Blocks(
-        title="自動ラジオ動画生成システム"
+        title="自動ラジオ動画生成システム v3.0"
     ) as app:
         
         # ヘッダー
         gr.Markdown(
             """
-            # 🎙️ 自動ラジオ動画生成システム v2.1
+            # 🎙️ 自動ラジオ動画生成システム v3.0
             
             **Perplexity** でテーマをリサーチし、**Gemini** が台本を作成。
             **VOICEVOX** で音声合成、**FFmpeg** で動画を生成します。
             """
         )
         
-        with gr.Row():
-            # ========== 左カラム: 設定パネル ==========
-            with gr.Column(scale=1):
-                gr.Markdown("## ⚙️ 設定パネル")
-                
-                # テーマ入力
-                theme_input = gr.Textbox(
-                    label="テーマ",
-                    placeholder="例: AIの未来について / 最近のゲーム事情 / 宇宙開発の最新動向",
-                    lines=2,
-                    info="動画で話すテーマを入力してください（必須）"
-                )
-                
-                # リサーチモード選択
-                research_mode_dropdown = gr.Dropdown(
-                    label="リサーチモード",
-                    choices=list(RESEARCH_MODE_MAP.keys()),
-                    value="トリビア (雑学)",
-                    info="Perplexityによるリサーチの方向性を選択"
-                )
-                
-                gr.Markdown("### 🎨 素材選択")
-                
+        # タブ切り替え
+        with gr.Tabs() as tabs:
+            # Tab 1: 自動生成 (Classic)
+            with gr.TabItem("🚀 自動生成 (Classic)", id="classic"):
                 with gr.Row():
-                    # 背景画像選択
-                    background_dropdown = gr.Dropdown(
-                        label="背景画像",
-                        choices=assets.get("backgrounds", ["default.png"]),
-                        value=assets.get("backgrounds", ["default.png"])[0] if assets.get("backgrounds") else None,
-                        info="assets/backgrounds/ 内の画像"
-                    )
+                    # ========== 左カラム: 設定パネル ==========
+                    with gr.Column(scale=1):
+                        gr.Markdown("### ⚙️ 設定パネル")
+                        
+                        # テーマ入力
+                        theme_input = gr.Textbox(
+                            label="テーマ",
+                            placeholder="例: AIの未来について / 最近のゲーム事情 / 宇宙開発の最新動向",
+                            lines=2,
+                            info="動画で話すテーマを入力してください（必須）"
+                        )
+                        
+                        # リサーチモード選択
+                        research_mode_dropdown = gr.Dropdown(
+                            label="リサーチモード",
+                            choices=list(RESEARCH_MODE_MAP.keys()),
+                            value="トリビア (雑学)",
+                            info="Perplexityによるリサーチの方向性を選択"
+                        )
+                        
+                        gr.Markdown("### 🎨 素材選択")
+                        
+                        with gr.Row():
+                            # 背景画像選択
+                            background_dropdown = gr.Dropdown(
+                                label="背景画像",
+                                choices=assets.get("backgrounds", ["default.png"]),
+                                value=assets.get("backgrounds", ["default.png"])[0] if assets.get("backgrounds") else None,
+                                info="assets/backgrounds/ 内の画像"
+                            )
+                            
+                            # BGM選択
+                            bgm_dropdown = gr.Dropdown(
+                                label="BGM",
+                                choices=assets.get("bgm", ["default.mp3"]),
+                                value=assets.get("bgm", ["default.mp3"])[0] if assets.get("bgm") else None,
+                                info="assets/bgm/ 内の音声"
+                            )
+                        
+                        # アセットプレビュー
+                        with gr.Row():
+                            # 背景画像プレビュー
+                            bg_preview = gr.Image(
+                                label="背景画像プレビュー",
+                                height=200,
+                                interactive=False
+                            )
+                            
+                            # BGMプレビュー
+                            bgm_preview = gr.Audio(
+                                label="BGMプレビュー",
+                                interactive=False
+                            )
+                        
+                        # 素材リスト更新ボタン
+                        refresh_assets_btn = gr.Button("🔄 素材リストを更新", size="sm")
+                        
+                        gr.Markdown("### 🎬 動画設定")
+                        
+                        # BGM音量スライダー
+                        bgm_volume_slider = gr.Slider(
+                            label="BGM音量",
+                            minimum=0.0,
+                            maximum=0.5,
+                            value=0.15,
+                            step=0.01,
+                            info="BGMの音量（0.0〜0.5）"
+                        )
+                        
+                        # フェード時間スライダー
+                        fade_time_slider = gr.Slider(
+                            label="フェード時間",
+                            minimum=1.0,
+                            maximum=10.0,
+                            value=3.0,
+                            step=0.5,
+                            info="BGMのフェードイン/アウト時間（秒）"
+                        )
+                        
+                        # 話速調整スライダー
+                        speed_slider = gr.Slider(
+                            label="話速 (Speed)",
+                            minimum=0.8,
+                            maximum=1.5,
+                            value=1.1,
+                            step=0.05,
+                            info="音声の再生速度（0.8～1.5）"
+                        )
+                        
+                        # スペクトラム表示
+                        spectrum_checkbox = gr.Checkbox(
+                            label="音声スペクトラムを表示",
+                            value=True,
+                            info="画面下部に音声の波形を表示"
+                        )
+                        
+                        # 実行ボタン
+                        generate_btn = gr.Button(
+                            "🚀 動画を生成する",
+                            variant="primary",
+                            size="lg"
+                        )
+                        
+                        # 注意事項
+                        gr.Markdown(
+                            """
+                            ### ⚠️ 注意事項
+                            - **VOICEVOX** エンジンが起動している必要があります
+                            - **Perplexity API Key** と **Gemini API Key** が `.env` に設定されている必要があります
+                            - 生成には数分かかる場合があります
+                            """
+                        )
                     
-                    # BGM選択
-                    bgm_dropdown = gr.Dropdown(
-                        label="BGM",
-                        choices=assets.get("bgm", ["default.mp3"]),
-                        value=assets.get("bgm", ["default.mp3"])[0] if assets.get("bgm") else None,
-                        info="assets/bgm/ 内の音声"
-                    )
+                    # ========== 右カラム: 結果パネル ==========
+                    with gr.Column(scale=1):
+                        gr.Markdown("## 📺 結果パネル")
+                        
+                        # 生成動画プレイヤー
+                        video_output = gr.Video(
+                            label="生成された動画",
+                            height=360
+                        )
+                        
+                        # ログ出力
+                        log_output = gr.Textbox(
+                            label="処理ログ",
+                            lines=12,
+                            max_lines=18,
+                            interactive=False
+                        )
+                        
+                        # コストレポート表示
+                        gr.Markdown("### 📊 API使用量・コスト")
+                        cost_output = gr.Markdown(
+                            value="*生成完了後に表示されます*"
+                        )
+                        
+                        # メタデータ表示エリア
+                        gr.Markdown("### 📝 YouTubeメタデータ")
+                        title_output = gr.Textbox(
+                            label="タイトル (コピー用)",
+                            placeholder="生成完了後に表示されます",
+                            interactive=True
+                        )
+                        description_output = gr.Textbox(
+                            label="概要欄・チャプター (一括コピー用)",
+                            placeholder="生成完了後に表示されます",
+                            lines=15,
+                            interactive=True
+                        )
+            
+            # Tab 2: マニュアル制作 (Pro Tools)
+            with gr.TabItem("🛠️ マニュアル制作 (Pro Tools)", id="manual"):
+                gr.Markdown("### 📝 Step A: リサーチ結果から台本生成")
                 
-                # アセットプレビュー
-                with gr.Row():
-                    # 背景画像プレビュー
-                    bg_preview = gr.Image(
-                        label="背景画像プレビュー",
-                        height=200,
-                        interactive=False
-                    )
-                    
-                    # BGMプレビュー
-                    bgm_preview = gr.Audio(
-                        label="BGMプレビュー",
-                        interactive=False
-                    )
-                
-                # 素材リスト更新ボタン
-                refresh_assets_btn = gr.Button("🔄 素材リストを更新", size="sm")
-                
-                gr.Markdown("### 🎬 動画設定")
-                
-                # BGM音量スライダー
-                bgm_volume_slider = gr.Slider(
-                    label="BGM音量",
-                    minimum=0.0,
-                    maximum=0.5,
-                    value=0.15,
-                    step=0.01,
-                    info="BGMの音量（0.0〜0.5）"
+                # リサーチ結果入力欄
+                research_input = gr.Textbox(
+                    label="Perplexity等のリサーチ結果を貼り付け",
+                    placeholder="ここにリサーチ結果のテキストを貼り付けてください...",
+                    lines=10,
+                    info="Perplexityや他のソースで得たリサーチ結果を貼り付け"
                 )
                 
-                # フェード時間スライダー
-                fade_time_slider = gr.Slider(
-                    label="フェード時間",
-                    minimum=1.0,
-                    maximum=10.0,
-                    value=3.0,
-                    step=0.5,
-                    info="BGMのフェードイン/アウト時間（秒）"
+                # テーマ/タイトル入力欄
+                theme_input_manual = gr.Textbox(
+                    label="テーマ/タイトル",
+                    placeholder="例: AIの倫理的課題について",
+                    info="台本のテーマまたはタイトルを入力してください"
                 )
                 
-                # 話速調整スライダー
-                speed_slider = gr.Slider(
-                    label="話速 (Speed)",
-                    minimum=0.8,
-                    maximum=1.5,
-                    value=1.1,
-                    step=0.05,
-                    info="音声の再生速度（0.8～1.5）"
-                )
-                
-                # スペクトラム表示
-                spectrum_checkbox = gr.Checkbox(
-                    label="音声スペクトラムを表示",
-                    value=True,
-                    info="画面下部に音声の波形を表示"
-                )
-                
-                # 実行ボタン
-                generate_btn = gr.Button(
-                    "🚀 動画を生成する",
+                # 台本生成ボタン
+                generate_script_btn = gr.Button(
+                    "📝 この内容で台本を作成",
                     variant="primary",
                     size="lg"
                 )
                 
-                # 注意事項
+                # 生成結果表示エリア
+                script_output = gr.Code(
+                    label="生成された台本",
+                    language="json",
+                    lines=20,
+                    interactive=True
+                )
+                
+                # 使い方
                 gr.Markdown(
                     """
-                    ### ⚠️ 注意事項
-                    - **VOICEVOX** エンジンが起動している必要があります
-                    - **Perplexity API Key** と **Gemini API Key** が `.env` に設定されている必要があります
-                    - 生成には数分かかる場合があります
+                    ### 📖 使い方
+                    1. Perplexity等でリサーチした結果を上のテキストボックスに貼り付け
+                    2. テーマ/タイトルを入力
+                    3. 「この内容で台本を作成」ボタンをクリック
+                    4. 生成された台本をコピーして、お好みの動画生成ツールで使用
+                    
+                    ### 💡 ヒント
+                    - リサーチ結果は詳細であるほど、質の高い台本が生成されます
+                    - 生成された台本はJSON形式なので、他のツールでも利用可能です
+                    - 台本の構成は「本題70%・リスナーメール20%・エンディング10%」の3部構成です
                     """
-                )
-            
-            # ========== 右カラム: 結果パネル ==========
-            with gr.Column(scale=1):
-                gr.Markdown("## 📺 結果パネル")
-                
-                # 生成動画プレイヤー
-                video_output = gr.Video(
-                    label="生成された動画",
-                    height=360
-                )
-                
-                # ログ出力
-                log_output = gr.Textbox(
-                    label="処理ログ",
-                    lines=12,
-                    max_lines=18,
-                    interactive=False
-                )
-                
-                # コストレポート表示
-                gr.Markdown("### 📊 API使用量・コスト")
-                cost_output = gr.Markdown(
-                    value="*生成完了後に表示されます*"
-                )
-                
-                # メタデータ表示エリア
-                gr.Markdown("### 📝 YouTubeメタデータ")
-                title_output = gr.Textbox(
-                    label="タイトル (コピー用)",
-                    placeholder="生成完了後に表示されます",
-                    interactive=True
-                )
-                description_output = gr.Textbox(
-                    label="概要欄・チャプター (一括コピー用)",
-                    placeholder="生成完了後に表示されます",
-                    lines=15,
-                    interactive=True
                 )
         
         # フッター
         gr.Markdown(
             """
             ---
-            *自動ラジオ動画生成システム v2.1 | Powered by Perplexity, Gemini, VOICEVOX, FFmpeg*
+            *自動ラジオ動画生成システム v3.0 | Powered by Perplexity, Gemini, VOICEVOX, FFmpeg*
             """
         )
         
@@ -385,6 +523,14 @@ def create_ui() -> gr.Blocks:
                 spectrum_checkbox
             ],
             outputs=[video_output, log_output, cost_output, title_output, description_output],
+            show_progress="full"
+        )
+        
+        # 台本生成
+        generate_script_btn.click(
+            fn=generate_script_from_research,
+            inputs=[research_input, theme_input_manual],
+            outputs=[script_output],
             show_progress="full"
         )
     
