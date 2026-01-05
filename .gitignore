@@ -19,3 +19,6 @@ Thumbs.db
 # Temporary
 *.tmp
 *.log
+
+# User settings
+user_settings.json

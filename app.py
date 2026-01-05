@@ -20,11 +20,15 @@ import gradio as gr
 from workflow import UIOverrides, run_workflow_sync, WorkflowResult, scan_assets, create_script_generator, load_config
 from core.models import Script
 from core.interfaces import ResearchResult
+from core.settings_manager import SettingsManager, UserSettings
 import json
 
 
 # ログメッセージを蓄積するためのグローバル変数
 _log_messages: list[str] = []
+
+# 設定マネージャー
+_settings_manager = SettingsManager()
 
 
 def clear_logs():
@@ -127,6 +131,18 @@ def generate_video(
         log_callback=log_callback,
         progress_callback=progress_callback
     )
+    
+    # 成功時に設定を保存
+    if result.success:
+        _settings_manager.update_from_ui(
+            research_mode=research_mode,
+            background_image=background_image,
+            bgm_file=bgm_file,
+            bgm_volume=bgm_volume,
+            fade_time=fade_time,
+            speed_scale=speed_scale,
+            enable_spectrum=enable_spectrum
+        )
     
     # 結果を返す
     if result.success and result.video_path:
@@ -235,6 +251,9 @@ def generate_script_from_research(
 def create_ui() -> gr.Blocks:
     """Gradio UIを作成"""
     
+    # 前回の設定を読み込む
+    saved_settings = _settings_manager.load()
+    
     # アセット一覧を取得
     assets = get_asset_choices()
     
@@ -273,7 +292,7 @@ def create_ui() -> gr.Blocks:
                         research_mode_dropdown = gr.Dropdown(
                             label="リサーチモード",
                             choices=list(RESEARCH_MODE_MAP.keys()),
-                            value="トリビア (雑学)",
+                            value=saved_settings.research_mode,
                             info="Perplexityによるリサーチの方向性を選択"
                         )
                         
@@ -284,7 +303,7 @@ def create_ui() -> gr.Blocks:
                             background_dropdown = gr.Dropdown(
                                 label="背景画像",
                                 choices=assets.get("backgrounds", ["default.png"]),
-                                value=assets.get("backgrounds", ["default.png"])[0] if assets.get("backgrounds") else None,
+                                value=saved_settings.background_image if saved_settings.background_image in assets.get("backgrounds", []) else (assets.get("backgrounds", ["default.png"])[0] if assets.get("backgrounds") else None),
                                 info="assets/backgrounds/ 内の画像"
                             )
                             
@@ -292,7 +311,7 @@ def create_ui() -> gr.Blocks:
                             bgm_dropdown = gr.Dropdown(
                                 label="BGM",
                                 choices=assets.get("bgm", ["default.mp3"]),
-                                value=assets.get("bgm", ["default.mp3"])[0] if assets.get("bgm") else None,
+                                value=saved_settings.bgm_file if saved_settings.bgm_file in assets.get("bgm", []) else (assets.get("bgm", ["default.mp3"])[0] if assets.get("bgm") else None),
                                 info="assets/bgm/ 内の音声"
                             )
                         
@@ -321,7 +340,7 @@ def create_ui() -> gr.Blocks:
                             label="BGM音量",
                             minimum=0.0,
                             maximum=0.5,
-                            value=0.15,
+                            value=saved_settings.bgm_volume,
                             step=0.01,
                             info="BGMの音量（0.0〜0.5）"
                         )
@@ -331,7 +350,7 @@ def create_ui() -> gr.Blocks:
                             label="フェード時間",
                             minimum=1.0,
                             maximum=10.0,
-                            value=3.0,
+                            value=saved_settings.fade_time,
                             step=0.5,
                             info="BGMのフェードイン/アウト時間（秒）"
                         )
@@ -341,7 +360,7 @@ def create_ui() -> gr.Blocks:
                             label="話速 (Speed)",
                             minimum=0.8,
                             maximum=1.5,
-                            value=1.1,
+                            value=saved_settings.speed_scale,
                             step=0.05,
                             info="音声の再生速度（0.8～1.5）"
                         )
@@ -349,7 +368,7 @@ def create_ui() -> gr.Blocks:
                         # スペクトラム表示
                         spectrum_checkbox = gr.Checkbox(
                             label="音声スペクトラムを表示",
-                            value=True,
+                            value=saved_settings.enable_spectrum,
                             info="画面下部に音声の波形を表示"
                         )
                         
