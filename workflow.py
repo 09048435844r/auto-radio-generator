@@ -82,6 +82,44 @@ class ProgressCallback:
             self.progress_callback(ratio, description)
 
 
+class LogFileWriter:
+    """ログをファイルに書き込むクラス"""
+    
+    def __init__(self, output_dir: Path):
+        """初期化
+        
+        Args:
+            output_dir: ログファイルを保存するディレクトリ
+        """
+        self.output_dir = output_dir
+        self.log_path = output_dir / "processing_log.txt"
+        self.logs: list[str] = []
+        
+        # ログファイルを初期化
+        self.log_path.write_text(
+            f"=== 自動ラジオ生成ログ ===\n"
+            f"開始時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n",
+            encoding="utf-8"
+        )
+    
+    def write(self, msg: str):
+        """ログメッセージを追記
+        
+        Args:
+            msg: ログメッセージ
+        """
+        self.logs.append(msg)
+        
+        # ファイルに追記
+        with open(self.log_path, "a", encoding="utf-8") as f:
+            f.write(msg + "\n")
+    
+    def finalize(self):
+        """ログファイルを完了"""
+        with open(self.log_path, "a", encoding="utf-8") as f:
+            f.write(f"\n終了時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+
+
 def create_script_generator(config: AppConfig) -> GeminiClient:
     """台本生成エンジン（Gemini）を作成"""
     return GeminiClient(config)
@@ -180,9 +218,15 @@ async def generate_video_workflow(
     # Usage集約用
     total_usage = TotalUsage()
     
+    # ログファイルライター（出力ディレクトリ作成後に初期化）
+    log_writer: Optional[LogFileWriter] = None
+    
     def log(msg: str):
         if log_callback:
             log_callback(msg)
+        # ログファイルにも書き込み
+        if log_writer:
+            log_writer.write(msg)
     
     def progress(ratio: float, desc: str):
         if progress_callback:
@@ -212,6 +256,10 @@ async def generate_video_workflow(
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_base = root / config.yaml.paths.output_dir / timestamp
         output_base.mkdir(parents=True, exist_ok=True)
+        
+        # ログファイルライターを初期化
+        log_writer = LogFileWriter(output_base)
+        log(f"出力ディレクトリ: {output_base}")
         
         # ========== Phase 1: リサーチ (5-20%) ==========
         research_data = None
@@ -399,6 +447,11 @@ async def generate_video_workflow(
         )
         log(f"✓ YouTubeメタデータ生成: {metadata_path.name}")
         
+        # ログファイルを完了
+        if log_writer:
+            log_writer.finalize()
+            log(f"✓ 処理ログ保存: {log_writer.log_path.name}")
+        
         # メタデータの内容を読み込んでUIへ渡す
         metadata_content = metadata_path.read_text(encoding="utf-8")
         
@@ -467,6 +520,11 @@ async def generate_video_workflow(
     except Exception as e:
         error_msg = f"エラーが発生しました: {str(e)}"
         log(f"\n❌ {error_msg}")
+        
+        # エラー時もログファイルを完了
+        if log_writer:
+            log_writer.finalize()
+        
         return WorkflowResult(success=False, error_message=error_msg)
 
 
