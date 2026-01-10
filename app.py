@@ -485,10 +485,9 @@ def generate_script_from_research(
         # リサーチ結果を作成（簡易的な実装）
         research_result = ResearchResult(
             topic=theme.strip(),
-            summary=research_text.strip()[:500] + "..." if len(research_text) > 500 else research_text.strip(),
-            key_points=research_text.strip().split('\n')[:10],  # 行をリストとして分割
-            sources=["手動入力"],
-            mode="manual"
+            mode="trivia",  # マニュアル入力はトリビアモードとして扱う
+            content=research_text.strip(),
+            sources=["手動入力"]
         )
         
         progress(0.6, desc="台本を生成中...")
