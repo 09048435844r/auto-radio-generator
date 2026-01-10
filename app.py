@@ -2,8 +2,14 @@
 
 ブラウザ上でパラメータ調整と動画生成実行ができるWeb UIアプリケーション
 
-機能:
-- Perplexityによるテーマのリサーチ（3モード: ディベート/世間の声/トリビア）
+v3.0 機能:
+- タブ式UI: 自動生成とマニュアル制作を分離
+- マニュアル制作ワークフロー: Step A(台本) → Step B(音声) → Step C(動画)
+- 設定の永続化: ユーザー設定を自動保存・復元
+- 処理ログ出力: 各実行の詳細ログをファイルに保存
+
+コア機能:
+- Perplexityによるテーマのリサーチ（4モード: ディベート/世間の声/トリビア/週次ダイジェスト）
 - Geminiによる3部構成の台本生成（本題70%/リスナーメール20%/エンディング10%）
 - VOICEVOXによる音声合成
 - FFmpegによる動画生成（音声スペクトラム可視化対応）
@@ -31,13 +37,13 @@ _log_messages: list[str] = []
 _settings_manager = SettingsManager()
 
 
-def clear_logs():
+def clear_logs() -> None:
     """ログをクリア"""
     global _log_messages
     _log_messages = []
 
 
-def append_log(msg: str):
+def append_log(msg: str) -> None:
     """ログを追加"""
     global _log_messages
     _log_messages.append(msg)
