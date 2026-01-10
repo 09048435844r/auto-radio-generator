@@ -324,6 +324,8 @@ def render_video_from_assets(
     from pathlib import Path
     from datetime import datetime
     from services.video_rendering import FfmpegRenderer
+    from core.interfaces import SynthesisResult
+    import wave
     
     # ログをクリア
     clear_logs()
@@ -394,6 +396,24 @@ def render_video_from_assets(
         
         append_log(f"出力先: {video_path}")
         
+        # 音声ファイルの長さを取得
+        try:
+            with wave.open(str(audio_file), 'rb') as wav:
+                frames = wav.getnframes()
+                rate = wav.getframerate()
+                duration_sec = frames / float(rate)
+        except Exception as e:
+            append_log(f"⚠️ 音声ファイルの長さ取得失敗: {e}")
+            duration_sec = 0.0
+        
+        # SynthesisResultオブジェクトを作成
+        synthesis_result = SynthesisResult(
+            audio_path=audio_file,
+            subtitle_path=subtitle_file,
+            total_duration_sec=duration_sec,
+            chapters=[]
+        )
+        
         # FfmpegRenderer作成
         progress(0.2, desc="レンダラーを初期化中...")
         renderer = FfmpegRenderer(config)
@@ -405,15 +425,11 @@ def render_video_from_assets(
             
             # レンダリング実行
             result = await renderer.render(
-                audio_path=audio_file,
-                subtitle_path=subtitle_file,
-                background_path=background_file,
-                bgm_path=bgm_path,
+                synthesis_result=synthesis_result,
+                background_image=background_file,
+                bgm_file=bgm_path,
                 output_path=video_path,
-                bgm_volume=0.15,  # デフォルト音量
-                fade_in_sec=3.0,
-                fade_out_sec=3.0,
-                enable_spectrum=True  # スペクトラム表示
+                subtitle_path=subtitle_file
             )
             
             return result
