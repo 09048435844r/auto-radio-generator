@@ -167,11 +167,146 @@ def generate_video(
         return None, get_logs(), "", "", ""
 
 
+def synthesize_audio_from_script(
+    script_json: str,
+    progress=gr.Progress()
+) -> tuple[str | None, str | None, str]:
+    """台本JSONから音声を合成
+    
+    Args:
+        script_json: 台本のJSON文字列
+        progress: Gradio進捗バー
+    
+    Returns:
+        (音声ファイルパス, 字幕ファイルパス, ログ出力)
+    """
+    import asyncio
+    from pathlib import Path
+    from datetime import datetime
+    from services.audio_synthesis import VoicevoxClient
+    
+    # ログをクリア
+    clear_logs()
+    append_log("音声合成を開始します...")
+    append_log("=" * 40)
+    
+    # 入力検証
+    if not script_json or not script_json.strip():
+        error_msg = "エラー: 台本が入力されていません。"
+        append_log(f"❌ {error_msg}")
+        return None, None, get_logs()
+    
+    try:
+        # JSONパース
+        progress(0.1, desc="台本をパース中...")
+        append_log("台本JSONをパース中...")
+        
+        script_dict = json.loads(script_json)
+        
+        # Scriptオブジェクトに変換
+        from core.models.script import Script, DialogueLine
+        
+        dialogue_lines = []
+        for line_dict in script_dict.get("dialogue", []):
+            dialogue_lines.append(DialogueLine(
+                section=line_dict.get("section", "main"),
+                speaker_id=line_dict.get("speaker_id", 3),
+                text=line_dict.get("text", ""),
+                emotion=line_dict.get("emotion"),
+                notes=line_dict.get("notes")
+            ))
+        
+        script = Script(
+            title=script_dict.get("title", "無題"),
+            total_duration_estimate=script_dict.get("total_duration_estimate", 0),
+            dialogue=dialogue_lines,
+            description=script_dict.get("description", ""),
+            thumbnail_title=script_dict.get("thumbnail_title", script_dict.get("title", "無題"))
+        )
+        
+        append_log(f"✓ 台本パース完了: {script.title}")
+        append_log(f"  セリフ数: {len(script.dialogue)}")
+        
+    except json.JSONDecodeError as e:
+        error_msg = f"JSON形式エラー: {str(e)}"
+        append_log(f"❌ {error_msg}")
+        append_log("ヒント: カンマやカッコの閉じ忘れがないか確認してください")
+        return None, None, get_logs()
+    except Exception as e:
+        error_msg = f"台本の解析に失敗しました: {str(e)}"
+        append_log(f"❌ {error_msg}")
+        return None, None, get_logs()
+    
+    try:
+        # 設定読み込み
+        progress(0.2, desc="設定を読み込み中...")
+        config = load_config(PROJECT_ROOT)
+        
+        # 出力ディレクトリを準備
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = PROJECT_ROOT / "output" / "manual_builds" / timestamp
+        output_dir.mkdir(parents=True, exist_ok=True)
+        append_log(f"出力ディレクトリ: {output_dir}")
+        
+        # VOICEVOXクライアント作成
+        progress(0.3, desc="VOICEVOXに接続中...")
+        append_log("VOICEVOXエンジンに接続中...")
+        voicevox = VoicevoxClient(config)
+        
+        # 非同期処理を実行
+        async def synthesize():
+            # エンジン状態確認
+            if not await voicevox.check_engine_status():
+                raise RuntimeError("VOICEVOXエンジンに接続できません。エンジンを起動してください。")
+            append_log("✓ VOICEVOXエンジン接続OK")
+            
+            # 音声合成
+            progress(0.4, desc="音声を合成中...")
+            append_log(f"\n== 音声合成 ==")
+            append_log(f"セリフ数: {len(script.dialogue)}")
+            
+            # 進捗コールバック
+            def synthesis_progress(current: int, total: int):
+                ratio = 0.4 + (current / total) * 0.5  # 0.4 -> 0.9
+                progress(ratio, desc=f"音声合成中... ({current}/{total})")
+                if current % 5 == 0:  # 5行ごとにログ出力
+                    append_log(f"  進捗: {current}/{total}")
+            
+            result = await voicevox.synthesize_script(
+                script=script,
+                output_dir=output_dir,
+                speed_scale=1.1,  # デフォルト話速
+                progress_callback=synthesis_progress
+            )
+            
+            return result
+        
+        # 非同期実行
+        result = asyncio.run(synthesize())
+        
+        progress(0.95, desc="完了処理中...")
+        append_log(f"\n✓ 音声合成完了")
+        append_log(f"  音声ファイル: {result.audio_path.name}")
+        append_log(f"  字幕ファイル: {result.subtitle_path.name}")
+        append_log(f"  総時間: {result.total_duration_sec:.1f}秒")
+        
+        progress(1.0, desc="完了!")
+        
+        return str(result.audio_path), str(result.subtitle_path), get_logs()
+        
+    except Exception as e:
+        error_msg = f"音声合成中にエラーが発生しました: {str(e)}"
+        append_log(f"\n❌ {error_msg}")
+        import traceback
+        append_log(f"\n詳細:\n{traceback.format_exc()}")
+        return None, None, get_logs()
+
+
 def generate_script_from_research(
     research_text: str,
     theme: str,
     progress=gr.Progress()
-) -> str:
+) -> tuple[str, str]:
     """リサーチ結果から台本を生成
     
     Args:
@@ -179,14 +314,16 @@ def generate_script_from_research(
         theme: テーマ/タイトル
     
     Returns:
-        生成された台本（JSON形式）
+        (台本JSON, 台本JSON) - Step AとStep Bの両方に出力
     """
     # 入力検証
     if not research_text or not research_text.strip():
-        return "エラー: リサーチ結果を入力してください。"
+        error_msg = "エラー: リサーチ結果を入力してください。"
+        return error_msg, error_msg
     
     if not theme or not theme.strip():
-        return "エラー: テーマ/タイトルを入力してください。"
+        error_msg = "エラー: テーマ/タイトルを入力してください。"
+        return error_msg, error_msg
     
     try:
         # ログをクリア
@@ -240,12 +377,14 @@ def generate_script_from_research(
         append_log(f"セリフ数: {len(script.dialogue)}")
         append_log(f"推定時間: {script.total_duration_estimate}秒")
         
-        return json.dumps(script_dict, ensure_ascii=False, indent=2)
+        script_json = json.dumps(script_dict, ensure_ascii=False, indent=2)
+        # Step AとStep Bの両方に同じ内容を返す
+        return script_json, script_json
         
     except Exception as e:
         error_msg = f"台本生成中にエラーが発生しました: {str(e)}"
         append_log(f"❌ {error_msg}")
-        return error_msg
+        return error_msg, error_msg
 
 
 def create_ui() -> gr.Blocks:
@@ -461,19 +600,71 @@ def create_ui() -> gr.Blocks:
                     interactive=True
                 )
                 
+                gr.Markdown("---")  # 区切り線
+                
+                # Step B: 音声合成
+                gr.Markdown("### 🎤 Step B: 音声合成 (Audio Synthesis)")
+                
+                # 台本エディタ
+                script_editor = gr.Code(
+                    label="台本JSON (編集可能)",
+                    language="json",
+                    lines=15,
+                    interactive=True,
+                    info="Step Aで生成された台本を編集できます"
+                )
+                
+                # 音声合成ボタン
+                synthesize_btn = gr.Button(
+                    "🎤 この台本で音声を合成する",
+                    variant="primary",
+                    size="lg"
+                )
+                
+                # 出力エリア
+                with gr.Row():
+                    with gr.Column():
+                        # 音声プレイヤー
+                        audio_output = gr.Audio(
+                            label="生成された音声",
+                            interactive=False
+                        )
+                        
+                        # 字幕ファイルダウンロード
+                        subtitle_output = gr.File(
+                            label="字幕ファイル (.ass)",
+                            interactive=False
+                        )
+                    
+                    with gr.Column():
+                        # ログ/ステータス表示
+                        synthesis_log = gr.Textbox(
+                            label="処理ログ",
+                            lines=10,
+                            interactive=False
+                        )
+                
                 # 使い方
                 gr.Markdown(
                     """
                     ### 📖 使い方
+                    
+                    **Step A: 台本生成**
                     1. Perplexity等でリサーチした結果を上のテキストボックスに貼り付け
                     2. テーマ/タイトルを入力
                     3. 「この内容で台本を作成」ボタンをクリック
-                    4. 生成された台本をコピーして、お好みの動画生成ツールで使用
+                    
+                    **Step B: 音声合成**
+                    1. 生成された台本が自動的にエディタに反映されます
+                    2. 必要に応じて台本を編集
+                    3. 「この台本で音声を合成する」ボタンをクリック
+                    4. 生成された音声と字幕をダウンロード
                     
                     ### 💡 ヒント
                     - リサーチ結果は詳細であるほど、質の高い台本が生成されます
                     - 生成された台本はJSON形式なので、他のツールでも利用可能です
                     - 台本の構成は「本題70%・リスナーメール20%・エンディング10%」の3部構成です
+                    - VOICEVOXエンジンが起動している必要があります
                     """
                 )
         
@@ -545,11 +736,19 @@ def create_ui() -> gr.Blocks:
             show_progress="full"
         )
         
-        # 台本生成
+        # 台本生成 (Step Aの出力をStep Bのエディタにも反映)
         generate_script_btn.click(
             fn=generate_script_from_research,
             inputs=[research_input, theme_input_manual],
-            outputs=[script_output],
+            outputs=[script_output, script_editor],  # 両方に出力
+            show_progress="full"
+        )
+        
+        # 音声合成 (Step B)
+        synthesize_btn.click(
+            fn=synthesize_audio_from_script,
+            inputs=[script_editor],
+            outputs=[audio_output, subtitle_output, synthesis_log],
             show_progress="full"
         )
     
