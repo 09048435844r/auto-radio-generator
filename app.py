@@ -170,7 +170,7 @@ def generate_video(
 def synthesize_audio_from_script(
     script_json: str,
     progress=gr.Progress()
-) -> tuple[str | None, str | None, str]:
+) -> tuple[str | None, str | None, str, str | None, str | None]:
     """台本JSONから音声を合成
     
     Args:
@@ -178,7 +178,7 @@ def synthesize_audio_from_script(
         progress: Gradio進捗バー
     
     Returns:
-        (音声ファイルパス, 字幕ファイルパス, ログ出力)
+        (音声ファイルパス, 字幕ファイルパス, ログ出力, 音声ファイルパス(Step C用), 字幕ファイルパス(Step C用))
     """
     import asyncio
     from pathlib import Path
@@ -194,7 +194,7 @@ def synthesize_audio_from_script(
     if not script_json or not script_json.strip():
         error_msg = "エラー: 台本が入力されていません。"
         append_log(f"❌ {error_msg}")
-        return None, None, get_logs()
+        return None, None, get_logs(), None, None
     
     try:
         # JSONパース
@@ -231,11 +231,11 @@ def synthesize_audio_from_script(
         error_msg = f"JSON形式エラー: {str(e)}"
         append_log(f"❌ {error_msg}")
         append_log("ヒント: カンマやカッコの閉じ忘れがないか確認してください")
-        return None, None, get_logs()
+        return None, None, get_logs(), None, None
     except Exception as e:
         error_msg = f"台本の解析に失敗しました: {str(e)}"
         append_log(f"❌ {error_msg}")
-        return None, None, get_logs()
+        return None, None, get_logs(), None, None
     
     try:
         # 設定読み込み
@@ -292,10 +292,152 @@ def synthesize_audio_from_script(
         
         progress(1.0, desc="完了!")
         
-        return str(result.audio_path), str(result.subtitle_path), get_logs()
+        # Step BとStep Cの両方に同じパスを返す
+        audio_path_str = str(result.audio_path)
+        subtitle_path_str = str(result.subtitle_path)
+        return audio_path_str, subtitle_path_str, get_logs(), audio_path_str, subtitle_path_str
         
     except Exception as e:
         error_msg = f"音声合成中にエラーが発生しました: {str(e)}"
+        append_log(f"\n❌ {error_msg}")
+        import traceback
+        append_log(f"\n詳細:\n{traceback.format_exc()}")
+        return None, None, get_logs(), None, None
+
+
+def render_video_from_assets(
+    audio_path: str | None,
+    subtitle_path: str | None,
+    background_path: str | None,
+    bgm_filename: str | None,
+    progress=gr.Progress()
+) -> tuple[str | None, str | None, str]:
+    """アセットから動画をレンダリング
+    
+    Args:
+        audio_path: 音声ファイルパス
+        subtitle_path: 字幕ファイルパス
+        background_path: 背景画像パス
+        bgm_filename: BGMファイル名
+        progress: Gradio進捗バー
+    
+    Returns:
+        (動画ファイルパス, 動画ファイルパス(ダウンロード用), ログ出力)
+    """
+    import asyncio
+    from pathlib import Path
+    from datetime import datetime
+    from services.video_rendering import FfmpegRenderer
+    
+    # ログをクリア
+    clear_logs()
+    append_log("動画レンダリングを開始します...")
+    append_log("=" * 40)
+    
+    # 入力検証
+    if not audio_path:
+        error_msg = "エラー: 音声ファイルが指定されていません。"
+        append_log(f"❌ {error_msg}")
+        return None, None, get_logs()
+    
+    if not subtitle_path:
+        error_msg = "エラー: 字幕ファイルが指定されていません。"
+        append_log(f"❌ {error_msg}")
+        return None, None, get_logs()
+    
+    if not background_path:
+        error_msg = "エラー: 背景画像が指定されていません。"
+        append_log(f"❌ {error_msg}")
+        return None, None, get_logs()
+    
+    try:
+        progress(0.1, desc="設定を読み込み中...")
+        
+        # パスをPathオブジェクトに変換
+        audio_file = Path(audio_path)
+        subtitle_file = Path(subtitle_path)
+        background_file = Path(background_path)
+        
+        # ファイル存在確認
+        if not audio_file.exists():
+            error_msg = f"エラー: 音声ファイルが見つかりません: {audio_path}"
+            append_log(f"❌ {error_msg}")
+            return None, None, get_logs()
+        
+        if not subtitle_file.exists():
+            error_msg = f"エラー: 字幕ファイルが見つかりません: {subtitle_path}"
+            append_log(f"❌ {error_msg}")
+            return None, None, get_logs()
+        
+        if not background_file.exists():
+            error_msg = f"エラー: 背景画像が見つかりません: {background_path}"
+            append_log(f"❌ {error_msg}")
+            return None, None, get_logs()
+        
+        append_log(f"✓ 入力ファイル確認完了")
+        append_log(f"  音声: {audio_file.name}")
+        append_log(f"  字幕: {subtitle_file.name}")
+        append_log(f"  背景: {background_file.name}")
+        
+        # 設定読み込み
+        config = load_config(PROJECT_ROOT)
+        
+        # BGMパスを取得
+        bgm_path = None
+        if bgm_filename:
+            bgm_path = PROJECT_ROOT / "assets" / "bgm" / bgm_filename
+            if not bgm_path.exists():
+                append_log(f"⚠️ BGMファイルが見つかりません: {bgm_filename}")
+                bgm_path = None
+            else:
+                append_log(f"  BGM: {bgm_filename}")
+        
+        # 出力ディレクトリを準備（音声ファイルと同じディレクトリ）
+        output_dir = audio_file.parent
+        video_path = output_dir / "video.mp4"
+        
+        append_log(f"出力先: {video_path}")
+        
+        # FfmpegRenderer作成
+        progress(0.2, desc="レンダラーを初期化中...")
+        renderer = FfmpegRenderer(config)
+        
+        # 非同期処理を実行
+        async def render():
+            progress(0.3, desc="動画をレンダリング中...")
+            append_log(f"\n== 動画レンダリング ==")
+            
+            # レンダリング実行
+            result = await renderer.render(
+                audio_path=audio_file,
+                subtitle_path=subtitle_file,
+                background_path=background_file,
+                bgm_path=bgm_path,
+                output_path=video_path,
+                bgm_volume=0.15,  # デフォルト音量
+                fade_in_sec=3.0,
+                fade_out_sec=3.0,
+                enable_spectrum=True  # スペクトラム表示
+            )
+            
+            return result
+        
+        # 非同期実行
+        result = asyncio.run(render())
+        
+        progress(0.95, desc="完了処理中...")
+        append_log(f"\n✓ 動画レンダリング完了")
+        append_log(f"  動画ファイル: {result.video_path.name}")
+        append_log(f"  長さ: {result.duration_sec:.1f}秒")
+        append_log(f"  サイズ: {result.file_size_mb:.1f}MB")
+        
+        progress(1.0, desc="完了!")
+        
+        video_path_str = str(result.video_path)
+        return video_path_str, video_path_str, get_logs()
+        
+    except Exception as e:
+        error_msg = f"動画レンダリング中にエラーが発生しました: {str(e)}"
         append_log(f"\n❌ {error_msg}")
         import traceback
         append_log(f"\n詳細:\n{traceback.format_exc()}")
@@ -644,6 +786,76 @@ def create_ui() -> gr.Blocks:
                             interactive=False
                         )
                 
+                gr.Markdown("---")  # 区切り線
+                
+                # Step C: 動画レンダリング
+                gr.Markdown("### 🎬 Step C: 動画書き出し (Rendering)")
+                
+                with gr.Row():
+                    with gr.Column():
+                        # 音声ファイル入力
+                        audio_input = gr.Audio(
+                            label="音声ファイル",
+                            sources=["upload"],
+                            type="filepath",
+                            interactive=True
+                        )
+                        
+                        # 字幕ファイル入力
+                        subtitle_input = gr.File(
+                            label="字幕ファイル (.ass)",
+                            file_types=[".ass"],
+                            type="filepath",
+                            interactive=True
+                        )
+                    
+                    with gr.Column():
+                        # 背景画像入力
+                        background_input = gr.Image(
+                            label="背景/サムネイル画像 (1920x1080推奨)",
+                            sources=["upload"],
+                            type="filepath",
+                            interactive=True
+                        )
+                        
+                        # BGM選択
+                        bgm_dropdown_manual = gr.Dropdown(
+                            label="BGM",
+                            choices=assets.get("bgm", ["default.mp3"]),
+                            value=assets.get("bgm", ["default.mp3"])[0] if assets.get("bgm") else None,
+                            info="assets/bgm/ 内の音声"
+                        )
+                
+                # 動画生成ボタン
+                render_btn = gr.Button(
+                    "🎬 動画を生成する (Render Video)",
+                    variant="primary",
+                    size="lg"
+                )
+                
+                # 出力エリア
+                with gr.Row():
+                    with gr.Column():
+                        # 完成動画プレビュー
+                        video_output_manual = gr.Video(
+                            label="完成動画",
+                            interactive=False
+                        )
+                        
+                        # 動画ファイルダウンロード
+                        video_file_output = gr.File(
+                            label="動画ファイルダウンロード",
+                            interactive=False
+                        )
+                    
+                    with gr.Column():
+                        # ログ/ステータス表示
+                        render_log = gr.Textbox(
+                            label="処理ログ",
+                            lines=10,
+                            interactive=False
+                        )
+                
                 # 使い方
                 gr.Markdown(
                     """
@@ -658,13 +870,21 @@ def create_ui() -> gr.Blocks:
                     1. 生成された台本が自動的にエディタに反映されます
                     2. 必要に応じて台本を編集
                     3. 「この台本で音声を合成する」ボタンをクリック
-                    4. 生成された音声と字幕をダウンロード
+                    4. 生成された音声と字幕がStep Cに自動反映されます
+                    
+                    **Step C: 動画レンダリング**
+                    1. Step Bの音声と字幕が自動的にセットされます
+                    2. 背景画像をアップロード
+                    3. BGMを選択
+                    4. 「動画を生成する」ボタンをクリック
+                    5. 完成した動画をダウンロード
                     
                     ### 💡 ヒント
                     - リサーチ結果は詳細であるほど、質の高い台本が生成されます
                     - 生成された台本はJSON形式なので、他のツールでも利用可能です
                     - 台本の構成は「本題70%・リスナーメール20%・エンディング10%」の3部構成です
                     - VOICEVOXエンジンが起動している必要があります
+                    - 背景画像は1920x1080ピクセルを推奨します
                     """
                 )
         
@@ -744,11 +964,19 @@ def create_ui() -> gr.Blocks:
             show_progress="full"
         )
         
-        # 音声合成 (Step B)
+        # 音声合成 (Step B) - Step Cの入力にも反映
         synthesize_btn.click(
             fn=synthesize_audio_from_script,
             inputs=[script_editor],
-            outputs=[audio_output, subtitle_output, synthesis_log],
+            outputs=[audio_output, subtitle_output, synthesis_log, audio_input, subtitle_input],
+            show_progress="full"
+        )
+        
+        # 動画レンダリング (Step C)
+        render_btn.click(
+            fn=render_video_from_assets,
+            inputs=[audio_input, subtitle_input, background_input, bgm_dropdown_manual],
+            outputs=[video_output_manual, video_file_output, render_log],
             show_progress="full"
         )
     
