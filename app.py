@@ -269,11 +269,10 @@ def synthesize_audio_from_script(
                 if current % 5 == 0:  # 5行ごとにログ出力
                     append_log(f"  進捗: {current}/{total}")
             
-            result = await voicevox.synthesize_script(
+            result = await voicevox.synthesize(
                 script=script,
                 output_dir=output_dir,
-                speed_scale=1.1,  # デフォルト話速
-                progress_callback=synthesis_progress
+                speed_scale_override=1.1  # デフォルト話速
             )
             
             return result
