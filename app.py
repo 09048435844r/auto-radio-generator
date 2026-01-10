@@ -209,19 +209,16 @@ def synthesize_audio_from_script(
         dialogue_lines = []
         for line_dict in script_dict.get("dialogue", []):
             dialogue_lines.append(DialogueLine(
-                section=line_dict.get("section", "main"),
-                speaker_id=line_dict.get("speaker_id", 3),
+                speaker_id=line_dict.get("speaker_id", "main"),
                 text=line_dict.get("text", ""),
-                emotion=line_dict.get("emotion"),
-                notes=line_dict.get("notes")
+                section=line_dict.get("section")
             ))
         
         script = Script(
             title=script_dict.get("title", "無題"),
-            total_duration_estimate=script_dict.get("total_duration_estimate", 0),
-            dialogue=dialogue_lines,
+            thumbnail_title=script_dict.get("thumbnail_title", script_dict.get("title", "無題")),
             description=script_dict.get("description", ""),
-            thumbnail_title=script_dict.get("thumbnail_title", script_dict.get("title", "無題"))
+            dialogue=dialogue_lines
         )
         
         append_log(f"✓ 台本パース完了: {script.title}")
@@ -500,14 +497,13 @@ def generate_script_from_research(
         # 台本をJSON形式に変換
         script_dict = {
             "title": script.title,
-            "total_duration_estimate": script.total_duration_estimate,
+            "thumbnail_title": script.thumbnail_title,
+            "description": script.description,
             "dialogue": [
                 {
-                    "section": line.section,
                     "speaker_id": line.speaker_id,
                     "text": line.text,
-                    "emotion": line.emotion,
-                    "notes": line.notes
+                    "section": line.section
                 }
                 for line in script.dialogue
             ]
@@ -516,7 +512,8 @@ def generate_script_from_research(
         append_log("✓ 台本生成が完了しました！")
         append_log(f"タイトル: {script.title}")
         append_log(f"セリフ数: {len(script.dialogue)}")
-        append_log(f"推定時間: {script.total_duration_estimate}秒")
+        if script.thumbnail_title:
+            append_log(f"サムネイルタイトル: {script.thumbnail_title}")
         
         script_json = json.dumps(script_dict, ensure_ascii=False, indent=2)
         # Step AとStep Bの両方に同じ内容を返す
