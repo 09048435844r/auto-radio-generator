@@ -749,11 +749,10 @@ def create_ui() -> gr.Blocks:
                 
                 # 台本エディタ
                 script_editor = gr.Code(
-                    label="台本JSON (編集可能)",
+                    label="台本JSON (編集可能) - Step Aで生成された台本を編集できます",
                     language="json",
                     lines=15,
-                    interactive=True,
-                    info="Step Aで生成された台本を編集できます"
+                    interactive=True
                 )
                 
                 # 音声合成ボタン
