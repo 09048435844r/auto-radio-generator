@@ -225,7 +225,7 @@ def generate_script_only(
                 append_log(f"テーマ: {theme.strip()}")
                 
                 script_generator = GeminiClient(config)
-                plan = await script_generator.create_research_plan(theme.strip(), instruction=None)
+                plan = await script_generator.create_research_plan(theme.strip(), mode, instruction=None)
                 
                 append_log(f"\n✓ 検索計画作成完了")
                 append_log(f"切り口: {plan.angle}")

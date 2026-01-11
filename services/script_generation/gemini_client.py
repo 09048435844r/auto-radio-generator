@@ -41,11 +41,12 @@ class GeminiClient(IScriptGenerator):
         # 最後のAPI呼び出しの使用量を保持
         self.last_usage: GeminiUsage | None = None
     
-    async def create_research_plan(self, theme: str, instruction: str | None = None) -> ResearchPlan:
+    async def create_research_plan(self, theme: str, mode: str, instruction: str | None = None) -> ResearchPlan:
         """AIプロデューサー: テーマから検索計画を作成
         
         Args:
             theme: 動画のテーマ
+            mode: リサーチモード (trivia/debate/weekly_digest/voices)
             instruction: ユーザーからの追加指示（オプション）
         
         Returns:
@@ -53,10 +54,11 @@ class GeminiClient(IScriptGenerator):
         """
         console.print(f"[cyan]AIプロデューサー: 検索計画を作成中...[/cyan]")
         console.print(f"  テーマ: {theme}")
+        console.print(f"  モード: {mode}")
         if instruction:
             console.print(f"  追加指示: {instruction}")
         
-        system_prompt = self._build_research_plan_prompt()
+        system_prompt = self._build_research_plan_prompt(mode)
         user_prompt = f"## テーマ\n{theme}\n\n"
         
         if instruction:
@@ -221,22 +223,61 @@ class GeminiClient(IScriptGenerator):
             dialogue=dialogue
         )
     
-    def _build_research_plan_prompt(self) -> str:
-        """検索計画作成用のシステムプロンプトを構築"""
-        return """あなたはラジオ番組の構成作家です。
+    def _build_research_plan_prompt(self, mode: str) -> str:
+        """検索計画作成用のシステムプロンプトを構築
+        
+        Args:
+            mode: リサーチモード (trivia/debate/weekly_digest/voices)
+        """
+        base_prompt = """あなたはラジオ番組の構成作家です。
 テーマを面白く深掘りするための「検索クエリ」を考案してください。
 
 ## タスク
 テーマに対して、以下の3つの観点から検索クエリを作成してください：
+"""
+        
+        # モード別の指示
+        mode_instructions = {
+            "trivia": """1. **意外な事実**: あまり知られていない数字や歴史的背景を探るクエリ
+   - 例: "○○の意外な歴史", "○○にまつわる驚きの数字"
 
-1. **最新/事実**: 数字や最新動向を探るクエリ
-   - 例: "○○の市場規模 2024", "○○の最新統計データ"
+2. **雑学・トリビア**: 面白いエピソードや豆知識を探るクエリ
+   - 例: "○○の面白いエピソード", "○○の豆知識"
 
-2. **議論/対立**: メリット・デメリットや賛否を探るクエリ
-   - 例: "○○のメリットとデメリット", "○○に対する批判"
+3. **深掘り**: 一般には語られない裏話や詳細を探るクエリ
+   - 例: "○○の裏側", "○○の詳しい仕組み""",
+            
+            "debate": """1. **賛成意見**: メリットや推進派の主張を探るクエリ
+   - 例: "○○のメリット", "○○を支持する理由"
 
-3. **ネタ/トリビア**: 意外な事実やエピソードを探るクエリ
-   - 例: "○○の意外な事実", "○○の面白いエピソード"
+2. **反対意見**: デメリットや批判的な意見を探るクエリ
+   - 例: "○○のデメリット", "○○に対する批判"
+
+3. **対立軸**: 賛否両論や議論のポイントを探るクエリ
+   - 例: "○○をめぐる議論", "○○の賛否両論""",
+            
+            "weekly_digest": """1. **今週の出来事**: 直近1週間の最新ニュースを探るクエリ（必ず「今週」「最新」を含める）
+   - 例: "○○ 今週のニュース", "○○ 最新動向 2024"
+
+2. **世間の反応**: SNSや世論の反応を探るクエリ（時事性重視）
+   - 例: "○○ 今週の反応", "○○ 最新の評判"
+
+3. **今後の展望**: 今週発表された予測や今後の動きを探るクエリ
+   - 例: "○○ 今後の予測", "○○ 最新の見通し""",
+            
+            "voices": """1. **口コミ・評判**: 実際の利用者の声や評価を探るクエリ
+   - 例: "○○ 口コミ", "○○ 評判"
+
+2. **体験談**: 実際の体験や事例を探るクエリ
+   - 例: "○○ 体験談", "○○ 使ってみた"
+
+3. **街の声**: SNSやフォーラムでの反応を探るクエリ
+   - 例: "○○ SNS反応", "○○ みんなの意見"""
+        }
+        
+        mode_instruction = mode_instructions.get(mode, mode_instructions["trivia"])
+        
+        return base_prompt + mode_instruction + """
 
 ## 追加指示について
 ユーザーから追加指示がある場合は、それを最優先してクエリを構成してください。
@@ -247,9 +288,9 @@ class GeminiClient(IScriptGenerator):
 ```json
 {
   "queries": [
-    "検索クエリ1（最新/事実）",
-    "検索クエリ2（議論/対立）",
-    "検索クエリ3（ネタ/トリビア）"
+    "検索クエリ1",
+    "検索クエリ2",
+    "検索クエリ3"
   ],
   "angle": "今回の台本の切り口・コンセプト（1文で）"
 }
