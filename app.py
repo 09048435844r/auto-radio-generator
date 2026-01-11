@@ -252,7 +252,7 @@ def generate_script_only(
             if not script_generator:
                 script_generator = GeminiClient(config)
             
-            script = await script_generator.generate(
+            script = script_generator.generate(
                 theme=theme.strip(),
                 research_data=research_result
             )
