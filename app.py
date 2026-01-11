@@ -795,11 +795,19 @@ def create_ui() -> gr.Blocks:
                         )
                         
                         # 実行ボタン
-                        generate_btn = gr.Button(
-                            "🚀 動画を生成する",
-                            variant="primary",
-                            size="lg"
-                        )
+                        with gr.Row():
+                            generate_btn = gr.Button(
+                                "🚀 動画を生成する",
+                                variant="primary",
+                                size="lg",
+                                scale=2
+                            )
+                            script_only_btn = gr.Button(
+                                "📝 台本のみ作成 (確認・編集)",
+                                variant="secondary",
+                                size="lg",
+                                scale=1
+                            )
                         
                         # 注意事項
                         gr.Markdown(
@@ -1093,6 +1101,14 @@ def create_ui() -> gr.Blocks:
                 spectrum_checkbox
             ],
             outputs=[video_output, log_output, cost_output, title_output, description_output],
+            show_progress="full"
+        )
+        
+        # 台本のみ作成（AIプロデューサーモード）
+        script_only_btn.click(
+            fn=generate_script_only,
+            inputs=[theme_input, research_mode_dropdown],
+            outputs=[script_editor, log_output],
             show_progress="full"
         )
         
