@@ -7,6 +7,7 @@ from .usage import (
     TotalUsage,
     CostBreakdown,
 )
+from .research import ResearchPlan
 
 __all__ = [
     "AppConfig",
@@ -18,4 +19,5 @@ __all__ = [
     "VoicevoxUsage",
     "TotalUsage",
     "CostBreakdown",
+    "ResearchPlan",
 ]

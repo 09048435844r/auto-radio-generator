@@ -173,6 +173,130 @@ def generate_video(
         return None, get_logs(), "", "", ""
 
 
+def generate_script_only(
+    theme: str,
+    research_mode: str,
+    progress=gr.Progress()
+) -> tuple[str, str]:
+    """台本のみを生成してマニュアルタブに転送
+    
+    AIプロデューサー機能を使用した3ステッププロセス:
+    Step 0: AIが検索計画を作成
+    Step 1: 複数クエリで並列リサーチ
+    Step 2: 収集した情報を元に台本生成
+    
+    Args:
+        theme: 動画のテーマ
+        research_mode: リサーチモード
+        progress: Gradio進捗バー
+    
+    Returns:
+        (台本JSON, ログ出力)
+    """
+    import asyncio
+    from services.research import PerplexityResearcher
+    from services.script_generation import GeminiClient
+    
+    # ログをクリア
+    clear_logs()
+    append_log("🎬 AIプロデューサーモード (松コース)")
+    append_log("=" * 40)
+    append_log("多角的深掘り検索で台本を生成します")
+    
+    # 入力検証
+    if not theme or not theme.strip():
+        return "", "エラー: テーマを入力してください。"
+    
+    try:
+        # 設定読み込み
+        config = load_config(PROJECT_ROOT)
+        
+        # リサーチモードを変換
+        mode = RESEARCH_MODE_MAP.get(research_mode)
+        
+        async def generate():
+            # Step 0: AIプロデューサーが検索計画を作成
+            research_result = None
+            script_generator = None
+            
+            if mode:
+                progress(0.1, desc="Step 0: AIが検索計画を作成中...")
+                append_log(f"\n== Step 0: 検索計画作成 ==")
+                append_log(f"テーマ: {theme.strip()}")
+                
+                script_generator = GeminiClient(config)
+                plan = await script_generator.create_research_plan(theme.strip(), instruction=None)
+                
+                append_log(f"\n✓ 検索計画作成完了")
+                append_log(f"切り口: {plan.angle}")
+                append_log(f"\n検索クエリ:")
+                for i, q in enumerate(plan.queries, 1):
+                    append_log(f"  {i}. {q}")
+                
+                # Step 1: 複数クエリで並列リサーチ
+                progress(0.3, desc="Step 1: 並列リサーチ中...")
+                append_log(f"\n== Step 1: 並列リサーチ ({research_mode}) ==")
+                
+                researcher = PerplexityResearcher(config)
+                research_result = await researcher.research_multi(plan.queries, mode)
+                
+                append_log(f"\n✓ 並列リサーチ完了")
+                append_log(f"収集した情報: {len(research_result.content)}文字")
+            else:
+                append_log("リサーチなしで台本生成")
+            
+            # Step 2: 収集した情報を元に台本生成
+            progress(0.7, desc="Step 2: 台本生成中...")
+            append_log(f"\n== Step 2: 台本生成 ==")
+            
+            if not script_generator:
+                script_generator = GeminiClient(config)
+            
+            script = await script_generator.generate(
+                theme=theme.strip(),
+                research_data=research_result
+            )
+            
+            append_log(f"\n✓ 台本生成完了")
+            append_log(f"  タイトル: {script.title}")
+            append_log(f"  セリフ数: {len(script.dialogue)}")
+            
+            return script
+        
+        # 非同期実行
+        script = asyncio.run(generate())
+        
+        # 台本をJSONに変換
+        script_dict = {
+            "title": script.title,
+            "thumbnail_title": script.thumbnail_title,
+            "description": script.description,
+            "dialogue": [
+                {
+                    "speaker_id": line.speaker_id,
+                    "text": line.text,
+                    "section": line.section
+                }
+                for line in script.dialogue
+            ]
+        }
+        script_json = json.dumps(script_dict, ensure_ascii=False, indent=2)
+        
+        progress(1.0, desc="完了!")
+        append_log("\n" + "=" * 40)
+        append_log("✓ AIプロデューサーモード完了")
+        append_log("マニュアル制作タブの Step B に移動して台本を編集できます")
+        
+        return script_json, get_logs()
+        
+    except Exception as e:
+        error_msg = f"台本生成中にエラーが発生しました: {str(e)}"
+        append_log(f"\n❌ {error_msg}")
+        import traceback
+        append_log(f"\n詳細:\n{traceback.format_exc()}")
+        return "", get_logs()
+
+
 def synthesize_audio_from_script(
     script_json: str,
     progress=gr.Progress()

@@ -1,4 +1,5 @@
 """Perplexity APIを使用したリサーチクライアント"""
+import asyncio
 from openai import OpenAI
 from rich.console import Console
 
@@ -93,51 +94,97 @@ class PerplexityResearcher(IResearcher):
             console.print(f"[red]Perplexity API 接続エラー: {e}[/red]")
             return False
     
-    def _get_default_system_prompt(self, mode: ResearchMode) -> str:
-        """デフォルトのシステムプロンプトを取得"""
-        # 全モード共通のMarkdown出力指示
-        markdown_instruction = """
-
-【出力形式の厳守】
-- 出力は必ずMarkdown形式で行ってください。
-- 重要なポイントは箇条書き（Bullet points）を使用してください。
-- トピックごとに見出し（### または ####）を付けて区切ってください。
-- ベタ書きの長文は避け、視認性を高めてください。
-- 段落間には適切な改行を入れてください。"""
+    async def research_multi(self, queries: list[str], mode: ResearchMode) -> ResearchResult:
+        """複数のクエリを並列に実行して情報を収集
         
-        prompts = {
-            "debate": """あなたは議論の専門家です。与えられたテーマについて、
-賛成・反対両方の視点から調査し、議論のポイントを整理してください。
-結果は日本語で出力してください。""" + markdown_instruction,
-            
-            "voices": """あなたはSNSアナリストです。与えられたテーマについて、
-一般の人々の反応や意見、面白いコメントを調査してください。
-結果は日本語でカジュアルに出力してください。""" + markdown_instruction,
-            
-            "trivia": """あなたは雑学の専門家です。与えられたテーマについて、
-あまり知られていない事実や歴史的背景を調査してください。
-結果は日本語で「へぇ〜」と言いたくなるような形式で出力してください。""" + markdown_instruction,
-            
-            "weekly_digest": """あなたはニュースキュレーターです。
-与えられたトピックに関連する「直近1週間以内の重要な出来事」をトップ3つ選定してください。
+        Args:
+            queries: 検索クエリのリスト
+            mode: リサーチモード
+        
+        Returns:
+            ResearchResult: 結合されたリサーチ結果
+        """
+        console.print(f"[cyan]Perplexity で並列リサーチ中...[/cyan]")
+        console.print(f"  クエリ数: {len(queries)}")
+        console.print(f"  モード: {mode}")
+        
+        # モード設定からシステムプロンプトを取得
+        mode_config = self.modes.get(mode)
+        if mode_config:
+            system_prompt = mode_config.system_prompt
+        else:
+            system_prompt = self._get_default_system_prompt(mode)
+        
+        # 各クエリを並列に実行
+        async def fetch_single(query: str, index: int) -> tuple[int, str]:
+            console.print(f"  [{index+1}/{len(queries)}] {query}")
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": query}
+                    ],
+                    max_tokens=self.max_tokens,
+                    temperature=0.7
+                )
+                content = response.choices[0].message.content
+                console.print(f"  ✓ [{index+1}] 完了 ({len(content)}文字)")
+                return (index, content)
+            except Exception as e:
+                console.print(f"  [red]✗ [{index+1}] エラー: {e}[/red]")
+                return (index, f"[エラー: {query}]")
+        
+        # asyncio.gatherで並列実行
+        tasks = [fetch_single(q, i) for i, q in enumerate(queries)]
+        results = await asyncio.gather(*tasks)
+        
+        # 結果をインデックス順にソートして結合
+        results.sort(key=lambda x: x[0])
+        combined_content = ""
+        for i, (idx, content) in enumerate(results):
+            combined_content += f"\n\n## 検索結果 {i+1}: {queries[idx]}\n\n{content}"
+        
+        console.print(f"[green]✓ 並列リサーチ完了[/green] (合計{len(combined_content)}文字)")
+        
+        # 使用量を記録
+        usage = PerplexityUsage(request_count=len(queries))
+        
+        return ResearchResult(
+            topic=", ".join(queries),
+            mode=mode,
+            content=combined_content,
+            sources=None,
+            usage=usage
+        )
+    
+    def _get_default_system_prompt(self, mode: ResearchMode) -> str:
+        """デフォルトのシステムプロンプトを取得（週刊誌記者モード）"""
+        # 全モード共通の週刊誌記者モード
+        base_prompt = """あなたは週刊誌の記者です。読者が食いつく「具体的で刺激的な情報」を提供してください。
 
-各ニュースについて以下のフォーマットで出力：
-### News 1: [見出し]
-- **事実 (The Facts)**: 5W1H（いつ、どこで、誰が、何をしたか）を具体的に。
-- **背景 (Context)**: なぜこれが今話題なのか？ これまでの経緯。
-- **影響 (Impact)**: 今後どうなるか？ ユーザーや業界へのメリット・デメリット。
-- **反応 (Reactions)**: SNSや専門家の具体的な反応。
+## 取材の原則
+1. **数字を重視**: 市場規模、ユーザー数、売上、成長率などの具体的な数値を提示
+2. **固有名詞を明記**: 企業名、製品名、人名、地名を具体的に
+3. **対立軸を探る**: メリットだけでなくデメリット、賛否両論、利害関係を揘示
+4. **最新情報**: 可能な限り2024年以降の情報を優先
 
-### News 2: [見出し]
-(同上のフォーマット)
-
-### News 3: [見出し]
-(同上のフォーマット)""" + markdown_instruction
+## 出力形式
+- Markdown形式で見出しと箇条書きを使用
+- 重要な数字や固有名詞は**太字**で強調
+- ベタ書きの長文は避け、読みやすく構造化
+"""
+        
+        # モード別の追加指示
+        mode_specific = {
+            "debate": "\n賛成派と反対派の主張を対比させ、それぞれの根拠となるデータを提示してください。",
+            "voices": "\nSNSやフォーラムでの具体的な反応、賛否の分かれ方、特徴的な意見を紹介してください。",
+            "trivia": "\n一般にはあまり知られていない意外な事実、歴史的経緯、裏話を揘示してください。",
+            "weekly_digest": "\n直近1週間以内のニュースをトップ3つ選び、各ニュースについて事実・背景・影響・反応を詳しく報告してください。"
         }
-        return prompts.get(mode, prompts["trivia"])
+        
+        return base_prompt + mode_specific.get(mode, mode_specific["trivia"])
     
     def _extract_sources(self, content: str) -> list[str] | None:
         """コンテンツからソース情報を抽出（あれば）"""
-        # Perplexityのレスポンスにソースが含まれる場合の処理
-        # 現時点では簡易実装
         return None

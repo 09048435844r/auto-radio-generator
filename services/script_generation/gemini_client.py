@@ -9,7 +9,7 @@ from google.genai import types
 from rich.console import Console
 
 from core.interfaces import IScriptGenerator, ResearchResult
-from core.models import Script, DialogueLine, AppConfig, GeminiUsage
+from core.models import Script, DialogueLine, AppConfig, GeminiUsage, ResearchPlan
 
 console = Console()
 
@@ -40,6 +40,56 @@ class GeminiClient(IScriptGenerator):
         
         # 最後のAPI呼び出しの使用量を保持
         self.last_usage: GeminiUsage | None = None
+    
+    async def create_research_plan(self, theme: str, instruction: str | None = None) -> ResearchPlan:
+        """AIプロデューサー: テーマから検索計画を作成
+        
+        Args:
+            theme: 動画のテーマ
+            instruction: ユーザーからの追加指示（オプション）
+        
+        Returns:
+            ResearchPlan: 検索クエリと台本の切り口
+        """
+        console.print(f"[cyan]AIプロデューサー: 検索計画を作成中...[/cyan]")
+        console.print(f"  テーマ: {theme}")
+        if instruction:
+            console.print(f"  追加指示: {instruction}")
+        
+        system_prompt = self._build_research_plan_prompt()
+        user_prompt = f"## テーマ\n{theme}\n\n"
+        
+        if instruction:
+            user_prompt += f"## 追加指示\n{instruction}\n\n"
+        
+        user_prompt += "上記のテーマについて、検索計画をJSON形式で作成してください。"
+        
+        try:
+            response_text, usage = self._call_api(system_prompt, user_prompt)
+            self.last_usage = usage
+            
+            # JSONを抽出してパース
+            json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1)
+            else:
+                json_str = response_text.strip()
+            
+            data = json.loads(json_str)
+            plan = ResearchPlan(
+                queries=data.get("queries", []),
+                angle=data.get("angle", "")
+            )
+            
+            console.print(f"[green]✓ 検索計画作成完了[/green]")
+            console.print(f"  切り口: {plan.angle}")
+            console.print(f"  クエリ数: {len(plan.queries)}")
+            
+            return plan
+            
+        except Exception as e:
+            console.print(f"[red]✗ 検索計画作成エラー: {e}[/red]")
+            raise
     
     def generate(self, theme: str, research_data: Optional[ResearchResult] = None) -> Script:
         """テーマとリサーチデータに基づいて台本を生成する
@@ -170,6 +220,46 @@ class GeminiClient(IScriptGenerator):
             description=data.get("description", ""),
             dialogue=dialogue
         )
+    
+    def _build_research_plan_prompt(self) -> str:
+        """検索計画作成用のシステムプロンプトを構築"""
+        return """あなたはラジオ番組の構成作家です。
+テーマを面白く深掘りするための「検索クエリ」を考案してください。
+
+## タスク
+テーマに対して、以下の3つの観点から検索クエリを作成してください：
+
+1. **最新/事実**: 数字や最新動向を探るクエリ
+   - 例: "○○の市場規模 2024", "○○の最新統計データ"
+
+2. **議論/対立**: メリット・デメリットや賛否を探るクエリ
+   - 例: "○○のメリットとデメリット", "○○に対する批判"
+
+3. **ネタ/トリビア**: 意外な事実やエピソードを探るクエリ
+   - 例: "○○の意外な事実", "○○の面白いエピソード"
+
+## 追加指示について
+ユーザーから追加指示がある場合は、それを最優先してクエリを構成してください。
+
+## 出力形式
+以下のJSON形式で出力してください：
+
+```json
+{
+  "queries": [
+    "検索クエリ1（最新/事実）",
+    "検索クエリ2（議論/対立）",
+    "検索クエリ3（ネタ/トリビア）"
+  ],
+  "angle": "今回の台本の切り口・コンセプト（1文で）"
+}
+```
+
+## 注意事項
+- クエリは具体的で検索しやすいものにする
+- 各クエリは異なる観点から情報を集められるようにする
+- angleは視聴者が興味を持つような切り口を提案する
+"""
     
     def _build_system_prompt(self) -> str:
         """3部構成のラジオ台本生成用システムプロンプトを構築"""
