@@ -132,6 +132,17 @@ class PerplexityResearcher(IResearcher):
                     temperature=0.7
                 )
                 content = response.choices[0].message.content
+                
+                # 引用情報を抽出して追記
+                citations = getattr(response.choices[0].message, 'citations', None)
+                if citations and len(citations) > 0:
+                    content += "\n\n## 📚 出典・参考文献\n"
+                    for i, citation in enumerate(citations, 1):
+                        if isinstance(citation, str):
+                            content += f"[{i}] [{citation}]({citation})\n"
+                        elif hasattr(citation, 'url'):
+                            content += f"[{i}] [{citation.url}]({citation.url})\n"
+                
                 console.print(f"  ✓ [{index+1}] 完了 ({len(content)}文字)")
                 return (index, content)
             except Exception as e:
@@ -195,6 +206,10 @@ class PerplexityResearcher(IResearcher):
 - 日付や数字は**太字**で強調
 - 各ニュースについて「事実→背景→影響→反応→今後の展望」を詳しく報告
 
+## 引用ルール
+- 事実や数字を挙げる際は、必ず文末に `[1]`, `[2]` のような引用番号を付与すること
+- これにより出典リストとの対応関係を明確にする
+
 直近1ヶ月以内を中心に、関連性の高いニュースをトップ3つ選び、各ニュースについて徹底的に詳しく報告してください。"""
         
         # その他のモードは徹底調査スタイル
@@ -223,6 +238,10 @@ class PerplexityResearcher(IResearcher):
 - Markdown形式で見出しを使用
 - 各セクションは**段落形式の長文**で記述
 - 重要な数字や固有名詞は**太字**で強調
+
+## 引用ルール
+- 事実や数字を挙げる際は、必ず文末に `[1]`, `[2]` のような引用番号を付与すること
+- これにより出典リストとの対応関係を明確にする
 """
         
         # モード別の追加指示
