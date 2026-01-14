@@ -22,8 +22,8 @@
 # -----------------------------------------------------------------------------
 # テーマに関する情報を事前調査し、台本生成の素材を提供します。
 researcher:
-  model: "sonar-pro"           # Perplexityモデル（sonar-pro推奨）
-  max_tokens: 2048             # 最大トークン数（リサーチ結果の長さ）
+  model: "sonar-reasoning-pro"           # Perplexityモデル（sonar-pro推奨）
+  max_tokens: 4096             # 最大トークン数（リサーチ結果の長さ）
   
   # リサーチモード定義（4種類）
   # 各モードで異なる視点からテーマを調査します。
@@ -89,8 +89,8 @@ researcher:
 script_generator:
   # 使用するモデル
   gemini:
-    model: "gemini-2.5-pro"              # メインモデル（高品質）
-    fallback_model: "gemini-2.0-flash"   # フォールバックモデル（高速）
+    model: "gemini-3.0-pro"              # メインモデル（高品質）
+    fallback_model: "gemini-2.5-pro"   # フォールバックモデル（高速）
     max_tokens: 8192                      # 最大トークン数（台本の長さ）
   
   # 台本の構成比率（合計100%）
