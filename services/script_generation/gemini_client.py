@@ -91,6 +91,38 @@ class GeminiClient(IScriptGenerator):
             
         except Exception as e:
             console.print(f"[red]✗ 検索計画作成エラー: {e}[/red]")
+            
+            # フォールバックモデルで再試行
+            if self.fallback_model and self.fallback_model != self.model_name:
+                console.print(f"[yellow]フォールバックモデルで再試行: {self.fallback_model}[/yellow]")
+                original_model = self.model_name
+                try:
+                    self.model_name = self.fallback_model
+                    response_text, usage = self._call_api(system_prompt, user_prompt)
+                    self.last_usage = usage
+                    
+                    # JSONを抽出してパース
+                    json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
+                    if json_match:
+                        json_str = json_match.group(1)
+                    else:
+                        json_str = response_text.strip()
+                    
+                    data = json.loads(json_str)
+                    plan = ResearchPlan(
+                        queries=data.get("queries", []),
+                        angle=data.get("angle", "")
+                    )
+                    
+                    console.print(f"[green]✓ フォールバックモデルで検索計画作成完了[/green]")
+                    console.print(f"  切り口: {plan.angle}")
+                    console.print(f"  クエリ数: {len(plan.queries)}")
+                    
+                    return plan
+                    
+                finally:
+                    self.model_name = original_model
+            
             raise
     
     def generate(self, theme: str, research_data: Optional[ResearchResult] = None) -> Script:
