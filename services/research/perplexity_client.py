@@ -134,7 +134,22 @@ class PerplexityResearcher(IResearcher):
                 content = response.choices[0].message.content
                 
                 # 引用情報を抽出して追記
-                citations = getattr(response.choices[0].message, 'citations', None)
+                # Perplexity APIのレスポンス構造をデバッグ
+                message = response.choices[0].message
+                
+                # 複数の可能性のある属性名をチェック
+                citations = None
+                for attr_name in ['citations', 'citation', 'sources', 'references']:
+                    citations = getattr(message, attr_name, None)
+                    if citations:
+                        console.print(f"  [dim]引用情報を '{attr_name}' 属性から取得[/dim]")
+                        break
+                
+                # レスポンスオブジェクト全体から引用を探す
+                if not citations and hasattr(response, 'citations'):
+                    citations = response.citations
+                    console.print(f"  [dim]引用情報をレスポンスルートから取得[/dim]")
+                
                 if citations and len(citations) > 0:
                     content += "\n\n## 📚 出典・参考文献\n"
                     for i, citation in enumerate(citations, 1):
@@ -142,6 +157,11 @@ class PerplexityResearcher(IResearcher):
                             content += f"[{i}] [{citation}]({citation})\n"
                         elif hasattr(citation, 'url'):
                             content += f"[{i}] [{citation.url}]({citation.url})\n"
+                        elif isinstance(citation, dict) and 'url' in citation:
+                            content += f"[{i}] [{citation['url']}]({citation['url']})\n"
+                    console.print(f"  [green]✓ 引用情報追加: {len(citations)}件[/green]")
+                else:
+                    console.print(f"  [yellow]⚠ 引用情報なし（Perplexity APIが返さなかった可能性）[/yellow]")
                 
                 console.print(f"  ✓ [{index+1}] 完了 ({len(content)}文字)")
                 return (index, content)
