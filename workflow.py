@@ -261,34 +261,45 @@ async def generate_video_workflow(
         log_writer = LogFileWriter(output_base)
         log(f"出力ディレクトリ: {output_base}")
         
-        # ========== Phase 1: リサーチ (5-20%) ==========
+        # ========== Phase 1: リサーチ (5-20%) - AIプロデューサーモード ==========
         research_data = None
         if overrides.enable_research and overrides.research_mode:
             progress(0.05, f"リサーチ中 ({overrides.research_mode})...")
-            log(f"\n== リサーチ ==")
+            log(f"\n== リサーチ (AIプロデューサーモード) ==")
             log(f"テーマ: {theme}")
             log(f"モード: {overrides.research_mode}")
-            log(f"[DEBUG] enable_research: {overrides.enable_research}")
-            log(f"[DEBUG] research_mode: {overrides.research_mode}")
             
             research_start = time.time()
             try:
-                researcher = create_researcher(config)
-                research_data = await researcher.research(theme, overrides.research_mode)
+                # Step 0: AIプロデューサーが検索計画を作成
+                progress(0.05, "Step 0: AIが検索計画を作成中...")
+                log(f"\n== Step 0: 検索計画作成 ==")
                 
-                log(f"[DEBUG] リサーチAPI呼び出し完了")
-                log(f"[DEBUG] research_data is None: {research_data is None}")
+                script_generator = create_script_generator(config)
+                plan = await script_generator.create_research_plan(theme, overrides.research_mode, instruction=None)
+                
+                log(f"✓ 検索計画作成完了")
+                log(f"切り口: {plan.angle}")
+                log(f"\n検索クエリ:")
+                for i, q in enumerate(plan.queries, 1):
+                    log(f"  {i}. {q}")
+                
+                # Step 1: 複数クエリで並列リサーチ
+                progress(0.10, "Step 1: 並列リサーチ中...")
+                log(f"\n== Step 1: 並列リサーチ ({overrides.research_mode}) ==")
+                
+                researcher = create_researcher(config)
+                research_data = await researcher.research_multi(plan.queries, overrides.research_mode)
+                
+                log(f"\n✓ 並列リサーチ完了")
+                log(f"収集した情報: {len(research_data.content)}文字")
                 
                 # Usage記録
                 if research_data and research_data.usage:
                     total_usage.perplexity = research_data.usage
                 
                 total_usage.research_duration_sec = time.time() - research_start
-                
-                if research_data:
-                    log(f"✓ リサーチ完了: {len(research_data.content)}文字 ({total_usage.research_duration_sec:.1f}秒)")
-                else:
-                    log(f"⚠ リサーチデータがNullです")
+                log(f"✓ リサーチ完了: {len(research_data.content)}文字 ({total_usage.research_duration_sec:.1f}秒)")
                 
                 progress(0.20, "リサーチ完了")
                 
