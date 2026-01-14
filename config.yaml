@@ -23,7 +23,7 @@
 # テーマに関する情報を事前調査し、台本生成の素材を提供します。
 researcher:
   model: "sonar-reasoning-pro"           # Perplexityモデル（sonar-pro推奨）
-  max_tokens: 4096             # 最大トークン数（リサーチ結果の長さ）
+  max_tokens: 8192             # 最大トークン数（リサーチ結果の長さ）
   
   # リサーチモード定義（4種類）
   # 各モードで異なる視点からテーマを調査します。
