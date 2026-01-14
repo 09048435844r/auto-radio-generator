@@ -349,6 +349,12 @@ async def generate_video_workflow(
                 log(f"✓ リサーチレポート保存: {report_path}")
                 log(f"[DEBUG] レポートサイズ: {report_path.stat().st_size} bytes")
                 
+                # Perplexityの生データを全文保存（加工なし）
+                full_report_path = output_base / "full_research_report.md"
+                full_report_path.write_text(research_data.content, encoding="utf-8")
+                log(f"✓ Perplexity全文レポート保存: {full_report_path}")
+                log(f"[DEBUG] 全文レポートサイズ: {full_report_path.stat().st_size} bytes")
+                
             except Exception as save_error:
                 log(f"⚠ リサーチ結果保存エラー: {save_error}")
                 import traceback
