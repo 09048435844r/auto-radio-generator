@@ -10,6 +10,7 @@ from rich.console import Console
 
 from core.interfaces import IScriptGenerator, ResearchResult
 from core.models import Script, DialogueLine, AppConfig, GeminiUsage, ResearchPlan
+from .time_expressions import get_time_expression
 
 console = Console()
 
@@ -425,7 +426,7 @@ class GeminiClient(IScriptGenerator):
 - キャラクターの口調を厳守すること"""
 
     def _build_weekly_digest_prompt(self, theme: str) -> str:
-        """今週のニュースまとめ専用のシステムプロンプトを構築
+        """最近のニュースまとめ専用のシステムプロンプトを構築
         
         ニュースキャスター＋コメンテーター形式の台本を生成する。
         リスナーメールコーナーは含めず、純粋なニュース解説に特化。
@@ -433,8 +434,14 @@ class GeminiClient(IScriptGenerator):
         main_char = self.personalities.main
         sub_char = self.personalities.sub
         
+        # 時間表現を動的に取得
+        time_expr = get_time_expression("weekly_digest")
+        title_prefix = time_expr["title_prefix"]
+        intro_phrase = time_expr["intro_phrase"]
+        outro_phrase = time_expr["outro_phrase"]
+        
         return f"""あなたは人気ニュース番組の台本作家です。
-2人のキャスターによる「今週のニュースまとめ」番組の台本を作成してください。
+2人のキャスターによる「{title_prefix}ニュースまとめ」番組の台本を作成してください。
 
 ## キャスター設定
 
@@ -451,7 +458,7 @@ class GeminiClient(IScriptGenerator):
 ## 番組構成（厳守）
 
 ### イントロ
-- 「{theme}に関する今週のトップ3ニュースをお届けするのだ！」のような短い導入
+- 「{theme}に関する{intro_phrase}トップ3ニュースをお届けするのだ！」のような短い導入
 - 挨拶は最小限に
 
 ### 本編: ニュース1, 2, 3 を順番に紹介
@@ -463,8 +470,8 @@ class GeminiClient(IScriptGenerator):
 5. 次のニュースへの移行
 
 ### アウトロ
-- 今週のニュースを簡潔にまとめる
-- 「来週もニュースチェックをお忘れなく！」のような締め
+- {outro_phrase}ニュースを簡潔にまとめる
+- 「引き続きニュースチェックをお忘れなく！」のような締め
 
 ## 出力形式（JSON）
 
@@ -472,7 +479,7 @@ class GeminiClient(IScriptGenerator):
 
 ```json
 {{
-  "title": "【今週のまとめ】{theme}に関する重要ニュース3選",
+  "title": "【{title_prefix}まとめ】{theme}に関する重要ニュース3選",
   "description": "番組の概要（YouTube説明文用、SEOを意識して関連キーワードを自然に盛り込み、動画の内容を興味深く詳細に要約すること。500文字程度を目安に）",
   "dialogue": [
     {{"speaker_id": "main", "text": "セリフ内容", "section": "intro"}},
