@@ -40,6 +40,12 @@ TIME_EXPRESSIONS: dict[str, TimeExpression] = {
         "intro_phrase": "",
         "outro_phrase": "",
         "period_description": "話題の"
+    },
+    "lecture": {
+        "title_prefix": "",
+        "intro_phrase": "",
+        "outro_phrase": "",
+        "period_description": "分かりやすい"
     }
 }
 

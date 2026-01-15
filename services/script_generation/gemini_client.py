@@ -11,6 +11,7 @@ from rich.console import Console
 from core.interfaces import IScriptGenerator, ResearchResult
 from core.models import Script, DialogueLine, AppConfig, GeminiUsage, ResearchPlan
 from .time_expressions import get_time_expression
+from .lecture_prompt import build_lecture_prompt
 
 console = Console()
 
@@ -140,9 +141,11 @@ class GeminiClient(IScriptGenerator):
         console.print(f"  テーマ: {theme}")
         console.print(f"  リサーチデータ: {'あり' if research_data else 'なし'}")
         
-        # weekly_digestモードの場合は専用プロンプトを使用
+        # モード別に専用プロンプトを使用
         if research_data and research_data.mode == "weekly_digest":
             system_prompt = self._build_weekly_digest_prompt(theme)
+        elif research_data and research_data.mode == "lecture":
+            system_prompt = build_lecture_prompt(theme, self.personalities.main, self.personalities.sub)
         else:
             system_prompt = self._build_system_prompt()
         user_prompt = self._build_user_prompt(theme, research_data)
@@ -306,7 +309,16 @@ class GeminiClient(IScriptGenerator):
    - 例: "○○ 体験談", "○○ 使ってみた"
 
 3. **街の声**: SNSやフォーラムでの反応を探るクエリ
-   - 例: "○○ SNS反応", "○○ みんなの意見"""
+   - 例: "○○ SNS反応", "○○ みんなの意見""",
+            
+            "lecture": """1. **基本定義**: 初心者向けの分かりやすい説明を探るクエリ（専門用語を避ける）
+   - 例: "○○ とは 初心者向け わかりやすく", "○○ 簡単に説明"
+
+2. **仕組み・構造**: 図解や比喩を使った説明を探るクエリ
+   - 例: "○○ 仕組み 図解 例え話", "○○ どういう仕組み 分かりやすく"
+
+3. **メリット・活用例**: 何ができるか、どう役立つかを探るクエリ
+   - 例: "○○ メリット 何ができる", "○○ 5歳児でもわかる", "○○ 具体例"""
         }
         
         mode_instruction = mode_instructions.get(mode, mode_instructions["trivia"])

@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from core.models.usage import PerplexityUsage
 
 
-ResearchMode = Literal["debate", "voices", "trivia", "weekly_digest"]
+ResearchMode = Literal["debate", "voices", "trivia", "weekly_digest", "lecture"]
 
 
 @dataclass

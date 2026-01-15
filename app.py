@@ -60,6 +60,7 @@ RESEARCH_MODE_MAP = {
     "世間の声 (SNS反応)": "voices",
     "トリビア (雑学)": "trivia",
     "今週のまとめ (ニュース)": "weekly_digest",
+    "解説・講座 (Lecture)": "lecture",
     "リサーチなし": None
 }
 
