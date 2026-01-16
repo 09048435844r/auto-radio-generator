@@ -10,8 +10,8 @@ from rich.console import Console
 
 from core.interfaces import IScriptGenerator, ResearchResult
 from core.models import Script, DialogueLine, AppConfig, GeminiUsage, ResearchPlan
+from core.prompt_manager import PromptManager
 from .time_expressions import get_time_expression
-from .lecture_prompt import build_lecture_prompt
 
 console = Console()
 
@@ -39,6 +39,7 @@ class GeminiClient(IScriptGenerator):
         self.max_tokens = config.yaml.script_generator.gemini.max_tokens
         self.structure = config.yaml.script_generator.structure
         self.personalities = config.yaml.personalities
+        self.prompt_manager = PromptManager()
         
         # 最後のAPI呼び出しの使用量を保持
         self.last_usage: GeminiUsage | None = None
@@ -141,13 +142,35 @@ class GeminiClient(IScriptGenerator):
         console.print(f"  テーマ: {theme}")
         console.print(f"  リサーチデータ: {'あり' if research_data else 'なし'}")
         
-        # モード別に専用プロンプトを使用
+        # モード別に専用プロンプトを使用（PromptManagerから取得）
         if research_data and research_data.mode == "weekly_digest":
-            system_prompt = self._build_weekly_digest_prompt(theme)
+            # 時間表現を取得
+            time_expr = get_time_expression("weekly_digest")
+            system_prompt = self.prompt_manager.get_script_prompt(
+                "weekly_digest",
+                title_prefix=time_expr["title_prefix"],
+                intro_phrase=time_expr["intro_phrase"],
+                outro_phrase=time_expr["outro_phrase"],
+                theme=theme,
+                main_char=self.personalities.main,
+                sub_char=self.personalities.sub
+            )
         elif research_data and research_data.mode == "lecture":
-            system_prompt = build_lecture_prompt(theme, self.personalities.main, self.personalities.sub)
+            system_prompt = self.prompt_manager.get_script_prompt(
+                "lecture",
+                theme=theme,
+                main_char=self.personalities.main,
+                sub_char=self.personalities.sub
+            )
         else:
-            system_prompt = self._build_system_prompt()
+            system_prompt = self.prompt_manager.get_script_prompt(
+                "standard",
+                main_char=self.personalities.main,
+                sub_char=self.personalities.sub,
+                main_topic_ratio=self.structure.main_topic_ratio,
+                listener_mail_ratio=self.structure.listener_mail_ratio,
+                ending_ratio=self.structure.ending_ratio
+            )
         user_prompt = self._build_user_prompt(theme, research_data)
         self.last_usage = None  # リセット
         
@@ -348,178 +371,3 @@ class GeminiClient(IScriptGenerator):
 - angleは視聴者が興味を持つような切り口を提案する
 """
     
-    def _build_system_prompt(self) -> str:
-        """3部構成のラジオ台本生成用システムプロンプトを構築"""
-        main_char = self.personalities.main
-        sub_char = self.personalities.sub
-        
-        return f"""あなたは人気ラジオ番組の台本作家です。
-2人のパーソナリティによる掛け合いトーク番組の台本を作成してください。
-
-## パーソナリティ設定
-
-### メインパーソナリティ（speaker_id: "main"）
-- 名前: {main_char.name}
-- 性格: {main_char.description}
-
-### サブパーソナリティ（speaker_id: "sub"）
-- 名前: {sub_char.name}
-- 性格: {sub_char.description}
-
-## 台本構成（厳守）
-
-台本は以下の3部構成で作成してください：
-
-### Part 1: 本題 ({self.structure.main_topic_ratio}%)
-- **挨拶は一切不要**。いきなり本題から始める
-- リサーチ結果を基に、2人で議論・解説を行う
-- {main_char.name}が話題を振り、{sub_char.name}が補足・ツッコミを入れる
-- 専門用語は噛み砕いて説明する
-
-### Part 2: リスナーメールコーナー ({self.structure.listener_mail_ratio}%)
-- 「さて、ここでリスナーからのお便りなのだ」のような導入
-- 架空のリスナー（ラジオネーム付き）からの質問を作成
-- テーマに関連した質問に2人で回答する
-
-### Part 3: エンディング ({self.structure.ending_ratio}%)
-- 簡潔な締めの挨拶
-- 次回予告（任意）
-- 「またね！」などの短い別れの挨拶
-
-## タイトル生成の制約条件（厳守）
-
-**禁止事項**:
-1. タイトルやサムネイルテキストに「【今週のニュース】」「【特集】」「Vol.1」などのプレフィックス（接頭辞）を付けないこと
-2. 「AIニュース」「ラジオ」などの一般的なチャンネル名や番組名をタイトルに入れないこと
-3. 中身の具体的なトピックやベネフィット（利益）にフォーカスすること
-
-**Few-Shot Examples（例示）**:
-- ❌ Bad: 【健康】中性脂肪について解説
-- ✅ Good: 中性脂肪は実は正義だった！？
-- ❌ Bad: 今週の経済ニュースまとめ
-- ✅ Good: 円安が止まらない本当の理由
-- ❌ Bad: AIラジオ：最新技術動向
-- ✅ Good: GPT-5はいつ来る？予測まとめ
-
-## 出力形式（JSON）
-
-必ず以下のJSON形式で出力してください：
-
-```json
-{{
-  "title": "番組タイトル（上記の制約条件を厳守し、テーマを反映した魅力的なタイトル）",
-  "thumbnail_title": "サムネイル用の短い釣りタイトル（10〜15文字以内のキャッチコピー。装飾なし。例: 「血糖値の新常識」「朝食の魔法」など）",
-  "description": "番組の概要（YouTube説明文用、SEOを意識して関連キーワードを自然に盛り込み、動画の内容を興味深く詳細に要約すること。500文字程度を目安に）",
-  "dialogue": [
-    {{"speaker_id": "main", "text": "セリフ内容", "section": "intro"}},
-    {{"speaker_id": "sub", "text": "セリフ内容"}},
-    ...
-    {{"speaker_id": "main", "text": "セリフ内容", "section": "main"}},
-    ...
-    {{"speaker_id": "main", "text": "セリフ内容", "section": "listener_mail"}},
-    ...
-    {{"speaker_id": "main", "text": "セリフ内容", "section": "ending"}},
-    ...
-  ]
-}}
-```
-
-## セクションマーカー（重要）
-各セクションの**最初のセリフ**にのみ `section` フィールドを付けてください：
-- `"intro"` - オープニングの最初
-- `"main"` - 本題の最初
-- `"listener_mail"` - リスナーメールの最初
-- `"ending"` - エンディングの最初
-
-## 重要な注意事項
-- 各セリフは1〜3文程度に収める（長すぎると聞きづらい）
-- 相槌や笑い声も適度に入れる（例: 「へぇ〜」「なるほどなのだ」）
-- 対話は40〜60ターン程度を目安に
-- キャラクターの口調を厳守すること"""
-
-    def _build_weekly_digest_prompt(self, theme: str) -> str:
-        """最近のニュースまとめ専用のシステムプロンプトを構築
-        
-        ニュースキャスター＋コメンテーター形式の台本を生成する。
-        リスナーメールコーナーは含めず、純粋なニュース解説に特化。
-        """
-        main_char = self.personalities.main
-        sub_char = self.personalities.sub
-        
-        # 時間表現を動的に取得
-        time_expr = get_time_expression("weekly_digest")
-        title_prefix = time_expr["title_prefix"]
-        intro_phrase = time_expr["intro_phrase"]
-        outro_phrase = time_expr["outro_phrase"]
-        
-        return f"""あなたは人気ニュース番組の台本作家です。
-2人のキャスターによる「{title_prefix}ニュースまとめ」番組の台本を作成してください。
-
-## キャスター設定
-
-### ニュースキャスター / 進行役（speaker_id: "main"）
-- 名前: {main_char.name}
-- 役割: ニュースの見出しと事実を読み上げ、議題を進行する
-- 性格: {main_char.description}
-
-### 専門コメンテーター / 解説役（speaker_id: "sub"）
-- 名前: {sub_char.name}
-- 役割: ニュースの背景や影響を深く解説する
-- 性格: {sub_char.description}
-
-## 番組構成（厳守）
-
-### イントロ
-- 「{theme}に関する{intro_phrase}トップ3ニュースをお届けするのだ！」のような短い導入
-- 挨拶は最小限に
-
-### 本編: ニュース1, 2, 3 を順番に紹介
-各ニュースについて：
-1. **{main_char.name}（進行役）**: 見出しを読み上げ、事実（5W1H）を簡潔に伝える
-2. **{sub_char.name}（解説役）**: 背景(Context)と影響(Impact)を深掘り解説
-3. **{main_char.name}**: SNSや専門家の反応を紹介
-4. 2人で短いやり取り（感想・補足）
-5. 次のニュースへの移行
-
-### アウトロ
-- {outro_phrase}ニュースを簡潔にまとめる
-- 「引き続きニュースチェックをお忘れなく！」のような締め
-
-## 出力形式（JSON）
-
-必ず以下のJSON形式で出力してください：
-
-```json
-{{
-  "title": "【{title_prefix}まとめ】{theme}に関する重要ニュース3選",
-  "description": "番組の概要（YouTube説明文用、SEOを意識して関連キーワードを自然に盛り込み、動画の内容を興味深く詳細に要約すること。500文字程度を目安に）",
-  "dialogue": [
-    {{"speaker_id": "main", "text": "セリフ内容", "section": "intro"}},
-    {{"speaker_id": "sub", "text": "セリフ内容"}},
-    ...
-    {{"speaker_id": "main", "text": "ニュース1の見出し...", "section": "news_1"}},
-    ...
-    {{"speaker_id": "main", "text": "ニュース2の見出し...", "section": "news_2"}},
-    ...
-    {{"speaker_id": "main", "text": "ニュース3の見出し...", "section": "news_3"}},
-    ...
-    {{"speaker_id": "main", "text": "セリフ内容", "section": "ending"}},
-    ...
-  ]
-}}
-```
-
-## セクションマーカー（重要）
-各セクションの**最初のセリフ**にのみ `section` フィールドを付けてください：
-- `"intro"` - オープニングの最初
-- `"news_1"` - ニュース1の最初（見出しを読み上げるセリフ）
-- `"news_2"` - ニュース2の最初
-- `"news_3"` - ニュース3の最初
-- `"ending"` - エンディングの最初
-
-## 重要な注意事項
-- 各セリフは1〜3文程度に収める
-- ニュースの正確性を重視しつつ、分かりやすく伝える
-- 専門用語は噌み砕いて説明する
-- 対話は50〜70ターン程度を目安に
-- キャラクターの口調を厳守すること"""

@@ -5,6 +5,7 @@ from rich.console import Console
 
 from core.interfaces import IResearcher, ResearchResult, ResearchMode
 from core.models import AppConfig, PerplexityUsage
+from core.prompt_manager import PromptManager
 
 console = Console()
 
@@ -33,6 +34,7 @@ class PerplexityResearcher(IResearcher):
         self.model = config.yaml.researcher.model
         self.max_tokens = config.yaml.researcher.max_tokens
         self.modes = config.yaml.researcher.modes
+        self.prompt_manager = PromptManager()
     
     async def research(self, topic: str, mode: ResearchMode) -> ResearchResult:
         """テーマについてリサーチを実行する"""
@@ -45,7 +47,8 @@ class PerplexityResearcher(IResearcher):
         if mode_config:
             system_prompt = mode_config.system_prompt
         else:
-            system_prompt = self._get_default_system_prompt(mode)
+            # PromptManagerからプロンプトを取得
+            system_prompt = self.prompt_manager.get_research_prompt(mode)
         
         try:
             response = self.client.chat.completions.create(
@@ -113,7 +116,8 @@ class PerplexityResearcher(IResearcher):
         if mode_config:
             system_prompt = mode_config.system_prompt
         else:
-            system_prompt = self._get_default_system_prompt(mode)
+            # PromptManagerからプロンプトを取得
+            system_prompt = self.prompt_manager.get_research_prompt(mode)
         
         # 各クエリを並列に実行
         async def fetch_single(query: str, index: int) -> tuple[int, str]:
@@ -191,112 +195,6 @@ class PerplexityResearcher(IResearcher):
             sources=None,
             usage=usage
         )
-    
-    def _get_default_system_prompt(self, mode: ResearchMode) -> str:
-        """デフォルトのシステムプロンプトを取得（モード別に切り替え）"""
-        
-        # weekly_digestモードの場合は徹底調査スタイル
-        if mode == "weekly_digest":
-            return """あなたは徹底的な調査を行う調査報道ジャーナリストです。簡潔な要約ではなく、詳細で網羅的なレポートを作成してください。
-
-## 調査の原則
-1. **詳細性の重視**: 1つのトピックにつき最低でも**300〜500文字**の詳細な解説を書くこと
-2. **データの網羅**: 見つかった数字、統計、固有名詞はすべて記載する
-3. **文章形式**: 箇条書きの多用は禁止。**段落（Paragraph）形式で詳細に記述**すること
-4. **複数視点**: 複数の情報源がある場合は、それぞれの違いや矛盾点も含めて記述する
-5. **柔軟な期間設定**: 
-   - 優先順位1: **直近1ヶ月以内**のニュースや大きな動きを探す
-   - 優先順位2: もし1ヶ月以内に特筆すべきニュースがない場合は、**過去3〜6ヶ月**まで範囲を広げる
-   - **重要**: 「ニュースがありませんでした」という回答は禁止
-
-## 禁止事項
-❌ 「簡潔な要約」は禁止
-❌ 箇条書きだけで終わらせない
-❌ 「概要」だけで終わらせない
-
-## 必須事項
-✅ 各トピックについて背景・経緯・具体例・影響を**文章で詳しく**説明
-✅ 数字やデータは必ず出典とともに記載
-✅ 企業名・製品名・人名などの固有名詞を具体的に
-✅ 最終的な出力文字数は**3000文字以上**を目指す
-
-## 出力形式
-- Markdown形式で見出しを使用
-- 各セクションは**段落形式の長文**で記述
-- 日付や数字は**太字**で強調
-- 各ニュースについて「事実→背景→影響→反応→今後の展望」を詳しく報告
-
-## 引用ルール
-- 事実や数字を挙げる際は、必ず文末に `[1]`, `[2]` のような引用番号を付与すること
-- これにより出典リストとの対応関係を明確にする
-
-直近1ヶ月以内を中心に、関連性の高いニュースをトップ3つ選び、各ニュースについて徹底的に詳しく報告してください。"""
-        
-        # その他のモードは徹底調査スタイル
-        base_prompt = """あなたは徹底的な調査を行う調査報道ジャーナリストです。簡潔な要約ではなく、詳細で網羅的なレポートを作成してください。
-
-## 調査の原則
-1. **詳細性の重視**: 1つのトピックにつき最低でも**300〜500文字**の詳細な解説を書くこと
-2. **データの網羅**: 市場規模、ユーザー数、売上、成長率などの数字は見つかった限りすべて記載
-3. **固有名詞の明記**: 企業名、製品名、人名、地名を具体的に
-4. **文章形式**: 箇条書きの多用は禁止。**段落（Paragraph）形式で詳細に記述**すること
-5. **複数視点**: 複数の情報源がある場合は、それぞれの違いや矛盾点も含めて記述する
-6. **最新情報**: 可能な限り2024年以降の情報を優先
-
-## 禁止事項
-❌ 「簡潔な要約」は禁止
-❌ 箇条書きだけで終わらせない
-❌ 「概要」だけで終わらせない
-
-## 必須事項
-✅ 各トピックについて背景・経緯・具体例・影響を**文章で詳しく**説明
-✅ 数字やデータは必ず出典とともに記載
-✅ 対立軸がある場合は両論を詳しく展開
-✅ 最終的な出力文字数は**3000文字以上**を目指す
-
-## 出力形式
-- Markdown形式で見出しを使用
-- 各セクションは**段落形式の長文**で記述
-- 重要な数字や固有名詞は**太字**で強調
-
-## 引用ルール
-- 事実や数字を挙げる際は、必ず文末に `[1]`, `[2]` のような引用番号を付与すること
-- これにより出典リストとの対応関係を明確にする
-"""
-        
-        # モード別の追加指示
-        mode_specific = {
-            "debate": "\n\n賛成派と反対派の主張を対比させ、それぞれの根拠となるデータを**段落形式で詳しく**説明してください。各立場について最低300文字ずつ記述すること。",
-            "voices": "\n\nSNSやフォーラムでの具体的な反応、賛否の分かれ方、特徴的な意見を**段落形式で詳しく**紹介してください。具体的な投稿内容や反応の背景も含めて記述すること。",
-            "trivia": "\n\n一般にはあまり知られていない意外な事実、歴史的経緯、裏話を**段落形式で詳しく**揘示してください。各トピックについて背景や経緯を含めて最低300文字ずつ記述すること。",
-            "lecture": """
-
-## 講座モード専用指示
-
-あなたは**プロの家庭教師**として、初心者（知識ゼロの生徒）に分かりやすく教えてください。
-
-### 必須事項
-1. **専門用語を避ける**: 難しい言葉は使わず、日常的な言葉に言い換えること
-2. **比喩（アナロジー）を必ず使う**: 「〜に例えると」という表現で、身近なものに例えて説明すること
-   - 例: 「AIは料理のレシピのようなもの」「ブロックチェーンは改ざんできないノートのようなもの」
-3. **構造**: 必ず以下の順序で説明すること
-   - **定義**: まず基本的な意味を簡単に説明
-   - **比喩**: 身近なものに例えて理解を助ける（複数の比喩を使うこと）
-   - **具体例**: 実際にどう使われているか、何ができるかを示す
-
-### 禁止事項
-❌ 専門用語を説明なしに使う
-❌ 抽象的な説明だけで終わる
-❌ 比喩を使わない
-
-### 推奨事項
-✅ 「つまり〜ということです」と噛み砕く
-✅ 「例えば〜」と具体例を多く出す
-✅ 「5歳児でもわかるように」という意識で書く
-✅ 段落形式で、優しく丁寧に説明する"""
-        }
-        
-        return base_prompt + mode_specific.get(mode, mode_specific["trivia"])
     
     def _extract_sources(self, content: str) -> list[str] | None:
         """コンテンツからソース情報を抽出（あれば）"""
