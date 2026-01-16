@@ -2,9 +2,10 @@
 
 ずんだもん（生徒役）とめたん（先生役）による教育番組形式の台本を生成する。
 """
+from typing import Any
 
 
-def build_lecture_prompt(theme: str, main_char, sub_char) -> str:
+def build_lecture_prompt(theme: str, main_char: Any, sub_char: Any) -> str:
     """講座モード専用のシステムプロンプトを構築
     
     Args:

@@ -54,7 +54,7 @@ def get_time_expression(mode: str) -> TimeExpression:
     """モードに対応する時間表現を取得
     
     Args:
-        mode: リサーチモード (trivia/debate/weekly_digest/voices)
+        mode: リサーチモード (trivia/debate/weekly_digest/voices/lecture)
     
     Returns:
         TimeExpression: 時間表現の辞書
