@@ -66,6 +66,40 @@ class WorkflowResult:
 
 
 @dataclass
+class PlanningPhaseResult:
+    """企画フェーズの実行結果"""
+    queries: list[str]
+    angle: str
+    gemini_usage: Optional[GeminiUsage] = None
+    duration_sec: float = 0.0
+
+
+@dataclass
+class ScriptingPhaseResult:
+    """台本作成フェーズの実行結果"""
+    script: Script
+    research_content: Optional[str] = None
+    perplexity_usage: Optional[PerplexityUsage] = None
+    gemini_usage: Optional[GeminiUsage] = None
+    research_duration_sec: float = 0.0
+    script_duration_sec: float = 0.0
+
+
+@dataclass
+class ProductionPhaseResult:
+    """制作フェーズの実行結果"""
+    video_path: Path
+    audio_path: Path
+    subtitle_path: Path
+    duration_sec: float
+    file_size_mb: float
+    chapters: list[ChapterMarker]
+    voicevox_usage: VoicevoxUsage
+    audio_duration_sec: float = 0.0
+    render_duration_sec: float = 0.0
+
+
+@dataclass
 class ProgressCallback:
     """進捗コールバック用クラス"""
     log_callback: Optional[Callable[[str], None]] = None
@@ -148,6 +182,306 @@ def apply_overrides(config: AppConfig, overrides: UIOverrides) -> AppConfig:
         config.yaml.video_renderer.enable_spectrum = overrides.enable_spectrum
     
     return config
+
+
+async def execute_planning_phase(
+    theme: str,
+    mode: ResearchMode,
+    config: AppConfig,
+    instruction: Optional[str] = None,
+    callbacks: Optional[ProgressCallback] = None
+) -> PlanningPhaseResult:
+    """企画フェーズ: AIプロデューサーが検索計画を作成
+    
+    Args:
+        theme: 動画のテーマ
+        mode: リサーチモード
+        config: アプリケーション設定
+        instruction: 追加指示（オプション）
+        callbacks: 進捗コールバック
+    
+    Returns:
+        PlanningPhaseResult: 検索クエリリストと切り口
+    """
+    cb = callbacks or ProgressCallback()
+    start_time = time.time()
+    
+    cb.log(f"\n== Phase 1: 企画（検索計画作成） ==")
+    cb.log(f"テーマ: {theme}")
+    cb.log(f"モード: {mode}")
+    cb.progress(0.05, "AIが検索計画を作成中...")
+    
+    try:
+        script_generator = create_script_generator(config)
+        plan = await script_generator.create_research_plan(theme, mode, instruction)
+        
+        cb.log(f"✓ 検索計画作成完了")
+        cb.log(f"切り口: {plan.angle}")
+        cb.log(f"\n検索クエリ:")
+        for i, q in enumerate(plan.queries, 1):
+            cb.log(f"  {i}. {q}")
+        
+        # Usage記録
+        gemini_usage = script_generator.last_usage
+        
+        duration = time.time() - start_time
+        cb.log(f"✓ 企画フェーズ完了 ({duration:.1f}秒)")
+        
+        return PlanningPhaseResult(
+            queries=plan.queries,
+            angle=plan.angle,
+            gemini_usage=gemini_usage,
+            duration_sec=duration
+        )
+    
+    except Exception as e:
+        cb.log(f"❌ 企画フェーズエラー: {e}")
+        raise
+
+
+async def execute_scripting_phase(
+    theme: str,
+    mode: ResearchMode,
+    queries: list[str],
+    config: AppConfig,
+    output_dir: Path,
+    enable_research: bool = True,
+    callbacks: Optional[ProgressCallback] = None
+) -> ScriptingPhaseResult:
+    """台本作成フェーズ: リサーチ → 台本生成
+    
+    Args:
+        theme: 動画のテーマ
+        mode: リサーチモード
+        queries: 検索クエリリスト（企画フェーズの出力）
+        config: アプリケーション設定
+        output_dir: 出力ディレクトリ（リサーチ結果保存用）
+        enable_research: リサーチを実行するか
+        callbacks: 進捗コールバック
+    
+    Returns:
+        ScriptingPhaseResult: 台本とリサーチ結果
+    """
+    cb = callbacks or ProgressCallback()
+    research_start = time.time()
+    research_data = None
+    research_content = None
+    perplexity_usage = None
+    research_duration = 0.0
+    
+    # Step 1: リサーチ
+    if enable_research and queries:
+        cb.log(f"\n== Phase 2-1: リサーチ ==")
+        cb.log(f"モード: {mode}")
+        cb.progress(0.10, "並列リサーチ中...")
+        
+        try:
+            researcher = create_researcher(config)
+            research_data = await researcher.research_multi(queries, mode)
+            
+            cb.log(f"✓ リサーチ完了")
+            cb.log(f"収集した情報: {len(research_data.content)}文字")
+            
+            research_content = research_data.content
+            perplexity_usage = research_data.usage
+            research_duration = time.time() - research_start
+            
+            # リサーチ結果を保存
+            _save_research_results(research_data, output_dir, cb)
+            
+        except Exception as e:
+            cb.log(f"⚠ リサーチエラー（スキップ）: {e}")
+            import traceback
+            cb.log(f"[DEBUG] {traceback.format_exc()}")
+    else:
+        cb.log(f"[INFO] リサーチスキップ")
+    
+    cb.progress(0.20, "リサーチ完了")
+    
+    # Step 2: 台本生成
+    cb.log(f"\n== Phase 2-2: 台本生成 ==")
+    cb.log(f"テーマ: {theme}")
+    cb.progress(0.25, "台本を生成中...")
+    
+    script_start = time.time()
+    script_generator = create_script_generator(config)
+    script = script_generator.generate(theme, research_data)
+    
+    gemini_usage = script_generator.last_usage
+    script_duration = time.time() - script_start
+    
+    cb.log(f"✓ 台本生成完了: {len(script.dialogue)}フレーズ ({script_duration:.1f}秒)")
+    cb.log(f"タイトル: {script.title}")
+    cb.progress(0.35, "台本生成完了")
+    
+    # 台本を保存
+    script_path = output_dir / "script.json"
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+    script_path.write_text(script.model_dump_json(indent=2), encoding="utf-8")
+    cb.log(f"✓ 台本保存: {script_path.name}")
+    
+    return ScriptingPhaseResult(
+        script=script,
+        research_content=research_content,
+        perplexity_usage=perplexity_usage,
+        gemini_usage=gemini_usage,
+        research_duration_sec=research_duration,
+        script_duration_sec=script_duration
+    )
+
+
+async def execute_production_phase(
+    script: Script,
+    config: AppConfig,
+    output_dir: Path,
+    project_root: Path,
+    speed_scale: Optional[float] = None,
+    callbacks: Optional[ProgressCallback] = None
+) -> ProductionPhaseResult:
+    """制作フェーズ: 音声合成 → 動画生成
+    
+    Args:
+        script: 台本データ（台本作成フェーズの出力）
+        config: アプリケーション設定
+        output_dir: 出力ディレクトリ
+        project_root: プロジェクトルート
+        speed_scale: 音声スピード倍率（オプション）
+        callbacks: 進捗コールバック
+    
+    Returns:
+        ProductionPhaseResult: 動画ファイルパスと各種メタデータ
+    """
+    cb = callbacks or ProgressCallback()
+    
+    # ========== Step 1: 音声合成 ==========
+    cb.log(f"\n== Phase 3-1: 音声合成 ==")
+    cb.log(f"フレーズ数: {len(script.dialogue)}")
+    cb.progress(0.40, "音声合成中...")
+    
+    audio_start = time.time()
+    audio_output_dir = output_dir / "audio"
+    
+    voicevox = VoicevoxClient(config)
+    synthesis_result = await voicevox.synthesize(
+        script,
+        audio_output_dir,
+        speed_scale_override=speed_scale
+    )
+    
+    voicevox_usage = VoicevoxUsage(
+        phrase_count=len(script.dialogue),
+        total_duration_sec=synthesis_result.total_duration_sec
+    )
+    audio_duration = time.time() - audio_start
+    
+    cb.log(f"✓ 音声合成完了: {synthesis_result.total_duration_sec:.1f}秒 ({audio_duration:.1f}秒)")
+    cb.progress(0.70, "音声合成完了")
+    
+    # ========== Step 2: 動画生成 ==========
+    cb.log(f"\n== Phase 3-2: 動画生成 ==")
+    cb.log(f"BGM音量: {config.yaml.video_renderer.bgm_volume}")
+    cb.log(f"フェードイン: {config.yaml.video_renderer.bgm_fade_in_sec}秒")
+    cb.log(f"フェードアウト: {config.yaml.video_renderer.bgm_fade_out_sec}秒")
+    cb.log(f"スペクトラム: {'ON' if config.yaml.video_renderer.enable_spectrum else 'OFF'}")
+    cb.progress(0.75, "動画を生成中...")
+    
+    render_start = time.time()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    video_output_path = output_dir / "videos" / f"radio_{timestamp}.mp4"
+    
+    background_image = project_root / config.yaml.paths.background_image
+    bgm_file = project_root / config.yaml.paths.bgm_file
+    
+    ffmpeg = FfmpegRenderer(config)
+    render_result = await ffmpeg.render(
+        synthesis_result=synthesis_result,
+        background_image=background_image,
+        bgm_file=bgm_file,
+        output_path=video_output_path,
+        subtitle_path=synthesis_result.subtitle_path
+    )
+    
+    render_duration = time.time() - render_start
+    
+    cb.log(f"✓ 動画生成完了: {render_result.file_size_mb:.1f}MB ({render_duration:.1f}秒)")
+    cb.progress(0.95, "動画生成完了")
+    
+    # ========== Step 3: サムネイル生成 ==========
+    cb.log(f"\n== Phase 3-3: サムネイル生成 ==")
+    thumbnail_generator = ThumbnailGenerator()
+    thumbnail_path = output_dir / "thumbnail.png"
+    thumbnail_generator.generate(
+        title=script.title,
+        thumbnail_title=script.thumbnail_title,
+        background_path=background_image,
+        output_path=thumbnail_path
+    )
+    cb.log(f"✓ サムネイル画像生成: {thumbnail_path.name}")
+    
+    return ProductionPhaseResult(
+        video_path=render_result.video_path,
+        audio_path=synthesis_result.audio_path,
+        subtitle_path=synthesis_result.subtitle_path,
+        duration_sec=render_result.duration_sec,
+        file_size_mb=render_result.file_size_mb,
+        chapters=synthesis_result.chapters,
+        voicevox_usage=voicevox_usage,
+        audio_duration_sec=audio_duration,
+        render_duration_sec=render_duration
+    )
+
+
+def _save_research_results(
+    research_data,
+    output_dir: Path,
+    callbacks: ProgressCallback
+) -> None:
+    """リサーチ結果をファイルに保存
+    
+    Args:
+        research_data: リサーチ結果
+        output_dir: 出力ディレクトリ
+        callbacks: 進捗コールバック
+    """
+    try:
+        from dataclasses import asdict
+        import json
+        
+        callbacks.log(f"[DEBUG] research.json保存処理開始")
+        
+        research_path = output_dir / "research.json"
+        research_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        research_dict = asdict(research_data)
+        json_str = json.dumps(research_dict, ensure_ascii=False, indent=2)
+        research_path.write_text(json_str, encoding="utf-8")
+        
+        callbacks.log(f"✓ リサーチ結果保存: {research_path}")
+        
+        # Markdownレポートも保存
+        report_path = output_dir / "research_report.md"
+        report_content = f"""# リサーチレポート
+
+**テーマ**: {research_data.topic}
+**モード**: {research_data.mode}
+**生成日時**: {datetime.now().strftime('%Y年%m月%d日 %H:%M:%S')}
+
+---
+
+{research_data.content}
+"""
+        report_path.write_text(report_content, encoding="utf-8")
+        callbacks.log(f"✓ リサーチレポート保存: {report_path}")
+        
+        # Perplexityの生データを全文保存
+        full_report_path = output_dir / "full_research_report.md"
+        full_report_path.write_text(research_data.content, encoding="utf-8")
+        callbacks.log(f"✓ Perplexity全文レポート保存: {full_report_path}")
+        
+    except Exception as save_error:
+        callbacks.log(f"⚠ リサーチ結果保存エラー: {save_error}")
+        import traceback
+        callbacks.log(f"[DEBUG] Traceback: {traceback.format_exc()}")
 
 
 async def check_prerequisites(
@@ -551,10 +885,192 @@ def run_workflow_sync(
     log_callback: Optional[Callable[[str], None]] = None,
     progress_callback: Optional[Callable[[float, str], None]] = None
 ) -> WorkflowResult:
-    """同期版ワークフロー実行（Gradioから呼び出し用）"""
-    return asyncio.run(generate_video_workflow(
-        theme, overrides, log_callback, progress_callback
-    ))
+    """同期版ワークフロー実行（Gradioから呼び出し用）
+    
+    3つの独立したフェーズ関数を順次呼び出すシンプルなラッパー。
+    これにより、自動モードが「手動工程の連続実行」と等価であることを保証します。
+    
+    Args:
+        theme: 動画のテーマ
+        overrides: UIからのパラメータオーバーライド
+        log_callback: ログ出力用コールバック関数
+        progress_callback: 進捗コールバック (ratio, description)
+    
+    Returns:
+        WorkflowResult: 実行結果（Usage/Cost情報含む）
+    """
+    async def _run_phases():
+        workflow_start = time.time()
+        overrides_obj = overrides or UIOverrides()
+        callbacks = ProgressCallback(log_callback, progress_callback)
+        log_writer: Optional[LogFileWriter] = None
+        
+        try:
+            # ========== Phase 0: 設定読み込み・前提条件チェック ==========
+            callbacks.progress(0.0, "設定を読み込み中...")
+            callbacks.log("設定を読み込み中...")
+            
+            config = load_config(PROJECT_ROOT)
+            config = apply_overrides(config, overrides_obj)
+            
+            # 素材パスのオーバーライド
+            if overrides_obj.background_image:
+                config.yaml.paths.background_image = f"assets/backgrounds/{overrides_obj.background_image}"
+            if overrides_obj.bgm_file:
+                config.yaml.paths.bgm_file = f"assets/bgm/{overrides_obj.bgm_file}"
+            
+            # 前提条件チェック
+            callbacks.progress(0.02, "前提条件を確認中...")
+            success, error = await check_prerequisites(config, log_callback)
+            if not success:
+                return WorkflowResult(success=False, error_message=error)
+            callbacks.progress(0.05, "前提条件OK")
+            
+            # 出力ディレクトリを準備
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_base = PROJECT_ROOT / config.yaml.paths.output_dir / timestamp
+            output_base.mkdir(parents=True, exist_ok=True)
+            
+            # ログファイルライターを初期化
+            log_writer = LogFileWriter(output_base)
+            callbacks.log(f"出力ディレクトリ: {output_base}")
+            
+            # Usage集約用
+            total_usage = TotalUsage()
+            
+            # ========== Phase 1: 企画（検索計画作成） ==========
+            planning_result = None
+            queries = []
+            
+            if overrides_obj.enable_research and overrides_obj.research_mode:
+                planning_result = await execute_planning_phase(
+                    theme=theme,
+                    mode=overrides_obj.research_mode,
+                    config=config,
+                    callbacks=callbacks
+                )
+                queries = planning_result.queries
+                if planning_result.gemini_usage:
+                    total_usage.gemini = planning_result.gemini_usage
+            else:
+                callbacks.log("[INFO] 企画フェーズスキップ（リサーチ無効）")
+            
+            # ========== Phase 2: 台本作成（リサーチ → 台本生成） ==========
+            scripting_result = await execute_scripting_phase(
+                theme=theme,
+                mode=overrides_obj.research_mode or "trivia",
+                queries=queries,
+                config=config,
+                output_dir=output_base,
+                enable_research=overrides_obj.enable_research,
+                callbacks=callbacks
+            )
+            
+            # Usage記録
+            if scripting_result.perplexity_usage:
+                total_usage.perplexity = scripting_result.perplexity_usage
+            if scripting_result.gemini_usage:
+                total_usage.gemini = scripting_result.gemini_usage
+            total_usage.research_duration_sec = scripting_result.research_duration_sec
+            total_usage.script_duration_sec = scripting_result.script_duration_sec
+            
+            # ========== Phase 3: 制作（音声合成 → 動画生成） ==========
+            production_result = await execute_production_phase(
+                script=scripting_result.script,
+                config=config,
+                output_dir=output_base,
+                project_root=PROJECT_ROOT,
+                speed_scale=overrides_obj.speed_scale,
+                callbacks=callbacks
+            )
+            
+            # Usage記録
+            total_usage.voicevox = production_result.voicevox_usage
+            total_usage.audio_duration_sec = production_result.audio_duration_sec
+            total_usage.render_duration_sec = production_result.render_duration_sec
+            
+            # ========== Phase 4: 後処理（メタデータ生成） ==========
+            callbacks.progress(0.95, "後処理中...")
+            
+            # YouTube用メタデータを生成
+            metadata_path = output_base / "metadata.txt"
+            _generate_youtube_metadata(
+                script=scripting_result.script,
+                chapters=production_result.chapters,
+                output_path=metadata_path
+            )
+            callbacks.log(f"✓ YouTubeメタデータ生成: {metadata_path.name}")
+            
+            # ログファイルを完了
+            if log_writer:
+                log_writer.finalize()
+                callbacks.log(f"✓ 処理ログ保存: {log_writer.log_path.name}")
+            
+            # メタデータの内容を読み込んでUIへ渡す
+            metadata_content = metadata_path.read_text(encoding="utf-8")
+            
+            # 日付入りタイトルと概要欄結合版を生成
+            creation_date = datetime.now().strftime("%Y.%m.%d")
+            formatted_title = f"{scripting_result.script.title} ({creation_date}制作)"
+            
+            # チャプターリストを生成
+            chapter_lines = []
+            if production_result.chapters:
+                for chapter in production_result.chapters:
+                    total_seconds = int(chapter.start_time_sec)
+                    minutes = total_seconds // 60
+                    seconds = total_seconds % 60
+                    timestamp_str = f"{minutes:02d}:{seconds:02d}"
+                    chapter_lines.append(f"{timestamp_str} {chapter.title}")
+            
+            # 概要欄結合（チャプター + 概要文 + ハッシュタグ）
+            formatted_description_parts = []
+            if chapter_lines:
+                formatted_description_parts.append("\n".join(chapter_lines))
+            formatted_description_parts.append(scripting_result.script.description)
+            formatted_description_parts.append("#ずんだもん #VOICEVOX #AI #ラジオ")
+            formatted_description = "\n\n".join(formatted_description_parts)
+            
+            # 総所要時間
+            total_usage.total_duration_sec = time.time() - workflow_start
+            
+            # コスト計算
+            cost_calculator = CostCalculator()
+            cost = cost_calculator.calculate(total_usage)
+            cost_report = cost_calculator.format_cost_report(total_usage, cost)
+            
+            callbacks.log(f"\n== 完了 ==")
+            callbacks.log(f"動画: {production_result.video_path}")
+            callbacks.log(f"総所要時間: {total_usage.total_duration_sec:.1f}秒")
+            callbacks.progress(1.0, "完了!")
+            
+            return WorkflowResult(
+                success=True,
+                video_path=production_result.video_path,
+                script=scripting_result.script,
+                audio_path=production_result.audio_path,
+                subtitle_path=production_result.subtitle_path,
+                duration_sec=production_result.duration_sec,
+                file_size_mb=production_result.file_size_mb,
+                usage=total_usage,
+                cost=cost,
+                cost_report=cost_report,
+                metadata_content=metadata_content,
+                formatted_title=formatted_title,
+                formatted_description=formatted_description
+            )
+            
+        except Exception as e:
+            error_msg = f"エラーが発生しました: {str(e)}"
+            callbacks.log(f"\n❌ {error_msg}")
+            
+            # エラー時もログファイルを完了
+            if log_writer:
+                log_writer.finalize()
+            
+            return WorkflowResult(success=False, error_message=error_msg)
+    
+    return asyncio.run(_run_phases())
 
 
 def scan_assets(project_root: Optional[Path] = None) -> dict[str, list[str]]:
