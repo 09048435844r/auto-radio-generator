@@ -68,6 +68,25 @@ class PromptManager:
         except KeyError as e:
             raise ValueError(f"プロンプトの変数展開に失敗しました。不足している変数: {e}")
     
+    def get_component(self, name: str) -> str:
+        """再利用可能なコンポーネントを取得
+        
+        Args:
+            name: コンポーネント名 (例: metadata_rules)
+        
+        Returns:
+            str: コンポーネントのテキスト
+        """
+        if "components" not in self._prompts:
+            raise ValueError("プロンプト設定ファイルに components セクションがありません")
+        
+        component = self._prompts["components"].get(name, "")
+        
+        if not component:
+            raise ValueError(f"コンポーネントが見つかりません: {name}")
+        
+        return component
+    
     def reload(self) -> None:
         """プロンプトを再読み込み（開発・デバッグ用）"""
         self._load_prompts()

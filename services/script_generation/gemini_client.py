@@ -142,6 +142,9 @@ class GeminiClient(IScriptGenerator):
         console.print(f"  テーマ: {theme}")
         console.print(f"  リサーチデータ: {'あり' if research_data else 'なし'}")
         
+        # メタデータルールコンポーネントを取得
+        metadata_rules = self.prompt_manager.get_component("metadata_rules")
+        
         # モード別に専用プロンプトを使用（PromptManagerから取得）
         if research_data and research_data.mode == "weekly_digest":
             # 時間表現を取得
@@ -153,14 +156,16 @@ class GeminiClient(IScriptGenerator):
                 outro_phrase=time_expr["outro_phrase"],
                 theme=theme,
                 main_char=self.personalities.main,
-                sub_char=self.personalities.sub
+                sub_char=self.personalities.sub,
+                metadata_rules=metadata_rules
             )
         elif research_data and research_data.mode == "lecture":
             system_prompt = self.prompt_manager.get_script_prompt(
                 "lecture",
                 theme=theme,
                 main_char=self.personalities.main,
-                sub_char=self.personalities.sub
+                sub_char=self.personalities.sub,
+                metadata_rules=metadata_rules
             )
         else:
             system_prompt = self.prompt_manager.get_script_prompt(
@@ -169,7 +174,8 @@ class GeminiClient(IScriptGenerator):
                 sub_char=self.personalities.sub,
                 main_topic_ratio=self.structure.main_topic_ratio,
                 listener_mail_ratio=self.structure.listener_mail_ratio,
-                ending_ratio=self.structure.ending_ratio
+                ending_ratio=self.structure.ending_ratio,
+                metadata_rules=metadata_rules
             )
         user_prompt = self._build_user_prompt(theme, research_data)
         self.last_usage = None  # リセット
