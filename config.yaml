@@ -103,7 +103,7 @@ researcher:
 script_generator:
   # 使用するモデル
   gemini:
-    model: "gemini-3.0-pro"              # メインモデル（高品質）
+    model: "gemini-3-pro-preview"              # メインモデル（高品質）
     fallback_model: "gemini-2.5-pro"   # フォールバックモデル（高速）
     max_tokens: 8192                      # 最大トークン数（台本の長さ）
   

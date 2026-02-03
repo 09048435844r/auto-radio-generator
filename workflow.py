@@ -246,6 +246,7 @@ async def execute_scripting_phase(
     config: AppConfig,
     output_dir: Path,
     enable_research: bool = True,
+    excluded_topics: Optional[str] = None,
     callbacks: Optional[ProgressCallback] = None
 ) -> ScriptingPhaseResult:
     """台本作成フェーズ: リサーチ → 台本生成
@@ -257,6 +258,7 @@ async def execute_scripting_phase(
         config: アプリケーション設定
         output_dir: 出力ディレクトリ（リサーチ結果保存用）
         enable_research: リサーチを実行するか
+        excluded_topics: 除外すべき既出情報（オプション）
         callbacks: 進捗コールバック
     
     Returns:
@@ -273,10 +275,13 @@ async def execute_scripting_phase(
     if enable_research and queries:
         cb.log(f"\n== Phase 2-1: リサーチ ==")
         cb.log(f"モード: {mode}")
+        if excluded_topics:
+            cb.log(f"除外トピック: {excluded_topics[:100]}..." if len(excluded_topics) > 100 else f"除外トピック: {excluded_topics}")
         cb.progress(0.10, "並列リサーチ中...")
         
         try:
             researcher = create_researcher(config)
+            # 除外トピックをリサーチャーに渡す（今後の拡張用）
             research_data = await researcher.research_multi(queries, mode)
             
             cb.log(f"✓ リサーチ完了")
@@ -1112,51 +1117,122 @@ def _generate_youtube_metadata(
     chapters: list[ChapterMarker],
     output_path: Path
 ) -> None:
-    """YouTube投稿用のメタデータファイルを生成
+    """YouTube投稿用のメタデータファイルを生成（packagingプロンプト使用）
     
     Args:
         script: 台本データ
         chapters: チャプターマーカーリスト
         output_path: 出力パス
     """
-    lines = [
-        "=" * 50,
-        "YouTube 投稿用メタデータ",
-        "=" * 50,
-        "",
-        "【タイトル】",
-        script.title,
-        "",
-        "【説明文】",
-        script.description,
-        "",
-    ]
+    from services.script_generation.gemini_client import GeminiClient
+    from core.settings_manager import SettingsManager
     
-    # チャプター情報を追加
-    if chapters:
-        lines.extend([
-            "【チャプター】",
-            "※ 以下をYouTubeの説明欄にコピー＆ペーストしてください",
-            "",
-        ])
+    # Geminiクライアントと設定を取得
+    gemini_client = GeminiClient()
+    settings = SettingsManager().load_settings()
+    
+    # 台本の要約を生成
+    script_summary = ""
+    if script.dialogue:
+        # ダイアログから主要な内容を要約
+        dialogue_texts = [d.text for d in script.dialogue[:10]]  # 最初の10セリフで要約
+        script_summary = " ".join(dialogue_texts)[:200] + "..." if len(" ".join(dialogue_texts)) > 200 else " ".join(dialogue_texts)
+    
+    # packagingプロンプトでメタデータを生成
+    try:
+        metadata_result = gemini_client.generate_packaging_prompt(
+            theme=script.title or "テーマ不明",
+            script_summary=script_summary
+        )
         
-        for chapter in chapters:
-            # 秒をMM:SS形式に変換
-            total_seconds = int(chapter.start_time_sec)
-            minutes = total_seconds // 60
-            seconds = total_seconds % 60
-            timestamp = f"{minutes:02d}:{seconds:02d}"
+        if metadata_result:
+            # JSONをパースして整形
+            import json
+            metadata = json.loads(metadata_result)
             
-            lines.append(f"{timestamp} {chapter.title}")
-        
-        lines.append("")
-    
-    # ハッシュタグ候補
-    lines.extend([
-        "【ハッシュタグ候補】",
-        "#ずんだもん #VOICEVOX #AI #ラジオ",
-        "",
-    ])
+            lines = [
+                "=" * 50,
+                "YouTube 投稿用メタデータ (AI生成)",
+                "=" * 50,
+                "",
+                "【タイトル】",
+                metadata.get("title", script.title or ""),
+                "",
+                "【サムネイル文字】",
+                metadata.get("thumbnail_title", ""),
+                "",
+                "【説明文】",
+                metadata.get("description", ""),
+                "",
+            ]
+            
+            # チャプター情報を追加
+            if chapters:
+                lines.extend([
+                    "【チャプター】",
+                    "※ 以下をYouTubeの説明欄にコピー＆ペーストしてください",
+                    "",
+                ])
+                
+                for chapter in chapters:
+                    # 秒をMM:SS形式に変換
+                    total_seconds = int(chapter.start_time_sec)
+                    minutes = total_seconds // 60
+                    seconds = total_seconds % 60
+                    timestamp = f"{minutes:02d}:{seconds:02d}"
+                    
+                    lines.append(f"{timestamp} {chapter.title}")
+                
+                lines.append("")
+            
+            # ハッシュタグ候補（説明文から抽出）
+            description = metadata.get("description", "")
+            hashtags = []
+            if "#" in description:
+                # 説明文からハッシュタグを抽出
+                import re
+                hashtags = re.findall(r"#\w+", description)
+            
+            if not hashtags:
+                hashtags = ["#ずんだもん", "#VOICEVOX", "#AI", "#ラジオ"]
+            
+            lines.extend([
+                "【ハッシュタグ候補】",
+                " ".join(hashtags),
+                "",
+            ])
+            
+        else:
+            # フォールバック：従来方式
+            lines = [
+                "=" * 50,
+                "YouTube 投稿用メタデータ",
+                "=" * 50,
+                "",
+                "【タイトル】",
+                script.title,
+                "",
+                "【説明文】",
+                script.description,
+                "",
+            ]
+            
+    except Exception as e:
+        # エラー時はフォールバック
+        lines = [
+            "=" * 50,
+            "YouTube 投稿用メタデータ",
+            "=" * 50,
+            "",
+            "【タイトル】",
+            script.title,
+            "",
+            "【説明文】",
+            script.description,
+            "",
+            f"※ メタデータ生成エラー: {str(e)}",
+            "",
+        ]
     
     # VOICEVOXクレジット表記（利用規約準拠）
     lines.extend([

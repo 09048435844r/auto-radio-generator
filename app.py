@@ -71,6 +71,505 @@ def get_asset_choices() -> dict[str, list[str]]:
     return assets
 
 
+def get_background_gallery_images() -> list[str]:
+    """背景画像ギャラリー用の画像パスリストを取得"""
+    backgrounds_dir = PROJECT_ROOT / "assets" / "backgrounds"
+    if not backgrounds_dir.exists():
+        return []
+    
+    image_paths = []
+    for ext in [".png", ".jpg", ".jpeg", ".webp"]:
+        image_paths.extend(backgrounds_dir.glob(f"*{ext}"))
+    
+    return [str(p) for p in sorted(image_paths)]
+
+
+def get_background_image_path(filename: str) -> str | None:
+    """背景画像のファイル名から絶対パスを取得"""
+    if not filename:
+        return None
+    backgrounds_dir = PROJECT_ROOT / "assets" / "backgrounds"
+    image_path = backgrounds_dir / filename
+    return str(image_path) if image_path.exists() else None
+
+
+def handle_gallery_select(evt: gr.SelectData) -> tuple[str, str]:
+    """ギャラリーから画像を選択したときの処理
+    
+    Args:
+        evt: Gradioの選択イベント
+    
+    Returns:
+        (画像パス, ファイル名)
+    """
+    if evt.value and 'image' in evt.value:
+        image_path = evt.value['image']['path']
+        filename = Path(image_path).name
+        return image_path, filename
+    return None, ""
+
+
+def handle_custom_upload(file_path: str) -> tuple[str, str]:
+    """カスタム画像をアップロードしたときの処理
+    
+    Args:
+        file_path: アップロードされたファイルのパス
+    
+    Returns:
+        (画像パス, ファイル名)
+    """
+    if file_path:
+        filename = Path(file_path).name
+        return file_path, filename
+    return None, ""
+
+
+def load_initial_background(filename: str) -> str | None:
+    """初期背景画像を読み込む
+    
+    Args:
+        filename: 背景画像のファイル名
+    
+    Returns:
+        画像パス
+    """
+    return get_background_image_path(filename)
+
+
+def create_step_mode_ui(assets: dict) -> dict:
+    """こだわりステップモードのUI構築
+    
+    Args:
+        assets: アセット情報（背景画像、BGMリスト）
+    
+    Returns:
+        UIコンポーネントの辞書
+    """
+    components = {}
+    
+    with gr.Accordion("🛠 こだわりステップモード (上級者向け)", open=False):
+        gr.Markdown("""
+        **高度な制作モード** - 各ステップを個別に実行・調整できます
+        
+        🔹 **Step 0**: 企画 → 検索クエリ案を生成  
+        🔹 **Step 1**: リサーチ & 台本 → クエリでリサーチし台本を作成  
+        🔹 **Step 2**: 制作 → 台本から動画を生成
+        """)
+        
+        # ========== Step 0: 企画フェーズ ==========
+        gr.Markdown("---")
+        gr.Markdown("### 📋 Step 0: 企画 (Planning)")
+        
+        with gr.Row():
+            components["step0_theme"] = gr.Textbox(
+                label="テーマ",
+                placeholder="例: 量子コンピュータの最新動向",
+                lines=2,
+                scale=3
+            )
+            components["step0_mode"] = gr.Dropdown(
+                label="リサーチモード",
+                choices=list(RESEARCH_MODE_MAP.keys()),
+                value="トリビア (雑学)",
+                scale=1
+            )
+        
+        components["step0_execute_btn"] = gr.Button(
+            "📋 Step 0: 企画・クエリ案出し",
+            variant="primary",
+            size="lg"
+        )
+        
+        gr.Markdown("**生成されたクエリ案:**")
+        with gr.Row():
+            components["step0_query1"] = gr.Textbox(label="クエリ1", lines=2, interactive=True)
+            components["step0_query2"] = gr.Textbox(label="クエリ2", lines=2, interactive=True)
+            components["step0_query3"] = gr.Textbox(label="クエリ3", lines=2, interactive=True)
+        
+        components["step0_angle"] = gr.Textbox(
+            label="切り口・コンセプト",
+            lines=2,
+            interactive=True
+        )
+        
+        # ========== Step 1: リサーチ & 台本フェーズ ==========
+        gr.Markdown("---")
+        gr.Markdown("### 🔍 Step 1: リサーチ & 台本 (Research & Scripting)")
+        
+        gr.Markdown("**使用するクエリ（Step 0から自動入力 or 手動編集）:**")
+        with gr.Row():
+            components["step1_query1"] = gr.Textbox(label="クエリ1", lines=2, interactive=True)
+            components["step1_query2"] = gr.Textbox(label="クエリ2", lines=2, interactive=True)
+            components["step1_query3"] = gr.Textbox(label="クエリ3", lines=2, interactive=True)
+        
+        components["step1_excluded_topics"] = gr.Textbox(
+            label="既出情報の除外",
+            placeholder="例: 前回の動画で話した内容、避けたい話題など",
+            lines=3,
+            info="この情報は台本生成時に考慮されます（オプション）"
+        )
+        
+        components["step1_execute_btn"] = gr.Button(
+            "🔍 Step 1: 上記クエリで台本を作成",
+            variant="primary",
+            size="lg"
+        )
+        
+        gr.Markdown("**生成された台本:**")
+        components["step1_title"] = gr.Textbox(
+            label="タイトル",
+            lines=1,
+            interactive=True
+        )
+        components["step1_thumbnail"] = gr.Textbox(
+            label="サムネイル文字",
+            lines=1,
+            interactive=True
+        )
+        components["step1_description"] = gr.Textbox(
+            label="概要欄",
+            lines=5,
+            interactive=True
+        )
+        components["step1_script_json"] = gr.Code(
+            label="台本JSON (編集可能)",
+            language="json",
+            lines=15,
+            interactive=True
+        )
+        
+        components["step1_log"] = gr.Textbox(
+            label="処理ログ",
+            lines=8,
+            interactive=False
+        )
+        
+        # ========== Step 2: 制作フェーズ ==========
+        gr.Markdown("---")
+        gr.Markdown("### 🎬 Step 2: 制作 (Production)")
+        
+        gr.Markdown("**動画設定:**")
+        with gr.Row():
+            components["step2_background"] = gr.Dropdown(
+                label="背景画像",
+                choices=assets.get("backgrounds", ["default.png"]),
+                value=assets.get("backgrounds", ["default.png"])[0] if assets.get("backgrounds") else None
+            )
+            components["step2_bgm"] = gr.Dropdown(
+                label="BGM",
+                choices=assets.get("bgm", ["default.mp3"]),
+                value=assets.get("bgm", ["default.mp3"])[0] if assets.get("bgm") else None
+            )
+        
+        with gr.Row():
+            components["step2_bgm_volume"] = gr.Slider(
+                label="BGM音量",
+                minimum=0.0,
+                maximum=0.5,
+                value=0.15,
+                step=0.01
+            )
+            components["step2_speed"] = gr.Slider(
+                label="話速",
+                minimum=0.8,
+                maximum=1.5,
+                value=1.0,
+                step=0.05
+            )
+        
+        components["step2_spectrum"] = gr.Checkbox(
+            label="音声スペクトラムを表示",
+            value=True
+        )
+        
+        components["step2_execute_btn"] = gr.Button(
+            "🎬 Step 2: この内容で動画を生成",
+            variant="primary",
+            size="lg"
+        )
+        
+        components["step2_video"] = gr.Video(
+            label="生成された動画",
+            height=360
+        )
+        
+        components["step2_log"] = gr.Textbox(
+            label="処理ログ",
+            lines=8,
+            interactive=False
+        )
+    
+    return components
+
+
+def execute_step0_planning(
+    theme: str,
+    research_mode: str,
+    progress=gr.Progress()
+) -> tuple[str, str, str, str]:
+    """Step 0: 企画フェーズを実行
+    
+    Args:
+        theme: テーマ
+        research_mode: リサーチモード
+        progress: Gradio進捗バー
+    
+    Returns:
+        (クエリ1, クエリ2, クエリ3, 切り口)
+    """
+    if not theme or not theme.strip():
+        return "", "", "", "エラー: テーマを入力してください"
+    
+    mode = RESEARCH_MODE_MAP.get(research_mode)
+    if not mode:
+        return "", "", "", "エラー: リサーチモードを選択してください"
+    
+    try:
+        from workflow import execute_planning_phase, ProgressCallback
+        import asyncio
+        
+        config = load_config()
+        
+        # コールバック設定
+        cb = ProgressCallback()
+        cb.log = lambda msg: None  # ログは不要
+        cb.progress = lambda ratio, desc: progress(ratio, desc=desc)
+        
+        # 企画フェーズを実行
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(
+            execute_planning_phase(
+                theme=theme.strip(),
+                mode=mode,
+                config=config,
+                callbacks=cb
+            )
+        )
+        loop.close()
+        
+        queries = result.queries
+        angle = result.angle or ""
+        
+        return (
+            queries[0] if len(queries) > 0 else "",
+            queries[1] if len(queries) > 1 else "",
+            queries[2] if len(queries) > 2 else "",
+            angle
+        )
+        
+    except Exception as e:
+        import traceback
+        error_msg = f"エラー: {str(e)}\n{traceback.format_exc()}"
+        return "", "", "", error_msg
+
+
+def execute_step1_scripting(
+    theme: str,
+    research_mode: str,
+    query1: str,
+    query2: str,
+    query3: str,
+    excluded_topics: str,
+    progress=gr.Progress()
+) -> tuple[str, str, str, str, str]:
+    """Step 1: リサーチ & 台本フェーズを実行
+    
+    Args:
+        theme: テーマ
+        research_mode: リサーチモード
+        query1, query2, query3: 検索クエリ
+        excluded_topics: 除外トピック
+        progress: Gradio進捗バー
+    
+    Returns:
+        (タイトル, サムネイル文字, 概要欄, 台本JSON, ログ)
+    """
+    if not theme or not theme.strip():
+        return "", "", "", "", "エラー: テーマを入力してください"
+    
+    mode = RESEARCH_MODE_MAP.get(research_mode)
+    if not mode:
+        return "", "", "", "", "エラー: リサーチモードを選択してください"
+    
+    queries = [q.strip() for q in [query1, query2, query3] if q and q.strip()]
+    if not queries:
+        return "", "", "", "", "エラー: 少なくとも1つのクエリを入力してください"
+    
+    try:
+        from workflow import execute_scripting_phase, ProgressCallback
+        import asyncio
+        from pathlib import Path
+        from datetime import datetime
+        import json
+        
+        config = load_config()
+        
+        # 出力ディレクトリ
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = PROJECT_ROOT / "output" / "step_mode" / timestamp
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # ログ収集
+        log_messages = []
+        
+        def log_callback(msg: str):
+            log_messages.append(msg)
+        
+        def progress_callback(ratio: float, desc: str):
+            progress(ratio, desc=desc)
+        
+        cb = ProgressCallback()
+        cb.log = log_callback
+        cb.progress = progress_callback
+        
+        # 台本生成フェーズを実行
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(
+            execute_scripting_phase(
+                theme=theme.strip(),
+                mode=mode,
+                queries=queries,
+                config=config,
+                output_dir=output_dir,
+                enable_research=True,
+                excluded_topics=excluded_topics.strip() if excluded_topics else None,
+                callbacks=cb
+            )
+        )
+        loop.close()
+        
+        script = result.script
+        
+        # 台本JSONを整形
+        script_json = json.dumps(script.model_dump(), ensure_ascii=False, indent=2)
+        
+        # ログを整形
+        log_text = "\n".join(log_messages)
+        
+        return (
+            script.title or "",
+            script.thumbnail_title or "",
+            script.description or "",
+            script_json,
+            log_text
+        )
+        
+    except Exception as e:
+        import traceback
+        error_msg = f"エラー: {str(e)}\n{traceback.format_exc()}"
+        return "", "", "", "", error_msg
+
+
+def execute_step2_production(
+    title: str,
+    description: str,
+    script_json: str,
+    background_image: str,
+    bgm_file: str,
+    bgm_volume: float,
+    speed_scale: float,
+    enable_spectrum: bool,
+    progress=gr.Progress()
+) -> tuple[str | None, str]:
+    """Step 2: 制作フェーズを実行
+    
+    Args:
+        title: タイトル
+        description: 概要欄
+        script_json: 台本JSON
+        background_image: 背景画像
+        bgm_file: BGMファイル
+        bgm_volume: BGM音量
+        speed_scale: 話速
+        enable_spectrum: スペクトラム表示
+        progress: Gradio進捗バー
+    
+    Returns:
+        (動画パス, ログ)
+    """
+    if not script_json or not script_json.strip():
+        return None, "エラー: 台本JSONを入力してください"
+    
+    try:
+        from workflow import execute_production_phase, ProgressCallback
+        import asyncio
+        from pathlib import Path
+        from datetime import datetime
+        import json
+        
+        config = load_config()
+        
+        # 台本JSONをパース
+        script_data = json.loads(script_json)
+        script = Script.model_validate(script_data)
+        
+        # タイトルと概要欄を更新
+        if title:
+            script.title = title
+        if description:
+            script.description = description
+        
+        # 出力ディレクトリ
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = PROJECT_ROOT / "output" / "step_mode" / timestamp
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # ログ収集
+        log_messages = []
+        
+        def log_callback(msg: str):
+            log_messages.append(msg)
+        
+        def progress_callback(ratio: float, desc: str):
+            progress(ratio, desc=desc)
+        
+        cb = ProgressCallback()
+        cb.log = log_callback
+        cb.progress = progress_callback
+        
+        # オーバーライド設定
+        overrides = UIOverrides(
+            bgm_volume=bgm_volume,
+            fade_in_sec=3.0,
+            fade_out_sec=3.0,
+            speed_scale=speed_scale,
+            enable_spectrum=enable_spectrum,
+            background_image=background_image,
+            bgm_file=bgm_file
+        )
+        
+        # 制作フェーズを実行
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(
+            execute_production_phase(
+                script=script,
+                config=config,
+                output_dir=output_dir,
+                overrides=overrides,
+                callbacks=cb
+            )
+        )
+        loop.close()
+        
+        # ログを整形
+        log_text = "\n".join(log_messages)
+        
+        if result.video_path and result.video_path.exists():
+            return str(result.video_path), log_text
+        else:
+            return None, log_text + "\n\nエラー: 動画ファイルが生成されませんでした"
+        
+    except json.JSONDecodeError as e:
+        return None, f"エラー: 台本JSONのパースに失敗しました: {str(e)}"
+    except Exception as e:
+        import traceback
+        error_msg = f"エラー: {str(e)}\n{traceback.format_exc()}"
+        return None, error_msg
+
+
 def generate_video(
     theme: str,
     research_mode: str,
@@ -680,8 +1179,44 @@ def create_ui() -> gr.Blocks:
     # アセット一覧を取得
     assets = get_asset_choices()
     
+    # カスタムCSS定義
+    custom_css = """
+    /* 全体のフォントと背景 */
+    .gradio-container { 
+        font-family: 'Helvetica Neue', Arial, sans-serif; 
+    }
+    
+    /* カード風のスタイル */
+    .group-container {
+        border: 1px solid #e5e7eb;
+        border-radius: 12px;
+        padding: 20px;
+        margin-bottom: 20px;
+        background-color: #f9fafb;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+    
+    .dark .group-container {
+        background-color: #1f2937;
+        border-color: #374151;
+    }
+    
+    /* 強調ボタン */
+    .primary-btn { 
+        font-weight: bold; 
+        font-size: 1.1em; 
+    }
+    
+    /* ギャラリーの角丸 */
+    .gallery-container {
+        border-radius: 8px;
+        overflow: hidden;
+    }
+    """
+    
     with gr.Blocks(
-        title="自動ラジオ動画生成システム v3.0"
+        title="自動ラジオ動画生成システム v3.0",
+        css=custom_css
     ) as app:
         
         # ヘッダー
@@ -698,127 +1233,161 @@ def create_ui() -> gr.Blocks:
         with gr.Tabs() as tabs:
             # Tab 1: 自動生成 (Classic)
             with gr.TabItem("🚀 自動生成 (Classic)", id="classic"):
-                with gr.Row():
-                    # ========== 左カラム: 設定パネル ==========
-                    with gr.Column(scale=1):
-                        gr.Markdown("### ⚙️ 設定パネル")
-                        
-                        # テーマ入力
-                        theme_input = gr.Textbox(
-                            label="テーマ",
-                            placeholder="例: AIの未来について / 最近のゲーム事情 / 宇宙開発の最新動向",
-                            lines=2,
-                            info="動画で話すテーマを入力してください（必須）"
-                        )
-                        
-                        # リサーチモード選択
-                        research_mode_dropdown = gr.Dropdown(
-                            label="リサーチモード",
-                            choices=list(RESEARCH_MODE_MAP.keys()),
-                            value=saved_settings.research_mode,
-                            info="Perplexityによるリサーチの方向性を選択"
-                        )
-                        
-                        gr.Markdown("### 🎨 素材選択")
-                        
-                        with gr.Row():
-                            # 背景画像選択
-                            background_dropdown = gr.Dropdown(
-                                label="背景画像",
-                                choices=assets.get("backgrounds", ["default.png"]),
-                                value=saved_settings.background_image if saved_settings.background_image in assets.get("backgrounds", []) else (assets.get("backgrounds", ["default.png"])[0] if assets.get("backgrounds") else None),
-                                info="assets/backgrounds/ 内の画像"
-                            )
+                
+                # ========== 全自動モード（モダンUI） ==========
+                with gr.Accordion("🚀 全自動モード (推奨)", open=True):
+                    with gr.Row():
+                        # ========== 左カラム: 設定パネル ==========
+                        with gr.Column(scale=1):
                             
-                            # BGM選択
-                            bgm_dropdown = gr.Dropdown(
-                                label="BGM",
-                                choices=assets.get("bgm", ["default.mp3"]),
-                                value=saved_settings.bgm_file if saved_settings.bgm_file in assets.get("bgm", []) else (assets.get("bgm", ["default.mp3"])[0] if assets.get("bgm") else None),
-                                info="assets/bgm/ 内の音声"
-                            )
-                        
-                        # アセットプレビュー
-                        with gr.Row():
-                            # 背景画像プレビュー
-                            bg_preview = gr.Image(
-                                label="背景画像プレビュー",
-                                height=200,
-                                interactive=False
-                            )
+                            # ブロック1: 📋 企画設定
+                            with gr.Group(elem_classes="group-container"):
+                                gr.Markdown("### 📋 企画設定")
+                                
+                                with gr.Row():
+                                    theme_input = gr.Textbox(
+                                        label="テーマ",
+                                        placeholder="例: AIの未来について / 最近のゲーム事情 / 宇宙開発の最新動向",
+                                        lines=2,
+                                        info="動画で話すテーマを入力してください（必須）",
+                                        scale=2
+                                    )
+                                    research_mode_dropdown = gr.Dropdown(
+                                        label="リサーチモード",
+                                        choices=list(RESEARCH_MODE_MAP.keys()),
+                                        value=saved_settings.research_mode,
+                                        info="Perplexityによるリサーチの方向性を選択",
+                                        scale=1
+                                    )
                             
-                            # BGMプレビュー
-                            bgm_preview = gr.Audio(
-                                label="BGMプレビュー",
-                                interactive=False
-                            )
-                        
-                        # 素材リスト更新ボタン
-                        refresh_assets_btn = gr.Button("🔄 素材リストを更新", size="sm")
-                        
-                        gr.Markdown("### 🎬 動画設定")
-                        
-                        # BGM音量スライダー
-                        bgm_volume_slider = gr.Slider(
-                            label="BGM音量",
-                            minimum=0.0,
-                            maximum=0.5,
-                            value=saved_settings.bgm_volume,
-                            step=0.01,
-                            info="BGMの音量（0.0〜0.5）"
-                        )
-                        
-                        # フェード時間スライダー
-                        fade_time_slider = gr.Slider(
-                            label="フェード時間",
-                            minimum=1.0,
-                            maximum=10.0,
-                            value=saved_settings.fade_time,
-                            step=0.5,
-                            info="BGMのフェードイン/アウト時間（秒）"
-                        )
-                        
-                        # 話速調整スライダー
-                        speed_slider = gr.Slider(
-                            label="話速 (Speed)",
-                            minimum=0.8,
-                            maximum=1.5,
-                            value=saved_settings.speed_scale,
-                            step=0.05,
-                            info="音声の再生速度（0.8～1.5）"
-                        )
-                        
-                        # スペクトラム表示
-                        spectrum_checkbox = gr.Checkbox(
-                            label="音声スペクトラムを表示",
-                            value=saved_settings.enable_spectrum,
-                            info="画面下部に音声の波形を表示"
-                        )
-                        
-                        # 実行ボタン
-                        with gr.Row():
-                            generate_btn = gr.Button(
-                                "🚀 動画を生成する",
-                                variant="primary",
-                                size="lg",
-                                scale=2
-                            )
-                            script_only_btn = gr.Button(
-                                "📝 台本のみ作成 (確認・編集)",
-                                variant="secondary",
-                                size="lg",
-                                scale=1
-                            )
-                        
-                        # 注意事項
-                        gr.Markdown(
-                            """
-                            ### ⚠️ 注意事項
-                            - **VOICEVOX** エンジンが起動している必要があります
-                            - **Perplexity API Key** と **Gemini API Key** が `.env` に設定されている必要があります
-                            - 生成には数分かかる場合があります
-                            """
-                        )
+                            # ブロック2: 🎨 クリエイティブ設定
+                            with gr.Group(elem_classes="group-container"):
+                                gr.Markdown("### 🎨 クリエイティブ設定")
+                                
+                                # 背景画像選択エリア
+                                gr.Markdown("#### 📷 背景画像")
+                                
+                                # 上段: プレビュー + カスタムアップロード
+                                with gr.Row(equal_height=True):
+                                    # 左側: 現在選択中の背景画像プレビュー
+                                    with gr.Column(scale=1):
+                                        bg_preview = gr.Image(
+                                            label="プレビュー",
+                                            height=300,
+                                            interactive=False
+                                        )
+                                        # 選択中のファイル名を保持する隠しコンポーネント
+                                        selected_bg_filename = gr.Textbox(
+                                            value=saved_settings.background_image if saved_settings.background_image else (assets.get("backgrounds", ["default.png"])[0] if assets.get("backgrounds") else ""),
+                                            visible=False
+                                        )
+                                    
+                                    # 右側: カスタム画像アップロード
+                                    with gr.Column(scale=1):
+                                        custom_bg_upload = gr.File(
+                                            label="カスタム画像をアップロード",
+                                            file_types=["image"],
+                                            type="filepath"
+                                        )
+                                        gr.Markdown("""
+                                        **アップロード情報:**
+                                        - PNG, JPG, WEBP対応
+                                        - 推奨: 1920x1080以上
+                                        """)
+                                
+                                # 下段: 背景画像ギャラリー
+                                bg_gallery = gr.Gallery(
+                                    label="背景画像ギャラリー",
+                                    value=get_background_gallery_images(),
+                                    columns=4,
+                                    height=200,
+                                    object_fit="cover",
+                                    elem_classes="gallery-container"
+                                )
+                                
+                                # BGM選択エリア
+                                gr.Markdown("#### 🎵 BGM")
+                                with gr.Row():
+                                    bgm_dropdown = gr.Dropdown(
+                                        label="BGM選択",
+                                        choices=assets.get("bgm", ["default.mp3"]),
+                                        value=saved_settings.bgm_file if saved_settings.bgm_file in assets.get("bgm", []) else (assets.get("bgm", ["default.mp3"])[0] if assets.get("bgm") else None),
+                                        scale=2
+                                    )
+                                    bgm_preview = gr.Audio(
+                                        label="プレビュー",
+                                        interactive=False,
+                                        scale=1
+                                    )
+                                
+                                # 素材リスト更新ボタン
+                                refresh_assets_btn = gr.Button("🔄 素材リストを更新", size="sm")
+                                
+                                # 動画設定
+                                gr.Markdown("#### ⚙️ 動画設定")
+                                
+                                with gr.Row():
+                                    bgm_volume_slider = gr.Slider(
+                                        label="BGM音量",
+                                        minimum=0.0,
+                                        maximum=0.5,
+                                        value=saved_settings.bgm_volume,
+                                        step=0.01,
+                                        info="BGMの音量（0.0〜0.5）"
+                                    )
+                                    fade_time_slider = gr.Slider(
+                                        label="フェード時間",
+                                        minimum=1.0,
+                                        maximum=10.0,
+                                        value=saved_settings.fade_time,
+                                        step=0.5,
+                                        info="BGMのフェードイン/アウト時間（秒）"
+                                    )
+                                
+                                with gr.Row():
+                                    speed_slider = gr.Slider(
+                                        label="話速 (Speed)",
+                                        minimum=0.8,
+                                        maximum=1.5,
+                                        value=saved_settings.speed_scale,
+                                        step=0.05,
+                                        info="音声の再生速度（0.8～1.5）"
+                                    )
+                                    spectrum_checkbox = gr.Checkbox(
+                                        label="音声スペクトラムを表示",
+                                        value=saved_settings.enable_spectrum,
+                                        info="画面下部に音声の波形を表示"
+                                    )
+                            
+                            # ブロック3: 🚀 生成アクション
+                            with gr.Group(elem_classes="group-container"):
+                                gr.Markdown("### 🚀 生成アクション")
+                                
+                                # 実行ボタン
+                                with gr.Row():
+                                    generate_btn = gr.Button(
+                                        "🚀 動画を生成する",
+                                        variant="primary",
+                                        size="lg",
+                                        scale=2,
+                                        elem_classes="primary-btn"
+                                    )
+                                    script_only_btn = gr.Button(
+                                        "📝 台本のみ作成",
+                                        variant="secondary",
+                                        size="lg",
+                                        scale=1
+                                    )
+                                
+                                # 注意事項
+                                gr.Markdown(
+                                    """
+                                    **⚠️ 注意事項:**
+                                    - **VOICEVOX** エンジンが起動している必要があります
+                                    - **Perplexity API Key** と **Gemini API Key** が `.env` に設定されている必要があります
+                                    - 生成には数分かかる場合があります
+                                    """
+                                )
                     
                     # ========== 右カラム: 結果パネル ==========
                     with gr.Column(scale=1):
@@ -857,9 +1426,31 @@ def create_ui() -> gr.Blocks:
                             lines=15,
                             interactive=True
                         )
+                
+                # ========== こだわりステップモード（新規UI） ==========
+                step_components = create_step_mode_ui(assets)
             
             # Tab 2: マニュアル制作 (Pro Tools)
             with gr.TabItem("🛠️ マニュアル制作 (Pro Tools)", id="manual"):
+                
+                # こだわりステップモード
+                with gr.Accordion("🛠 こだわりステップモード", open=False):
+                    gr.Markdown("""
+                    **高度な制作モード** - 各ステップを個別に実行・調整できます
+                    
+                    🔹 **Step A**: リサーチ → 台本生成（個別調整可能）  
+                    🔹 **Step B**: 台本 → 音声合成（個別調整可能）  
+                    🔹 **Step C**: 音声・字幕 → 動画レンダリング（個別調整可能）
+                    """)
+                    
+                    # ステップモード選択
+                    step_mode = gr.Radio(
+                        choices=["通常モード（一括）", "こだわりステップモード"],
+                        value="通常モード（一括）",
+                        label="制作モード",
+                        info="こだわりステップモードでは各工程を個別に実行・調整できます"
+                    )
+                
                 gr.Markdown("### 📝 Step A: リサーチ結果から台本生成")
                 
                 # リサーチ結果入力欄
@@ -1058,34 +1649,57 @@ def create_ui() -> gr.Blocks:
             )
         
         refresh_assets_btn.click(
-            fn=refresh_assets,
+            fn=lambda: (get_background_gallery_images(), gr.update(choices=get_asset_choices().get("bgm", []))),
             inputs=[],
-            outputs=[background_dropdown, bgm_dropdown]
+            outputs=[bg_gallery, bgm_dropdown]
         )
         
-        # アセットプレビューの更新
-        def update_bg_preview(filename):
-            if filename:
-                bg_path = PROJECT_ROOT / "assets" / "backgrounds" / filename
-                return str(bg_path) if bg_path.exists() else None
-            return None
+        # 背景画像ギャラリーから選択
+        bg_gallery.select(
+            fn=handle_gallery_select,
+            inputs=[],
+            outputs=[bg_preview, selected_bg_filename]
+        )
         
+        # カスタム背景画像をアップロード
+        custom_bg_upload.change(
+            fn=handle_custom_upload,
+            inputs=[custom_bg_upload],
+            outputs=[bg_preview, selected_bg_filename]
+        )
+        
+        # BGMプレビューの更新
         def update_bgm_preview(filename):
             if filename:
                 bgm_path = PROJECT_ROOT / "assets" / "bgm" / filename
                 return str(bgm_path) if bgm_path.exists() else None
             return None
         
-        background_dropdown.change(
-            fn=update_bg_preview,
-            inputs=[background_dropdown],
-            outputs=[bg_preview]
-        )
-        
         bgm_dropdown.change(
             fn=update_bgm_preview,
             inputs=[bgm_dropdown],
             outputs=[bgm_preview]
+        )
+        
+        # 初期表示: 保存された設定から背景画像とBGMをプレビューに表示
+        def load_initial_previews(bg_filename, bgm_filename):
+            """起動時に保存された設定から背景画像とBGMをプレビューに表示"""
+            bg_path = None
+            if bg_filename:
+                bg_path = get_background_image_path(bg_filename)
+            
+            bgm_path = None
+            if bgm_filename:
+                bgm_file_path = PROJECT_ROOT / "assets" / "bgm" / bgm_filename
+                if bgm_file_path.exists():
+                    bgm_path = str(bgm_file_path)
+            
+            return bg_path, bgm_path
+        
+        app.load(
+            fn=load_initial_previews,
+            inputs=[selected_bg_filename, bgm_dropdown],
+            outputs=[bg_preview, bgm_preview]
         )
         
         # 動画生成
@@ -1094,7 +1708,7 @@ def create_ui() -> gr.Blocks:
             inputs=[
                 theme_input,
                 research_mode_dropdown,
-                background_dropdown,
+                selected_bg_filename,  # 選択中の背景画像ファイル名を使用
                 bgm_dropdown,
                 bgm_volume_slider,
                 fade_time_slider,
@@ -1134,6 +1748,82 @@ def create_ui() -> gr.Blocks:
             fn=render_video_from_assets,
             inputs=[audio_input, subtitle_input, background_input, bgm_dropdown_manual],
             outputs=[video_output_manual, video_file_output, render_log],
+            show_progress="full"
+        )
+        
+        # ========== こだわりステップモードのイベントハンドラ ==========
+        
+        # Step 0: 企画フェーズ
+        step_components["step0_execute_btn"].click(
+            fn=execute_step0_planning,
+            inputs=[
+                step_components["step0_theme"],
+                step_components["step0_mode"]
+            ],
+            outputs=[
+                step_components["step0_query1"],
+                step_components["step0_query2"],
+                step_components["step0_query3"],
+                step_components["step0_angle"]
+            ],
+            show_progress="full"
+        )
+        
+        # Step 0の出力をStep 1の入力に自動コピー
+        step_components["step0_query1"].change(
+            fn=lambda x: x,
+            inputs=[step_components["step0_query1"]],
+            outputs=[step_components["step1_query1"]]
+        )
+        step_components["step0_query2"].change(
+            fn=lambda x: x,
+            inputs=[step_components["step0_query2"]],
+            outputs=[step_components["step1_query2"]]
+        )
+        step_components["step0_query3"].change(
+            fn=lambda x: x,
+            inputs=[step_components["step0_query3"]],
+            outputs=[step_components["step1_query3"]]
+        )
+        
+        # Step 1: リサーチ & 台本フェーズ
+        step_components["step1_execute_btn"].click(
+            fn=execute_step1_scripting,
+            inputs=[
+                step_components["step0_theme"],  # テーマはStep 0から
+                step_components["step0_mode"],   # モードもStep 0から
+                step_components["step1_query1"],
+                step_components["step1_query2"],
+                step_components["step1_query3"],
+                step_components["step1_excluded_topics"]
+            ],
+            outputs=[
+                step_components["step1_title"],
+                step_components["step1_thumbnail"],
+                step_components["step1_description"],
+                step_components["step1_script_json"],
+                step_components["step1_log"]
+            ],
+            show_progress="full"
+        )
+        
+        # Step 2: 制作フェーズ
+        step_components["step2_execute_btn"].click(
+            fn=execute_step2_production,
+            inputs=[
+                step_components["step1_title"],
+                step_components["step1_description"],
+                step_components["step1_script_json"],
+                step_components["step2_background"],
+                step_components["step2_bgm"],
+                step_components["step2_bgm_volume"],
+                step_components["step2_speed"],
+                step_components["step2_spectrum"]
+            ],
+            outputs=[
+                step_components["step2_video"],
+                step_components["step2_log"]
+            ],
             show_progress="full"
         )
     

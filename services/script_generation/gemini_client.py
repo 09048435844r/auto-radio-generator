@@ -376,4 +376,27 @@ class GeminiClient(IScriptGenerator):
 - 各クエリは異なる観点から情報を集められるようにする
 - angleは視聴者が興味を持つような切り口を提案する
 """
+
+    def generate_packaging_prompt(self, theme: str, script_summary: str) -> str:
+        """packagingプロンプトを使用してメタデータを生成
+        
+        Args:
+            theme: テーマ
+            script_summary: 台本の要約
+            
+        Returns:
+            生成されたメタデータJSON文字列
+        """
+        # プロンプトマネージャーからpackagingプロンプトを取得
+        packaging_prompt = self.prompt_manager.get_prompt("packaging", "default")
+        
+        # 変数を置換
+        formatted_prompt = packaging_prompt.format(
+            theme=theme,
+            script_summary=script_summary
+        )
+        
+        # Geminiで生成
+        response = self.model.generate_content(formatted_prompt)
+        return response.text
     
