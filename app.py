@@ -36,6 +36,41 @@ _log_messages: list[str] = []
 # 設定マネージャー
 _settings_manager = SettingsManager()
 
+# カスタムCSS定義（Gradio 6.0対応: launch()で使用）
+CUSTOM_CSS = """
+/* 全体のフォントと背景 */
+.gradio-container { 
+    font-family: 'Helvetica Neue', Arial, sans-serif; 
+}
+
+/* カード風のスタイル */
+.group-container {
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+    background-color: #f9fafb;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.dark .group-container {
+    background-color: #1f2937;
+    border-color: #374151;
+}
+
+/* 強調ボタン */
+.primary-btn { 
+    font-weight: bold; 
+    font-size: 1.1em; 
+}
+
+/* ギャラリーの角丸 */
+.gallery-container {
+    border-radius: 8px;
+    overflow: hidden;
+}
+"""
+
 
 def clear_logs() -> None:
     """ログをクリア"""
@@ -1179,44 +1214,8 @@ def create_ui() -> gr.Blocks:
     # アセット一覧を取得
     assets = get_asset_choices()
     
-    # カスタムCSS定義
-    custom_css = """
-    /* 全体のフォントと背景 */
-    .gradio-container { 
-        font-family: 'Helvetica Neue', Arial, sans-serif; 
-    }
-    
-    /* カード風のスタイル */
-    .group-container {
-        border: 1px solid #e5e7eb;
-        border-radius: 12px;
-        padding: 20px;
-        margin-bottom: 20px;
-        background-color: #f9fafb;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-    }
-    
-    .dark .group-container {
-        background-color: #1f2937;
-        border-color: #374151;
-    }
-    
-    /* 強調ボタン */
-    .primary-btn { 
-        font-weight: bold; 
-        font-size: 1.1em; 
-    }
-    
-    /* ギャラリーの角丸 */
-    .gallery-container {
-        border-radius: 8px;
-        overflow: hidden;
-    }
-    """
-    
     with gr.Blocks(
-        title="自動ラジオ動画生成システム v3.0",
-        css=custom_css
+        title="自動ラジオ動画生成システム v3.0"
     ) as app:
         
         # ヘッダー
@@ -1848,7 +1847,8 @@ def main():
         server_port=None,  # 自動的に空いているポートを検索
         share=False,
         inbrowser=True,
-        theme=gr.themes.Soft()
+        theme=gr.themes.Soft(),
+        css=CUSTOM_CSS  # Gradio 6.0: CSSはlaunch()で指定
     )
 
 
