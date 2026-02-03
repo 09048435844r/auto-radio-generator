@@ -1126,7 +1126,7 @@ def _generate_youtube_metadata(
     """
     from services.script_generation.gemini_client import GeminiClient
     from core.settings_manager import SettingsManager
-    from core.config_loader import load_config
+    from core.models.config import load_config
     
     # 設定をロード
     config = load_config()
