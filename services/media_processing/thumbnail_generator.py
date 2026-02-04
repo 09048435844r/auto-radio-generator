@@ -83,10 +83,10 @@ class ThumbnailGenerator:
         # 3. タイトルテキストを描画
         thumbnail = self._draw_title_text(background, display_title)
         
-        # 4. 日付バッジを描画
-        thumbnail = self._draw_date_badge(thumbnail)
+        # 4. キャッチフレーズバッジを描画（AI生成のthumbnail_title、なければ日付）
+        thumbnail = self._draw_catchphrase_badge(thumbnail, thumbnail_title)
         
-        # 4. 保存
+        # 5. 保存
         output_path.parent.mkdir(parents=True, exist_ok=True)
         thumbnail.save(output_path, "PNG", quality=95)
         
@@ -474,22 +474,28 @@ class ThumbnailGenerator:
         # メインテキストを描画
         draw.text((x, y), text, font=font, fill=fill_color)
     
-    def _draw_date_badge(self, img: Image.Image) -> Image.Image:
-        """セーフエリア内の右上に日付バッジを描画（1:1トリミング対応）
+    def _draw_catchphrase_badge(self, img: Image.Image, catchphrase: str) -> Image.Image:
+        """セーフエリア内の右上にキャッチフレーズバッジを描画（1:1トリミング対応）
         
         Args:
             img: ベース画像
+            catchphrase: キャッチフレーズ（AI生成のthumbnail_title、空なら日付を使用）
         
         Returns:
             Image.Image: バッジ描画後の画像
         """
         draw = ImageDraw.Draw(img)
         
-        # 現在の日付を取得
-        current_date = datetime.now().strftime("%Y.%m.%d制作")
+        # キャッチフレーズが空なら日付を使用
+        if not catchphrase:
+            badge_text = datetime.now().strftime("%Y.%m.%d制作")
+            font_size = 45
+        else:
+            badge_text = catchphrase
+            # 7文字以内の短いフレーズなので大きめのフォント
+            font_size = 60
         
         # フォント設定
-        font_size = 45
         font = None
         for font_path in self.font_paths:
             try:
@@ -502,14 +508,14 @@ class ThumbnailGenerator:
             font = ImageFont.load_default()
         
         # テキストサイズを計測
-        bbox = draw.textbbox((0, 0), current_date, font=font)
+        bbox = draw.textbbox((0, 0), badge_text, font=font)
         text_width = bbox[2] - bbox[0]
         text_height = bbox[3] - bbox[1]
         
         # バッジの位置とサイズ
         margin = 50
-        padding_x = 20
-        padding_y = 15
+        padding_x = 25
+        padding_y = 20
         badge_width = text_width + padding_x * 2
         badge_height = text_height + padding_y * 2
         
@@ -543,7 +549,7 @@ class ThumbnailGenerator:
         # 白文字で描画
         draw.text(
             (text_x, text_y),
-            current_date,
+            badge_text,
             font=font,
             fill="#FFFFFF"
         )

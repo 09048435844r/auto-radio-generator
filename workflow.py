@@ -804,6 +804,17 @@ async def generate_video_workflow(
         )
         log(f"✓ YouTubeメタデータ生成: {metadata_path.name}")
         
+        # サムネイル画像を生成（AI生成のthumbnail_titleを使用）
+        thumbnail_generator = ThumbnailGenerator()
+        thumbnail_path = output_base / "thumbnail.png"
+        thumbnail_generator.generate(
+            title=generated_metadata.get("title", script.title),
+            thumbnail_title=generated_metadata.get("thumbnail_title", ""),
+            background_path=background_image,
+            output_path=thumbnail_path
+        )
+        log(f"✓ サムネイル画像生成: {thumbnail_path.name}")
+        
         # ログファイルを完了
         if log_writer:
             log_writer.finalize()
@@ -833,17 +844,6 @@ async def generate_video_workflow(
         formatted_description_parts.append(script.description)
         formatted_description_parts.append("#ずんだもん #VOICEVOX #AI #ラジオ")
         formatted_description = "\n\n".join(formatted_description_parts)
-        
-        # サムネイル画像を生成
-        thumbnail_generator = ThumbnailGenerator()
-        thumbnail_path = output_base / "thumbnail.png"
-        thumbnail_generator.generate(
-            title=script.title,
-            thumbnail_title=script.thumbnail_title,
-            background_path=background_image,
-            output_path=thumbnail_path
-        )
-        log(f"✓ サムネイル画像生成: {thumbnail_path.name}")
         
         # 総所要時間
         total_usage.total_duration_sec = time.time() - workflow_start
@@ -1007,6 +1007,18 @@ def run_workflow_sync(
                 theme=theme
             )
             callbacks.log(f"✓ YouTubeメタデータ生成: {metadata_path.name}")
+            
+            # サムネイル画像を生成（AI生成のthumbnail_titleを使用）
+            background_image = PROJECT_ROOT / config.yaml.paths.background_image
+            thumbnail_generator = ThumbnailGenerator()
+            thumbnail_path = output_base / "thumbnail.png"
+            thumbnail_generator.generate(
+                title=generated_metadata.get("title", scripting_result.script.title),
+                thumbnail_title=generated_metadata.get("thumbnail_title", ""),
+                background_path=background_image,
+                output_path=thumbnail_path
+            )
+            callbacks.log(f"✓ サムネイル画像生成: {thumbnail_path.name}")
             
             # ログファイルを完了
             if log_writer:
@@ -1188,6 +1200,25 @@ def _generate_youtube_metadata(
             
             metadata = json.loads(json_text)
             
+            # チャプター情報をテキスト化
+            chapters_text = ""
+            if chapters:
+                chapter_lines = []
+                for chapter in chapters:
+                    # 秒をMM:SS形式に変換
+                    total_seconds = int(chapter.start_time_sec)
+                    minutes = total_seconds // 60
+                    seconds = total_seconds % 60
+                    timestamp = f"{minutes:02d}:{seconds:02d}"
+                    chapter_lines.append(f"{timestamp} {chapter.title}")
+                
+                chapters_text = "\n".join(chapter_lines)
+            
+            # AI生成の説明文にチャプター情報を追記
+            ai_description = metadata.get("description", "")
+            if chapters_text:
+                metadata["description"] = ai_description + "\n\n【目次】\n" + chapters_text
+            
             lines = [
                 "=" * 50,
                 "YouTube 投稿用メタデータ (AI生成)",
@@ -1203,25 +1234,6 @@ def _generate_youtube_metadata(
                 metadata.get("description", ""),
                 "",
             ]
-            
-            # チャプター情報を追加
-            if chapters:
-                lines.extend([
-                    "【チャプター】",
-                    "※ 以下をYouTubeの説明欄にコピー＆ペーストしてください",
-                    "",
-                ])
-                
-                for chapter in chapters:
-                    # 秒をMM:SS形式に変換
-                    total_seconds = int(chapter.start_time_sec)
-                    minutes = total_seconds // 60
-                    seconds = total_seconds % 60
-                    timestamp = f"{minutes:02d}:{seconds:02d}"
-                    
-                    lines.append(f"{timestamp} {chapter.title}")
-                
-                lines.append("")
             
             # ハッシュタグ候補（説明文から抽出）
             description = metadata.get("description", "")
