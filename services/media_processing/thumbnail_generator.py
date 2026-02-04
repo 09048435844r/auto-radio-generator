@@ -80,11 +80,11 @@ class ThumbnailGenerator:
         # 2. 背景を暗くしてブラーをかける（視認性向上）
         background = self._apply_effects(background, darken_factor, blur_radius)
         
-        # 3. タイトルテキストを描画
+        # 3. タイトルテキストを描画（中央にthumbnail_titleを表示）
         thumbnail = self._draw_title_text(background, display_title)
         
-        # 4. キャッチフレーズバッジを描画（AI生成のthumbnail_title、なければ日付）
-        thumbnail = self._draw_catchphrase_badge(thumbnail, thumbnail_title)
+        # 4. 日付バッジを描画（右上に日付を表示）
+        thumbnail = self._draw_date_badge(thumbnail)
         
         # 5. 保存
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -474,26 +474,20 @@ class ThumbnailGenerator:
         # メインテキストを描画
         draw.text((x, y), text, font=font, fill=fill_color)
     
-    def _draw_catchphrase_badge(self, img: Image.Image, catchphrase: str) -> Image.Image:
-        """セーフエリア内の右上にキャッチフレーズバッジを描画（1:1トリミング対応）
+    def _draw_date_badge(self, img: Image.Image) -> Image.Image:
+        """セーフエリア内の右上に日付バッジを描画（1:1トリミング対応）
         
         Args:
             img: ベース画像
-            catchphrase: キャッチフレーズ（AI生成のthumbnail_title、空なら日付を使用）
         
         Returns:
             Image.Image: バッジ描画後の画像
         """
         draw = ImageDraw.Draw(img)
         
-        # キャッチフレーズが空なら日付を使用
-        if not catchphrase:
-            badge_text = datetime.now().strftime("%Y.%m.%d制作")
-            font_size = 45
-        else:
-            badge_text = catchphrase
-            # 7文字以内の短いフレーズなので大きめのフォント
-            font_size = 60
+        # 現在の日付を取得
+        badge_text = datetime.now().strftime("%Y.%m.%d制作")
+        font_size = 45
         
         # フォント設定
         font = None

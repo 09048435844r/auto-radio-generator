@@ -1214,10 +1214,12 @@ def _generate_youtube_metadata(
                 
                 chapters_text = "\n".join(chapter_lines)
             
-            # AI生成の説明文にチャプター情報を追記
+            # チャプター情報を概要欄の先頭に配置
             ai_description = metadata.get("description", "")
             if chapters_text:
-                metadata["description"] = ai_description + "\n\n【目次】\n" + chapters_text
+                metadata["description"] = "【目次】\n" + chapters_text + "\n\n" + ai_description
+            else:
+                metadata["description"] = ai_description
             
             lines = [
                 "=" * 50,
