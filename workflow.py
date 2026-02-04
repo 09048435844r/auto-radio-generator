@@ -1133,7 +1133,7 @@ def _generate_youtube_metadata(
     
     # Geminiクライアントを初期化（configを渡す）
     gemini_client = GeminiClient(config)
-    settings = SettingsManager().load_settings()
+    settings = SettingsManager().load()
     
     # 台本の要約を生成
     script_summary = ""
