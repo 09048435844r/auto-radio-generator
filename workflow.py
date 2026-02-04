@@ -1149,10 +1149,17 @@ def _generate_youtube_metadata(
     import json
     metadata = {}
     try:
+        print(f"[DEBUG] メタデータ生成開始")
+        print(f"[DEBUG] テーマ: {script.title}")
+        print(f"[DEBUG] 台本要約: {script_summary[:100]}...")
+        
         metadata_result = gemini_client.generate_packaging_prompt(
             theme=script.title or "テーマ不明",
             script_summary=script_summary
         )
+        
+        print(f"[DEBUG] Geminiレスポンス受信: {len(metadata_result)} chars")
+        print(f"[DEBUG] レスポンス内容: {metadata_result[:200]}...")
         
         if metadata_result:
             # JSONをパースして整形（マークダウンコードブロックを除去）
@@ -1233,7 +1240,12 @@ def _generate_youtube_metadata(
             ]
             
     except Exception as e:
-        # エラー時はフォールバック
+        # エラー時はフォールバックし、詳細をログ出力
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"[ERROR] メタデータ生成エラー: {str(e)}")
+        print(f"[ERROR] Traceback:\n{error_detail}")
+        
         lines = [
             "=" * 50,
             "YouTube 投稿用メタデータ",
