@@ -796,7 +796,7 @@ async def generate_video_workflow(
         
         # YouTube用メタデータを生成
         metadata_path = output_base / "metadata.txt"
-        _generate_youtube_metadata(
+        generated_metadata = _generate_youtube_metadata(
             script=script,
             chapters=synthesis_result.chapters,
             output_path=metadata_path
@@ -863,14 +863,14 @@ async def generate_video_workflow(
             script=script,
             audio_path=synthesis_result.audio_path,
             subtitle_path=synthesis_result.subtitle_path,
-            duration_sec=render_result.duration_sec,
+            duration_sec=total_usage.total_duration_sec,
             file_size_mb=render_result.file_size_mb,
             usage=total_usage,
             cost=cost,
             cost_report=cost_report,
-            metadata_content=metadata_content,
-            formatted_title=formatted_title,
-            formatted_description=formatted_description
+            metadata_content=metadata_path.read_text(encoding="utf-8") if metadata_path.exists() else "",
+            formatted_title=generated_metadata.get("title", script.title),
+            formatted_description=generated_metadata.get("description", script.description)
         )
         
     except Exception as e:
@@ -999,7 +999,7 @@ def run_workflow_sync(
             
             # YouTube用メタデータを生成
             metadata_path = output_base / "metadata.txt"
-            _generate_youtube_metadata(
+            generated_metadata = _generate_youtube_metadata(
                 script=scripting_result.script,
                 chapters=production_result.chapters,
                 output_path=metadata_path
@@ -1061,8 +1061,8 @@ def run_workflow_sync(
                 cost=cost,
                 cost_report=cost_report,
                 metadata_content=metadata_content,
-                formatted_title=formatted_title,
-                formatted_description=formatted_description
+                formatted_title=generated_metadata.get("title", scripting_result.script.title),
+                formatted_description=generated_metadata.get("description", scripting_result.script.description)
             )
             
         except Exception as e:
@@ -1116,13 +1116,16 @@ def _generate_youtube_metadata(
     script: Script,
     chapters: list[ChapterMarker],
     output_path: Path
-) -> None:
+) -> dict:
     """YouTube投稿用のメタデータファイルを生成（packagingプロンプト使用）
     
     Args:
         script: 台本データ
         chapters: チャプターマーカーリスト
         output_path: 出力パス
+        
+    Returns:
+        生成されたメタデータ辞書 {"title": str, "thumbnail_title": str, "description": str}
     """
     from services.script_generation.gemini_client import GeminiClient
     from core.settings_manager import SettingsManager
@@ -1143,6 +1146,8 @@ def _generate_youtube_metadata(
         script_summary = " ".join(dialogue_texts)[:200] + "..." if len(" ".join(dialogue_texts)) > 200 else " ".join(dialogue_texts)
     
     # packagingプロンプトでメタデータを生成
+    import json
+    metadata = {}
     try:
         metadata_result = gemini_client.generate_packaging_prompt(
             theme=script.title or "テーマ不明",
@@ -1150,9 +1155,15 @@ def _generate_youtube_metadata(
         )
         
         if metadata_result:
-            # JSONをパースして整形
-            import json
-            metadata = json.loads(metadata_result)
+            # JSONをパースして整形（マークダウンコードブロックを除去）
+            import re
+            json_text = metadata_result.strip()
+            if json_text.startswith("```"):
+                # コードブロックを除去
+                json_text = re.sub(r'^```(?:json)?\s*\n', '', json_text)
+                json_text = re.sub(r'\n```\s*$', '', json_text)
+            
+            metadata = json.loads(json_text)
             
             lines = [
                 "=" * 50,
@@ -1255,3 +1266,9 @@ def _generate_youtube_metadata(
     ])
     
     output_path.write_text("\n".join(lines), encoding="utf-8")
+    
+    # video_metadata.jsonとして保存
+    metadata_json_path = output_path.parent / "video_metadata.json"
+    metadata_json_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+    
+    return metadata

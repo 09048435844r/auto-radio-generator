@@ -68,6 +68,33 @@ class PromptManager:
         except KeyError as e:
             raise ValueError(f"プロンプトの変数展開に失敗しました。不足している変数: {e}")
     
+    def get_prompt(self, section: str, key: str = "default") -> str:
+        """汎用プロンプト取得メソッド
+        
+        Args:
+            section: プロンプトセクション名 (例: packaging, research, script)
+            key: プロンプトキー (デフォルト: "default")
+        
+        Returns:
+            str: プロンプトテキスト
+        """
+        if section not in self._prompts:
+            raise ValueError(f"プロンプトセクションが見つかりません: {section}")
+        
+        section_data = self._prompts[section]
+        
+        # セクションが辞書の場合、keyで取得
+        if isinstance(section_data, dict):
+            prompt = section_data.get(key, "")
+            if not prompt:
+                raise ValueError(f"プロンプトが見つかりません: {section}.{key}")
+            return prompt
+        # セクションが文字列の場合、そのまま返す
+        elif isinstance(section_data, str):
+            return section_data
+        else:
+            raise ValueError(f"プロンプトの形式が不正です: {section}")
+    
     def get_component(self, name: str) -> str:
         """再利用可能なコンポーネントを取得
         

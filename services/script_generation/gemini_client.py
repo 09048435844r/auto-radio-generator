@@ -390,7 +390,10 @@ class GeminiClient(IScriptGenerator):
             script_summary=script_summary
         )
         
-        # Geminiで生成
-        response = self.model.generate_content(formatted_prompt)
-        return response.text
+        # Geminiで生成（_call_apiメソッドを使用）
+        response_text, _ = self._call_api(
+            system_prompt="",
+            user_prompt=formatted_prompt
+        )
+        return response_text
     
