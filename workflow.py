@@ -799,7 +799,8 @@ async def generate_video_workflow(
         generated_metadata = _generate_youtube_metadata(
             script=script,
             chapters=synthesis_result.chapters,
-            output_path=metadata_path
+            output_path=metadata_path,
+            theme=theme
         )
         log(f"✓ YouTubeメタデータ生成: {metadata_path.name}")
         
@@ -1002,7 +1003,8 @@ def run_workflow_sync(
             generated_metadata = _generate_youtube_metadata(
                 script=scripting_result.script,
                 chapters=production_result.chapters,
-                output_path=metadata_path
+                output_path=metadata_path,
+                theme=theme
             )
             callbacks.log(f"✓ YouTubeメタデータ生成: {metadata_path.name}")
             
@@ -1115,7 +1117,8 @@ def scan_assets(project_root: Optional[Path] = None) -> dict[str, list[str]]:
 def _generate_youtube_metadata(
     script: Script,
     chapters: list[ChapterMarker],
-    output_path: Path
+    output_path: Path,
+    theme: str = ""
 ) -> dict:
     """YouTube投稿用のメタデータファイルを生成（packagingプロンプト使用）
     
@@ -1123,6 +1126,7 @@ def _generate_youtube_metadata(
         script: 台本データ
         chapters: チャプターマーカーリスト
         output_path: 出力パス
+        theme: 元のテーマ（script.titleが空の場合に使用）
         
     Returns:
         生成されたメタデータ辞書 {"title": str, "thumbnail_title": str, "description": str}
@@ -1149,12 +1153,15 @@ def _generate_youtube_metadata(
     import json
     metadata = {}
     try:
+        # script.titleが空の場合は元のthemeを使用
+        effective_theme = script.title or theme or "テーマ不明"
+        
         print(f"[DEBUG] メタデータ生成開始")
-        print(f"[DEBUG] テーマ: {script.title}")
+        print(f"[DEBUG] テーマ: {effective_theme}")
         print(f"[DEBUG] 台本要約: {script_summary[:100]}...")
         
         metadata_result = gemini_client.generate_packaging_prompt(
-            theme=script.title or "テーマ不明",
+            theme=effective_theme,
             script_summary=script_summary
         )
         
