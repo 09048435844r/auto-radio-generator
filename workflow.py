@@ -823,9 +823,10 @@ async def generate_video_workflow(
         # メタデータの内容を読み込んでUIへ渡す
         metadata_content = metadata_path.read_text(encoding="utf-8")
         
-        # 日付入りタイトルと概要欄結合版を生成
+        # 日付入りタイトルを生成（AI生成タイトル + 日付）
         creation_date = datetime.now().strftime("%Y.%m.%d")
-        formatted_title = f"{script.title} ({creation_date}制作)"
+        ai_title = generated_metadata.get("title", script.title)
+        formatted_title = f"{ai_title} ({creation_date}制作)"
         
         # チャプターリストを生成
         chapter_lines = []
@@ -870,7 +871,7 @@ async def generate_video_workflow(
             cost=cost,
             cost_report=cost_report,
             metadata_content=metadata_path.read_text(encoding="utf-8") if metadata_path.exists() else "",
-            formatted_title=generated_metadata.get("title", script.title),
+            formatted_title=formatted_title,
             formatted_description=generated_metadata.get("description", script.description)
         )
         
@@ -1028,9 +1029,10 @@ def run_workflow_sync(
             # メタデータの内容を読み込んでUIへ渡す
             metadata_content = metadata_path.read_text(encoding="utf-8")
             
-            # 日付入りタイトルと概要欄結合版を生成
+            # 日付入りタイトルを生成（AI生成タイトル + 日付）
             creation_date = datetime.now().strftime("%Y.%m.%d")
-            formatted_title = f"{scripting_result.script.title} ({creation_date}制作)"
+            ai_title = generated_metadata.get("title", scripting_result.script.title)
+            formatted_title = f"{ai_title} ({creation_date}制作)"
             
             # チャプターリストを生成
             chapter_lines = []
@@ -1075,7 +1077,7 @@ def run_workflow_sync(
                 cost=cost,
                 cost_report=cost_report,
                 metadata_content=metadata_content,
-                formatted_title=generated_metadata.get("title", scripting_result.script.title),
+                formatted_title=formatted_title,
                 formatted_description=generated_metadata.get("description", scripting_result.script.description)
             )
             
