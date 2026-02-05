@@ -1183,24 +1183,9 @@ def _generate_youtube_metadata(
         print(f"[DEBUG] レスポンス内容: {metadata_result[:200]}...")
         
         if metadata_result:
-            # JSONをパースして整形（マークダウンコードブロックを除去）
-            import re
-            
-            # ```json ... ``` ブロックを抽出
-            json_match = re.search(r'```(?:json)?\s*\n(.*?)\n```', metadata_result, re.DOTALL)
-            if json_match:
-                json_text = json_match.group(1).strip()
-            else:
-                json_text = metadata_result.strip()
-            
-            # JSONオブジェクトのみを抽出（余分なテキストを除去）
-            json_match = re.search(r'(\{.*\})', json_text, re.DOTALL)
-            if json_match:
-                json_text = json_match.group(1)
-            
-            print(f"[DEBUG] 抽出されたJSON: {json_text[:200]}...")
-            
-            metadata = json.loads(json_text)
+            # JSONモードでは、レスポンスは常に正しいJSON形式
+            print(f"[DEBUG] JSONレスポンス: {metadata_result[:200]}...")
+            metadata = json.loads(metadata_result.strip())
             
             # チャプター情報をテキスト化
             chapters_text = ""

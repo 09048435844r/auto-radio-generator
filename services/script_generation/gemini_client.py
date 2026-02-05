@@ -217,6 +217,7 @@ class GeminiClient(IScriptGenerator):
             config=types.GenerateContentConfig(
                 max_output_tokens=self.max_tokens,
                 temperature=0.85,
+                response_mime_type="application/json",  # JSONモード有効化
             )
         )
         
@@ -248,23 +249,12 @@ class GeminiClient(IScriptGenerator):
         return prompt
     
     def _parse_response(self, response_text: str) -> Script:
-        """APIレスポンスからScriptオブジェクトを生成"""
-        # JSONブロックを抽出
-        json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
-        if json_match:
-            json_str = json_match.group(1)
-        else:
-            # JSONブロックがない場合、全体をJSONとして解釈
-            json_str = response_text.strip()
+        """APIレスポンスからScriptオブジェクトを生成
         
-        try:
-            data = json.loads(json_str)
-        except json.JSONDecodeError as e:
-            console.print(f"[yellow]JSON解析エラー、再解析を試みます...[/yellow]")
-            # 余分な文字を削除して再試行
-            json_str = re.sub(r'^[^{]*', '', json_str)
-            json_str = re.sub(r'[^}]*$', '', json_str)
-            data = json.loads(json_str)
+        JSONモード有効化により、response_textは常に正しいJSON形式で返される
+        """
+        # JSONモードでは、レスポンスは常に正しいJSON形式
+        data = json.loads(response_text.strip())
         
         # Scriptオブジェクトに変換（sectionフィールドも含む）
         dialogue = [
