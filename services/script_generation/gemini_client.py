@@ -1,7 +1,9 @@
 """Gemini APIを使用した台本生成クライアント"""
 import json
+import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 from google import genai
@@ -138,6 +140,30 @@ class GeminiClient(IScriptGenerator):
         Note:
             API使用量は self.last_usage で取得可能
         """
+        
+        # Mock Mode Check
+        mock_mode = self.config.yaml.dev.mock_mode if hasattr(self.config.yaml, 'dev') else False
+        if mock_mode:
+            mock_data_path = self.config.yaml.dev.mock_data_path if hasattr(self.config.yaml.dev, 'mock_data_path') else "tests/mock_data"
+            mock_file = Path(mock_data_path) / "script.json"
+            
+            if mock_file.exists():
+                console.print(f"[yellow]⚠ MOCK MODE: Using data from {mock_file}[/yellow]")
+                with open(mock_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    script_obj = Script(**data)
+                    # 使用量をリセット（Mockなので0）
+                    self.last_usage = GeminiUsage(
+                        input_tokens=0,
+                        output_tokens=0,
+                        request_count=0,
+                        model_name="mock"
+                    )
+                    return script_obj
+            else:
+                console.print(f"[red]✗ Mock data not found at {mock_file}[/red]")
+                console.print(f"[yellow]  Falling back to normal API execution...[/yellow]")
+        
         console.print(f"[cyan]Gemini で台本を生成中...[/cyan]")
         console.print(f"  テーマ: {theme}")
         console.print(f"  リサーチデータ: {'あり' if research_data else 'なし'}")
@@ -175,7 +201,8 @@ class GeminiClient(IScriptGenerator):
         self.last_usage = None  # リセット
         
         try:
-            response_text, usage = self._call_api(system_prompt, user_prompt)
+            # response_schemaを使用してスキーマ検証を有効化
+            response_text, usage = self._call_api(system_prompt, user_prompt, use_schema=True)
             self.last_usage = usage
             script = self._parse_response(response_text)
             
@@ -192,7 +219,7 @@ class GeminiClient(IScriptGenerator):
                 original_model = self.model_name
                 self.model_name = self.fallback_model
                 try:
-                    response_text, usage = self._call_api(system_prompt, user_prompt)
+                    response_text, usage = self._call_api(system_prompt, user_prompt, use_schema=True)
                     self.last_usage = usage
                     script = self._parse_response(response_text)
                     return script
@@ -200,12 +227,27 @@ class GeminiClient(IScriptGenerator):
                     self.model_name = original_model
             raise
     
-    def _call_api(self, system_prompt: str, user_prompt: str) -> tuple[str, GeminiUsage]:
+    def _call_api(self, system_prompt: str, user_prompt: str, use_schema: bool = False) -> tuple[str, GeminiUsage]:
         """Gemini APIを呼び出す
+        
+        Args:
+            system_prompt: システムプロンプト
+            user_prompt: ユーザープロンプト
+            use_schema: Scriptスキーマを使用するかどうか
         
         Returns:
             tuple[str, GeminiUsage]: (レスポンステキスト, 使用量)
         """
+        config_params = {
+            "max_output_tokens": self.max_tokens,
+            "temperature": 0.85,
+            "response_mime_type": "application/json",  # JSONモード有効化
+        }
+        
+        # 台本生成時はスキーマを指定して構造化出力を強制
+        if use_schema:
+            config_params["response_schema"] = Script
+        
         response = self.client.models.generate_content(
             model=self.model_name,
             contents=[
@@ -214,11 +256,7 @@ class GeminiClient(IScriptGenerator):
                     parts=[types.Part(text=f"{system_prompt}\n\n{user_prompt}")]
                 )
             ],
-            config=types.GenerateContentConfig(
-                max_output_tokens=self.max_tokens,
-                temperature=0.85,
-                response_mime_type="application/json",  # JSONモード有効化
-            )
+            config=types.GenerateContentConfig(**config_params)
         )
         
         # 使用量を取得
@@ -251,26 +289,29 @@ class GeminiClient(IScriptGenerator):
     def _parse_response(self, response_text: str) -> Script:
         """APIレスポンスからScriptオブジェクトを生成
         
-        JSONモード有効化により、response_textは常に正しいJSON形式で返される
+        JSONモード + response_schemaにより、response_textは常に正しいJSON形式で返される
+        Pydanticモデルで厳格なバリデーションを実施
         """
-        # JSONモードでは、レスポンスは常に正しいJSON形式
-        data = json.loads(response_text.strip())
-        
-        # Scriptオブジェクトに変換（sectionフィールドも含む）
-        dialogue = [
-            DialogueLine(
-                speaker_id=line["speaker_id"],
-                text=line["text"],
-                section=line.get("section")  # セクションマーカー（オプション）
-            )
-            for line in data.get("dialogue", [])
-        ]
-        
-        return Script(
-            title=data.get("title", "無題"),
-            description=data.get("description", ""),
-            dialogue=dialogue
-        )
+        try:
+            # JSONをパース
+            json_data = json.loads(response_text.strip())
+            
+            # Pydanticモデルでバリデーション（ここで検証エラーなら例外が出る）
+            script_obj = Script(**json_data)
+            
+            console.print(f"[green]✓ Pydanticバリデーション成功[/green]")
+            console.print(f"  総ターン数: {script_obj.total_turns}")
+            
+            return script_obj
+            
+        except json.JSONDecodeError as e:
+            console.print(f"[red]✗ JSON解析エラー: {e}[/red]")
+            console.print(f"[dim]レスポンス: {response_text[:200]}...[/dim]")
+            raise
+        except Exception as e:
+            console.print(f"[red]✗ Pydanticバリデーションエラー: {e}[/red]")
+            console.print(f"[dim]JSON: {response_text[:200]}...[/dim]")
+            raise
     
     def _build_research_plan_prompt(self, mode: str) -> str:
         """検索計画作成用のシステムプロンプトを構築

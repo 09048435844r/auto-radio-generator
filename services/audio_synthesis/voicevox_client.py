@@ -1,5 +1,6 @@
 """VOICEVOX APIを使用した音声合成クライアント"""
 import asyncio
+import shutil
 import textwrap
 import wave
 from io import BytesIO
@@ -53,6 +54,35 @@ class VoicevoxClient(IAudioSynthesizer):
             speed_scale_override: UIからの話速指定（優先される）
         """
         output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Mock Mode Check
+        mock_mode = self.config.yaml.dev.mock_mode if hasattr(self.config.yaml, 'dev') else False
+        if mock_mode:
+            mock_data_path = self.config.yaml.dev.mock_data_path if hasattr(self.config.yaml.dev, 'mock_data_path') else "tests/mock_data"
+            mock_audio_file = Path(mock_data_path) / "audio" / "combined_audio.wav"
+            output_audio_path = output_dir / "combined_audio.wav"
+            
+            if mock_audio_file.exists():
+                console.print(f"[yellow]⚠ MOCK MODE: Using audio from {mock_audio_file}[/yellow]")
+                # Mockファイルを出力先にコピー
+                shutil.copy(mock_audio_file, output_audio_path)
+                
+                # Mockファイルの情報を取得
+                audio_segment = AudioSegment.from_wav(str(mock_audio_file))
+                duration_sec = len(audio_segment) / 1000.0
+                
+                console.print(f"[green]✓ Mock音声を使用しました[/green] ({duration_sec:.1f}秒)")
+                
+                # SynthesisResultを返す（チャプターは空）
+                return SynthesisResult(
+                    audio_path=output_audio_path,
+                    subtitle_path=None,  # Mockではサブタイトルなし
+                    duration_sec=duration_sec,
+                    chapters=[]  # Mockではチャプターなし
+                )
+            else:
+                console.print(f"[red]✗ Mock audio not found at {mock_audio_file}[/red]")
+                console.print(f"[yellow]  Falling back to normal VOICEVOX synthesis...[/yellow]")
         
         # UIからの指定がconfigより優先
         speed_scale = speed_scale_override if speed_scale_override is not None else self.audio_config.speed_scale

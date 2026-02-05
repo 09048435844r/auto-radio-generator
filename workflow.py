@@ -890,7 +890,8 @@ def run_workflow_sync(
     theme: str,
     overrides: Optional[UIOverrides] = None,
     log_callback: Optional[Callable[[str], None]] = None,
-    progress_callback: Optional[Callable[[float, str], None]] = None
+    progress_callback: Optional[Callable[[float, str], None]] = None,
+    use_mock: bool = False
 ) -> WorkflowResult:
     """同期版ワークフロー実行（Gradioから呼び出し用）
     
@@ -902,6 +903,7 @@ def run_workflow_sync(
         overrides: UIからのパラメータオーバーライド
         log_callback: ログ出力用コールバック関数
         progress_callback: 進捗コールバック (ratio, description)
+        use_mock: Mockモードを使用するか（開発・テスト用）
     
     Returns:
         WorkflowResult: 実行結果（Usage/Cost情報含む）
@@ -911,6 +913,7 @@ def run_workflow_sync(
         overrides_obj = overrides or UIOverrides()
         callbacks = ProgressCallback(log_callback, progress_callback)
         log_writer: Optional[LogFileWriter] = None
+        original_mock_mode = None  # 元のmock_mode設定を保存
         
         try:
             # ========== Phase 0: 設定読み込み・前提条件チェック ==========
@@ -918,6 +921,21 @@ def run_workflow_sync(
             callbacks.log("設定を読み込み中...")
             
             config = load_config(PROJECT_ROOT)
+            
+            # Mockモードのオーバーライド
+            if use_mock:
+                callbacks.log("🔴 Mockモードが有効化されました")
+                # 元の設定を保存
+                if hasattr(config.yaml, 'dev'):
+                    original_mock_mode = config.yaml.dev.mock_mode
+                else:
+                    # devセクションが存在しない場合は作成
+                    from types import SimpleNamespace
+                    config.yaml.dev = SimpleNamespace(mock_mode=False, mock_data_path="tests/mock_data")
+                    original_mock_mode = False
+                # mock_modeをTrueにオーバーライド
+                config.yaml.dev.mock_mode = True
+            
             config = apply_overrides(config, overrides_obj)
             
             # 素材パスのオーバーライド
@@ -1090,6 +1108,12 @@ def run_workflow_sync(
                 log_writer.finalize()
             
             return WorkflowResult(success=False, error_message=error_msg)
+        
+        finally:
+            # Mockモード設定を元に戻す
+            if use_mock and original_mock_mode is not None:
+                config.yaml.dev.mock_mode = original_mock_mode
+                callbacks.log("🔴 Mockモード設定を元に戻しました")
     
     return asyncio.run(_run_phases())
 

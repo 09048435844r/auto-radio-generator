@@ -1,5 +1,8 @@
 """Perplexity APIを使用したリサーチクライアント"""
 import asyncio
+import os
+import json
+from pathlib import Path
 from openai import OpenAI
 from rich.console import Console
 
@@ -38,6 +41,23 @@ class PerplexityResearcher(IResearcher):
     
     async def research(self, topic: str, mode: ResearchMode) -> ResearchResult:
         """テーマについてリサーチを実行する"""
+        
+        # Mock Mode Check
+        mock_mode = self.config.yaml.dev.mock_mode if hasattr(self.config.yaml, 'dev') else False
+        if mock_mode:
+            mock_data_path = self.config.yaml.dev.mock_data_path if hasattr(self.config.yaml.dev, 'mock_data_path') else "tests/mock_data"
+            mock_file = Path(mock_data_path) / "research.json"
+            
+            if mock_file.exists():
+                console.print(f"[yellow]⚠ MOCK MODE: Using data from {mock_file}[/yellow]")
+                with open(mock_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    # Pydanticの後方互換性機能により、古い形式も自動変換される
+                    return ResearchResult(**data)
+            else:
+                console.print(f"[red]✗ Mock data not found at {mock_file}[/red]")
+                console.print(f"[yellow]  Falling back to normal API execution...[/yellow]")
+        
         console.print(f"[cyan]Perplexity でリサーチ中...[/cyan]")
         console.print(f"  テーマ: {topic}")
         console.print(f"  モード: {mode}")

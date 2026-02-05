@@ -614,6 +614,7 @@ def generate_video(
     fade_time: float,
     speed_scale: float,
     enable_spectrum: bool,
+    use_mock: bool = False,
     progress=gr.Progress()
 ) -> tuple[str | None, str, str, str, str]:
     """動画生成を実行
@@ -627,6 +628,7 @@ def generate_video(
         fade_time: フェードイン/アウト時間 (秒)
         speed_scale: 音声スピード (0.8-1.5)
         enable_spectrum: スペクトラム表示
+        use_mock: Mockモードを使用するか
         progress: Gradio進捗バー
     
     Returns:
@@ -670,7 +672,8 @@ def generate_video(
         theme=theme.strip(),
         overrides=overrides,
         log_callback=log_callback,
-        progress_callback=progress_callback
+        progress_callback=progress_callback,
+        use_mock=use_mock
     )
     
     # 成功時に設定を保存
@@ -1362,6 +1365,13 @@ def create_ui() -> gr.Blocks:
                             with gr.Group(elem_classes="group-container"):
                                 gr.Markdown("### 🚀 生成アクション")
                                 
+                                # Mockモード用チェックボックス
+                                use_mock = gr.Checkbox(
+                                    label="🔴【開発用】Mockモード (リサーチ・台本・音声を固定データでスキップ)",
+                                    value=False,
+                                    info="APIを使わずにtests/mock_dataの固定データを使用します（開発・テスト用）"
+                                )
+                                
                                 # 実行ボタン
                                 with gr.Row():
                                     generate_btn = gr.Button(
@@ -1712,7 +1722,8 @@ def create_ui() -> gr.Blocks:
                 bgm_volume_slider,
                 fade_time_slider,
                 speed_slider,
-                spectrum_checkbox
+                spectrum_checkbox,
+                use_mock  # Mockモードチェックボックス
             ],
             outputs=[video_output, log_output, cost_output, title_output, description_output],
             show_progress="full"
