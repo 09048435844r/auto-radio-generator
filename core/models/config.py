@@ -90,6 +90,7 @@ class VideoRendererConfig(BaseModel):
     output_codec: str = "libx264"
     output_audio_codec: str = "aac"
     output_audio_bitrate: str = "192k"
+    use_gpu: bool = True  # GPU加速（NVENC）を使用
     bgm_volume: float = 0.15
     bgm_fade_in_sec: float = 3.0
     bgm_fade_out_sec: float = 3.0
@@ -129,6 +130,12 @@ class PersonalitiesConfig(BaseModel):
     )
 
 
+class DevConfig(BaseModel):
+    """開発用設定（Mockモード等）"""
+    mock_mode: bool = Field(default=False)
+    mock_data_path: str = Field(default="tests/mock_data")
+
+
 class YamlConfig(BaseModel):
     """YAML設定ファイル全体"""
     researcher: ResearcherConfig = Field(default_factory=ResearcherConfig)
@@ -143,6 +150,7 @@ class YamlConfig(BaseModel):
     )
     paths: PathsConfig = Field(default_factory=PathsConfig)
     personalities: PersonalitiesConfig = Field(default_factory=PersonalitiesConfig)
+    dev: DevConfig = Field(default_factory=DevConfig)  # 開発用設定
 
 
 # =============================================================================
