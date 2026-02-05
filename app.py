@@ -811,7 +811,7 @@ def generate_script_only(
             "description": script.description,
             "dialogue": [
                 {
-                    "speaker_id": line.speaker_id,
+                    "speaker": line.speaker,
                     "text": line.text,
                     "section": line.section
                 }
@@ -876,8 +876,14 @@ def synthesize_audio_from_script(
         
         dialogue_lines = []
         for line_dict in script_dict.get("dialogue", []):
+            # speaker_idからspeakerへの変換（後方互換性）
+            speaker = line_dict.get("speaker")
+            if not speaker:
+                # 古い形式のspeaker_idをspeakerに変換
+                speaker_id = line_dict.get("speaker_id", "main")
+                speaker = "A" if speaker_id == "main" else "B"
             dialogue_lines.append(DialogueLine(
-                speaker_id=line_dict.get("speaker_id", "main"),
+                speaker=speaker,
                 text=line_dict.get("text", ""),
                 section=line_dict.get("section")
             ))
@@ -1184,7 +1190,7 @@ def generate_script_from_research(
             "description": script.description,
             "dialogue": [
                 {
-                    "speaker_id": line.speaker_id,
+                    "speaker": line.speaker,
                     "text": line.text,
                     "section": line.section
                 }

@@ -81,8 +81,8 @@ async def main():
     # 対話の一部を表示
     console.print("\n[dim]対話プレビュー（最初の5行）:[/dim]")
     for line in script.dialogue[:5]:
-        speaker_color = "yellow" if line.speaker_id == "main" else "magenta"
-        console.print(f"  [{speaker_color}][{line.speaker_id}][/{speaker_color}] {line.text[:50]}...")
+        speaker_color = "yellow" if line.speaker == "A" else "magenta"
+        console.print(f"  [{speaker_color}][{line.speaker}][/{speaker_color}] {line.text[:50]}...")
     if len(script.dialogue) > 5:
         console.print(f"  [dim]... 他 {len(script.dialogue) - 5} 行[/dim]")
     

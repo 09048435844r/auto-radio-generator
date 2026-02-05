@@ -60,8 +60,8 @@ class IScriptGenerator(ABC):
   "title": "YouTube動画のタイトル案（魅力的で視聴者の興味を引くもの）",
   "description": "YouTubeの概要欄テキスト。ハッシュタグも含める。",
   "dialogue": [
-    {{"speaker_id": "main", "text": "セリフ..."}},
-    {{"speaker_id": "sub", "text": "セリフ..."}},
+    {{"speaker": "A", "text": "セリフ..."}},
+    {{"speaker": "B", "text": "セリフ..."}},
     ...
   ]
 }}
