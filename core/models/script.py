@@ -11,6 +11,7 @@ class DialogueLine(BaseModel):
     speaker: SpeakerID = Field(..., description="話者ID ('A' または 'B')")
     text: str = Field(..., min_length=1, description="セリフ本文（空文字不可）")
     emotion: Optional[str] = Field(None, description="感情指定（例: joy, sorrow, neutral）")
+    section: Optional[str] = Field(None, description="セクションマーカー（チャプター用、例: intro, main_1, ending）")
     
     # 後方互換性のため、古いJSON形式を自動変換
     @model_validator(mode='before')
