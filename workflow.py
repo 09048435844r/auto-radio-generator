@@ -967,7 +967,18 @@ def run_workflow_sync(
             planning_result = None
             queries = []
             
-            if overrides_obj.enable_research and overrides_obj.research_mode:
+            # Mockモード判定
+            if config.yaml.dev.mock_mode:
+                callbacks.log("[yellow]⚠ MOCK MODE: Skipping planning phase[/yellow]")
+                # ダミーの検索クエリを設定
+                queries = [
+                    "Mock Query 1: テーマに関する一般的な調査",
+                    "Mock Query 2: トレンドと背景",
+                    "Mock Query 3: 面白い雑学"
+                ]
+                angle = "Mock Mode: 既存のデータを使用して高速に動画生成をテストする"
+                callbacks.log(f"切り口: {angle}")
+            elif overrides_obj.enable_research and overrides_obj.research_mode:
                 planning_result = await execute_planning_phase(
                     theme=theme,
                     mode=overrides_obj.research_mode,
