@@ -12,6 +12,23 @@ class DialogueLine(BaseModel):
     text: str = Field(..., min_length=1, description="セリフ本文（空文字不可）")
     emotion: Optional[str] = Field(None, description="感情指定（例: joy, sorrow, neutral）")
     
+    # 後方互換性のため、古いJSON形式を自動変換
+    @model_validator(mode='before')
+    @classmethod
+    def upgrade_legacy_data(cls, data: Any) -> Any:
+        """既存のspeaker_id形式を新形式に変換"""
+        if isinstance(data, dict):
+            # speaker_id -> speaker 変換
+            if 'speaker_id' in data and 'speaker' not in data:
+                role = data.pop('speaker_id')
+                if role == 'main':
+                    data['speaker'] = 'A'
+                elif role == 'sub':
+                    data['speaker'] = 'B'
+                else:
+                    data['speaker'] = 'A'  # fallback
+        return data
+    
     # 後方互換性のため、speaker_idも受け入れる
     @field_validator('speaker', mode='before')
     @classmethod
