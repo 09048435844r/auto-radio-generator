@@ -209,7 +209,7 @@ async def execute_planning_phase(
     cb.log(f"\n== Phase 1: 企画（検索計画作成） ==")
     cb.log(f"テーマ: {theme}")
     cb.log(f"モード: {mode}")
-    cb.progress(0.05, "AIが検索計画を作成中...")
+    cb.progress(0.10, "🤔 企画・検索計画を作成中...")
     
     try:
         script_generator = create_script_generator(config)
@@ -277,7 +277,7 @@ async def execute_scripting_phase(
         cb.log(f"モード: {mode}")
         if excluded_topics:
             cb.log(f"除外トピック: {excluded_topics[:100]}..." if len(excluded_topics) > 100 else f"除外トピック: {excluded_topics}")
-        cb.progress(0.10, "並列リサーチ中...")
+        cb.progress(0.30, "🔍 リサーチを実行中 (Perplexity)...")
         
         try:
             researcher = create_researcher(config)
@@ -301,12 +301,12 @@ async def execute_scripting_phase(
     else:
         cb.log(f"[INFO] リサーチスキップ")
     
-    cb.progress(0.20, "リサーチ完了")
+    cb.progress(0.45, "✅ リサーチ完了")
     
     # Step 2: 台本生成
     cb.log(f"\n== Phase 2-2: 台本生成 ==")
     cb.log(f"テーマ: {theme}")
-    cb.progress(0.25, "台本を生成中...")
+    cb.progress(0.50, "📝 台本を執筆中 (Gemini Pro)...")
     
     script_start = time.time()
     script_generator = create_script_generator(config)
@@ -317,7 +317,7 @@ async def execute_scripting_phase(
     
     cb.log(f"✓ 台本生成完了: {len(script.dialogue)}フレーズ ({script_duration:.1f}秒)")
     cb.log(f"タイトル: {script.title}")
-    cb.progress(0.35, "台本生成完了")
+    cb.progress(0.65, "✅ 台本生成完了")
     
     # 台本を保存
     script_path = output_dir / "script.json"
@@ -361,7 +361,7 @@ async def execute_production_phase(
     # ========== Step 1: 音声合成 ==========
     cb.log(f"\n== Phase 3-1: 音声合成 ==")
     cb.log(f"フレーズ数: {len(script.dialogue)}")
-    cb.progress(0.40, "音声合成中...")
+    cb.progress(0.70, "🗣️ 音声を合成中 (VOICEVOX)...")
     
     audio_start = time.time()
     audio_output_dir = output_dir / "audio"
@@ -380,7 +380,7 @@ async def execute_production_phase(
     audio_duration = time.time() - audio_start
     
     cb.log(f"✓ 音声合成完了: {synthesis_result.total_duration_sec:.1f}秒 ({audio_duration:.1f}秒)")
-    cb.progress(0.70, "音声合成完了")
+    cb.progress(0.85, "✅ 音声合成完了")
     
     # ========== Step 2: 動画生成 ==========
     cb.log(f"\n== Phase 3-2: 動画生成 ==")
@@ -388,7 +388,7 @@ async def execute_production_phase(
     cb.log(f"フェードイン: {config.yaml.video_renderer.bgm_fade_in_sec}秒")
     cb.log(f"フェードアウト: {config.yaml.video_renderer.bgm_fade_out_sec}秒")
     cb.log(f"スペクトラム: {'ON' if config.yaml.video_renderer.enable_spectrum else 'OFF'}")
-    cb.progress(0.75, "動画を生成中...")
+    cb.progress(0.90, "🎬 動画をレンダリング中 (FFmpeg)...")
     
     render_start = time.time()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -409,7 +409,7 @@ async def execute_production_phase(
     render_duration = time.time() - render_start
     
     cb.log(f"✓ 動画生成完了: {render_result.file_size_mb:.1f}MB ({render_duration:.1f}秒)")
-    cb.progress(0.95, "動画生成完了")
+    cb.progress(0.95, "✅ 動画生成完了")
     
     # ========== Step 3: サムネイル生成 ==========
     cb.log(f"\n== Phase 3-3: サムネイル生成 ==")
@@ -917,7 +917,7 @@ def run_workflow_sync(
         
         try:
             # ========== Phase 0: 設定読み込み・前提条件チェック ==========
-            callbacks.progress(0.0, "設定を読み込み中...")
+            callbacks.progress(0.0, "🚀 生成プロセスを開始します...")
             callbacks.log("設定を読み込み中...")
             
             config = load_config(PROJECT_ROOT)
@@ -949,7 +949,7 @@ def run_workflow_sync(
             success, error = await check_prerequisites(config, log_callback)
             if not success:
                 return WorkflowResult(success=False, error_message=error)
-            callbacks.progress(0.05, "前提条件OK")
+            callbacks.progress(0.05, "✅ 前提条件OK")
             
             # 出力ディレクトリを準備
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1026,7 +1026,7 @@ def run_workflow_sync(
             total_usage.render_duration_sec = production_result.render_duration_sec
             
             # ========== Phase 4: 後処理（メタデータ生成） ==========
-            callbacks.progress(0.95, "後処理中...")
+            callbacks.progress(0.97, "📦 後処理中...")
             
             # YouTube用メタデータを生成
             metadata_path = output_base / "metadata.txt"
@@ -1092,7 +1092,7 @@ def run_workflow_sync(
             callbacks.log(f"\n== 完了 ==")
             callbacks.log(f"動画: {production_result.video_path}")
             callbacks.log(f"総所要時間: {total_usage.total_duration_sec:.1f}秒")
-            callbacks.progress(1.0, "完了!")
+            callbacks.progress(1.0, "✨ すべて完了しました！")
             
             return WorkflowResult(
                 success=True,
