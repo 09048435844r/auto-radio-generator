@@ -147,6 +147,7 @@ video_renderer:
   output_codec: "libx264"          # 動画コーデック（H.264）
   output_audio_codec: "aac"        # 音声コーデック（AAC）
   output_audio_bitrate: "192k"     # 音声ビットレート
+  use_gpu: true                    # GPU加速を使用（NVENC: RTX 4070など）
   
   # BGM設定
   bgm_volume: 0.15           # BGM音量（0.0〜1.0、0.15=控えめ）

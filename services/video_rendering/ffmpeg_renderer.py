@@ -241,6 +241,29 @@ class FfmpegRenderer(IVideoRenderer):
         # フィルター全体
         filter_complex = f"{bgm_filter};{audio_mix_filter};{video_filter}"
         
+        # GPU加速設定の取得
+        use_gpu = getattr(self.video_config, 'use_gpu', False)
+        
+        # エンコーダー設定を切り替え
+        if use_gpu:
+            # GPU加速（NVENC）を使用
+            console.print("[green]🚀 Using GPU Acceleration (RTX 4070/NVENC)[/green]")
+            video_codec = "h264_nvenc"
+            codec_params = [
+                "-preset", "p4",      # RTXシリーズ向け推奨プリセット
+                "-rc", "vbr",         # 可変ビットレート
+                "-cq", "23",          # Constant Quality (23 = 高品質)
+                "-b:v", "0",          # ビットレート制限なし（CQ優先）
+            ]
+        else:
+            # CPU エンコーディング（libx264）
+            console.print("[yellow]🐢 Using CPU Encoding (libx264)[/yellow]")
+            video_codec = "libx264"
+            codec_params = [
+                "-preset", "medium",  # CPUプリセット
+                "-crf", "23",         # Constant Rate Factor
+            ]
+        
         cmd = [
             self.ffmpeg_path,
             "-y",  # 上書き確認なし
@@ -263,12 +286,11 @@ class FfmpegRenderer(IVideoRenderer):
             "-map", "[vout]",
             "-map", "[aout]",
             
-            # ビデオコーデック設定
-            "-c:v", self.video_config.output_codec,
-            "-preset", "medium",
-            "-crf", "23",
+            # ビデオコーデック設定（GPU/CPU切り替え）
+            "-c:v", video_codec,
+            *codec_params,  # プリセットと品質設定を展開
             "-r", str(fps),
-            "-pix_fmt", "yuv420p",
+            "-pix_fmt", "yuv420p",  # 互換性のため必須
             
             # オーディオコーデック設定
             "-c:a", self.video_config.output_audio_codec,
