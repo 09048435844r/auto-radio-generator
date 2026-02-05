@@ -169,6 +169,7 @@ class GeminiClient(IScriptGenerator):
         console.print(f"  リサーチデータ: {'あり' if research_data else 'なし'}")
         
         # モード別に専用プロンプトを使用（PromptManagerから取得）
+        # プロンプトテンプレートでは {main} と {sub} が使われているため、マッピングを追加
         if research_data and research_data.mode == "weekly_digest":
             # 時間表現を取得
             time_expr = get_time_expression("weekly_digest")
@@ -179,20 +180,26 @@ class GeminiClient(IScriptGenerator):
                 outro_phrase=time_expr["outro_phrase"],
                 theme=theme,
                 main_char=self.personalities.main,
-                sub_char=self.personalities.sub
+                sub_char=self.personalities.sub,
+                main=self.personalities.main,  # {main} 変数用
+                sub=self.personalities.sub      # {sub} 変数用
             )
         elif research_data and research_data.mode == "lecture":
             system_prompt = self.prompt_manager.get_script_prompt(
                 "lecture",
                 theme=theme,
                 main_char=self.personalities.main,
-                sub_char=self.personalities.sub
+                sub_char=self.personalities.sub,
+                main=self.personalities.main,  # {main} 変数用
+                sub=self.personalities.sub      # {sub} 変数用
             )
         else:
             system_prompt = self.prompt_manager.get_script_prompt(
                 "standard",
                 main_char=self.personalities.main,
                 sub_char=self.personalities.sub,
+                main=self.personalities.main,  # {main} 変数用
+                sub=self.personalities.sub,     # {sub} 変数用
                 main_topic_ratio=self.structure.main_topic_ratio,
                 listener_mail_ratio=self.structure.listener_mail_ratio,
                 ending_ratio=self.structure.ending_ratio

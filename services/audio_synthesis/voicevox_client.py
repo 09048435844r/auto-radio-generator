@@ -74,10 +74,12 @@ class VoicevoxClient(IAudioSynthesizer):
                 console.print(f"[green]✓ Mock音声を使用しました[/green] ({duration_sec:.1f}秒)")
                 
                 # SynthesisResultを返す（チャプターは空）
+                # Mockモードでは字幕ファイルは生成しないが、Pathオブジェクトとして空のパスを設定
+                subtitle_path = output_dir / "subtitles.srt"
                 return SynthesisResult(
                     audio_path=output_audio_path,
-                    subtitle_path=None,  # Mockではサブタイトルなし
-                    duration_sec=duration_sec,
+                    subtitle_path=subtitle_path,
+                    total_duration_sec=duration_sec,  # 正しいフィールド名
                     chapters=[]  # Mockではチャプターなし
                 )
             else:
