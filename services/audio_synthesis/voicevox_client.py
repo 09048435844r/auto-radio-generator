@@ -123,14 +123,15 @@ class VoicevoxClient(IAudioSynthesizer):
                         console.print(f"[yellow]  ▶ チャプター: {chapter_title} @ {adjusted_time_sec:.1f}s[/yellow]")
                     
                     # 話者IDからVOICEVOX speaker_idを取得
-                    speaker_id = getattr(self.speakers, line.speaker_id, self.speakers.main)
+                    # line.speaker は "A" または "B"
+                    voicevox_speaker_id = self.speakers.main if line.speaker == "A" else self.speakers.sub
                     
                     # デバッグ: 話者情報を表示
-                    console.print(f"[dim]  [{i+1}] {line.speaker_id} → VOICEVOX ID: {speaker_id}[/dim]")
+                    console.print(f"[dim]  [{i+1}] {line.speaker} → VOICEVOX ID: {voicevox_speaker_id}[/dim]")
                     
                     # 音声合成
                     audio_data = await self._synthesize_phrase(
-                        client, line.text, speaker_id, speed_scale
+                        client, line.text, voicevox_speaker_id, speed_scale
                     )
                     
                     # AudioSegmentに変換
@@ -140,7 +141,7 @@ class VoicevoxClient(IAudioSynthesizer):
                     # タイミング情報を記録（話者IDも含める）
                     start_time = current_time_ms
                     end_time = current_time_ms + duration_ms
-                    phrase_data.append((audio_segment, start_time, end_time, line.text, line.speaker_id))
+                    phrase_data.append((audio_segment, start_time, end_time, line.text, line.speaker))
                     
                     current_time_ms = end_time + pause_ms
                     progress.update(task, advance=1, description=f"合成中... {i+1}/{len(script.dialogue)}")
@@ -258,7 +259,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         
         lines = [header]
         
-        for _, start_ms, end_ms, text, speaker_id in phrase_data:
+        for _, start_ms, end_ms, text, speaker in phrase_data:
             # 冒頭の無音分をオフセット
             adjusted_start_ms = start_ms + pre_roll_offset_ms
             adjusted_end_ms = end_ms + pre_roll_offset_ms
@@ -267,7 +268,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             end_time = self._ms_to_ass_time(adjusted_end_ms)
             
             # 話者IDに応じてスタイルを選択
-            style = "Main" if speaker_id == "main" else "Sub"
+            style = "Main" if speaker == "A" else "Sub"
             
             # BudouXで自然な改行位置を取得（限界設定: 画面端ギリギリまで拡大）
             from budoux import load_default_japanese_parser
