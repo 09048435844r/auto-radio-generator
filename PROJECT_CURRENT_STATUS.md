@@ -1,8 +1,8 @@
 # 🎙️ Auto Radio Generator - Project Current Status Report
 
-**Generated:** 2026-02-05  
-**Version:** v3.1.1 (JSON Mode)  
-**Branch:** fix/smart-json-parsing
+**Generated:** 2026-02-07  
+**Version:** v3.1.2 (GPU / Mock / UI)  
+**Branch:** master
 
 ---
 

@@ -6,10 +6,10 @@
 import asyncio
 import sys
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional, Literal
+from typing import Callable, Optional
 
 # プロジェクトルートをパスに追加
 PROJECT_ROOT = Path(__file__).parent
@@ -20,7 +20,7 @@ from core.models import (
     load_config, Script, AppConfig,
     TotalUsage, PerplexityUsage, GeminiUsage, VoicevoxUsage, CostBreakdown
 )
-from core.interfaces import IScriptGenerator, SynthesisResult, RenderResult, ResearchMode, ChapterMarker
+from core.interfaces import ResearchMode, ChapterMarker
 from services.script_generation import GeminiClient
 from services.research import PerplexityResearcher
 from services.audio_synthesis import VoicevoxClient
