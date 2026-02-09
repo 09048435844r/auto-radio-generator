@@ -169,8 +169,11 @@ class FfmpegRenderer(IVideoRenderer):
             f"afade=t=out:st={fade_out_start}:d={fade_out_sec}[bgm]"
         )
         
-        # 音声ミックス
-        audio_mix_filter = "[1:a][bgm]amix=inputs=2:duration=first:dropout_transition=2[aout]"
+        # 音声ミックス → ラウドネスノーマライゼーション（YouTube推奨: -14 LUFS）
+        audio_mix_filter = (
+            "[1:a][bgm]amix=inputs=2:duration=first:dropout_transition=2[mixed];"
+            "[mixed]loudnorm=I=-14:TP=-1:LRA=11[aout]"
+        )
         
         # 字幕ファイル (.ass) の適用
         if subtitle_file and subtitle_file.exists():
