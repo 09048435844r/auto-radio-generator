@@ -108,7 +108,18 @@ class FfmpegRenderer(IVideoRenderer):
             total_duration_sec=total_duration
         )
         
+        # デバッグ: FFmpegフルコマンドをログ出力
+        full_cmd_str = ' '.join(cmd)
         console.print(f"[dim]実行コマンド: {' '.join(cmd[:10])}...[/dim]")
+        console.print(f"[dim]DEBUG filter_complex:[/dim]")
+        # filter_complexの値だけ抽出して見やすく表示
+        try:
+            fc_idx = cmd.index("-filter_complex")
+            console.print(f"[dim]{cmd[fc_idx + 1]}[/dim]")
+        except ValueError:
+            pass
+        console.print(f"[dim]DEBUG full command ({len(cmd)} args):[/dim]")
+        console.print(f"[dim]{full_cmd_str}[/dim]")
         
         # 非同期でFFmpegを実行
         process = await asyncio.create_subprocess_exec(
@@ -177,21 +188,19 @@ class FfmpegRenderer(IVideoRenderer):
         
         # 字幕ファイル (.ass) の適用
         if subtitle_file and subtitle_file.exists():
-            # 【重要】Windows絶対パスのトラブル回避策
-            # カレントディレクトリ(プロジェクトルート)からの相対パスに変換する
-            # 例: E:\project\output\...\subs.ass -> output/2025.../subs.ass
-            try:
-                rel_path = os.path.relpath(subtitle_file, os.getcwd())
-                # パス区切りをスラッシュに統一 (Windowsの \ はFFmpegでエスケープ問題を起こすため)
-                safe_path = rel_path.replace("\\", "/")
-            except ValueError:
-                # 万が一別ドライブの場合は、やむを得ず絶対パスを使い、コロンだけエスケープする
-                safe_path = str(subtitle_file.resolve()).replace("\\", "/").replace(":", "\\:")
+            # 【重要】Windows絶対パスのFFmpeg subtitlesフィルタ向けエスケープ
+            # libass（subtitlesフィルタの内部ライブラリ）は独自のパス解析を行うため、
+            # 以下の処理が必須:
+            #   1. バックスラッシュ \ → スラッシュ / に統一
+            #   2. ドライブレターのコロン : → \: にエスケープ
+            #   3. シングルクォートで囲む（スペース等の対策）
+            # 相対パスでも同様の問題が起きるため、絶対パスに統一してエスケープする
+            abs_path = str(subtitle_file.resolve())
+            safe_path = abs_path.replace("\\", "/").replace(":", "\\:")
 
-            console.print(f"[dim]DEBUG: Using subtitle path for FFmpeg: {safe_path}[/dim]")
+            console.print(f"[dim]DEBUG: subtitle original: {subtitle_file}[/dim]")
+            console.print(f"[dim]DEBUG: subtitle escaped:  {safe_path}[/dim]")
             
-            # フィルタの書き方を 'subtitles=filename' に統一（assフィルタのエイリアスだがこちらが安定）
-            # ファイル名をシングルクォートで囲む
             subtitle_filter = f"subtitles='{safe_path}'"
         else:
             console.print("[yellow]WARNING: Subtitle path not provided or file not found.[/yellow]")
