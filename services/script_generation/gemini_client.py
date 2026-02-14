@@ -1,8 +1,6 @@
 """Gemini APIを使用した台本生成クライアント"""
 import json
-import os
 import re
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -11,7 +9,7 @@ from google.genai import types
 from rich.console import Console
 
 from core.interfaces import IScriptGenerator, ResearchResult
-from core.models import Script, DialogueLine, AppConfig, GeminiUsage, ResearchPlan
+from core.models import Script, AppConfig, GeminiUsage, ResearchPlan
 from core.prompt_manager import PromptManager
 from .time_expressions import get_time_expression
 

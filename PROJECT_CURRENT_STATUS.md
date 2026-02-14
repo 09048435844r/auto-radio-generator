@@ -1,7 +1,7 @@
 # 🎙️ Auto Radio Generator - Project Current Status Report
 
 **Generated:** 2026-02-07  
-**Version:** v3.1.2 (GPU / Mock / UI)  
+**Version:** v3.2.0 (GPU / Mock / UI)  
 **Branch:** master
 
 ---

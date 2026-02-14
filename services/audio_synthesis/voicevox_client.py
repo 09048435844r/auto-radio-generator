@@ -1,7 +1,6 @@
 """VOICEVOX APIを使用した音声合成クライアント"""
 import asyncio
 import shutil
-import textwrap
 import wave
 from io import BytesIO
 from pathlib import Path

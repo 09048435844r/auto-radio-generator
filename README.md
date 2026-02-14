@@ -1,4 +1,4 @@
-# 🎙️ 自動ラジオ動画生成システム v3.1.2
+# 🎙️ 自動ラジオ動画生成システム v3.2.0
 
 AIが台本を作成し、音声合成・BGM合成を行い、YouTube/Podcast用のラジオ動画（MP4）を自動生成するシステムです。
 
@@ -13,15 +13,21 @@ AIが台本を作成し、音声合成・BGM合成を行い、YouTube/Podcast用
 - **サムネイル生成**: センターセーフ方式で1:1トリミング対応
 - **YouTubeチャプター**: 自動生成されたセクションマーカーでチャプター対応
 
-### v3.1.2 新機能（GPU / Mock / UI強化）
-- 🚀 **NVENC GPU高速化**: NVIDIA GPUによるハードウェアエンコード対応（h264_nvenc）
-  - `config.yaml` の `video_renderer.use_gpu` で切り替え可能
-  - GPU非搭載環境では自動的にCPU（libx264）にフォールバック
-- 🧪 **Mock開発モード**: API課金なしでワークフロー全体をテスト可能
-  - `config.yaml` の `dev.mock_mode` で有効化
-  - ローカルの固定データ（`tests/mock_data/`）を使用して高速に動作確認
-- 📊 **進捗可視化UI**: Gradio進捗バーで各フェーズの状況をリアルタイム表示
+### v3.2.0 新機能（Negative Prompt / Audio Pro / Quality）
+- � **Manually Controlled Topics**: 「避けてほしい話題」(Negative Prompt) による生成内容の制御
+  - UI上で除外トピックを自由入力し、Geminiプロンプトに自動反映
+  - スペースやカンマ区切りで複数トピック指定可能
+- 🔊 **Pro-Level Audio**: ラウドネスノーマライゼーション (-14 LUFS) による音圧自動調整
+  - YouTube推奨基準 (I=-14, TP=-1, LRA=11) に準拠
+  - FFmpeg `loudnorm` フィルタで音声ミキシング後に自動適用
+- 📊 **Visual Progress**: 詳細な進捗バー表示
+  - Gradio進捗バーで各フェーズの状況をリアルタイム表示
   - 🤔 企画 → 🔍 リサーチ → 📝 台本 → 🗣️ 音声 → 🎬 動画 → ✨ 完了
+- 🚀 **High Performance**: Mockモード開発とNVENC (GPU) レンダリング
+  - NVIDIA GPUによるハードウェアエンコード対応（h264_nvenc）
+  - API課金なしでワークフロー全体をテスト可能なMockモード
+
+### v3.1.2 以前の機能（GPU / Mock / UI強化）
 - 🛡️ **後方互換性強化**: 旧JSON形式（`speaker_id`/`dialogue`）の自動変換バリデータ追加
 
 ### v3.1.1 新機能（JSON Mode Patch）

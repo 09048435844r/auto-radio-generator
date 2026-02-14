@@ -2,7 +2,7 @@
 
 ブラウザ上でパラメータ調整と動画生成実行ができるWeb UIアプリケーション
 
-v3.1.2 機能:
+v3.2.0 機能:
 - タブ式UI: 自動生成とマニュアル制作を分離
 - マニュアル制作ワークフロー: Step A(台本) → Step B(音声) → Step C(動画)
 - 設定の永続化: ユーザー設定を自動保存・復元
@@ -642,7 +642,7 @@ def generate_video(
     
     # ログをクリア
     clear_logs()
-    append_log("自動ラジオ動画生成システム v3.1.2")
+    append_log("自動ラジオ動画生成システム v3.2.0")
     append_log("=" * 40)
     
     # リサーチモードを変換
@@ -1159,7 +1159,7 @@ def generate_script_from_research(
     try:
         # ログをクリア
         clear_logs()
-        append_log("台本生成ツール v3.1.2")
+        append_log("台本生成ツール v3.2.0")
         append_log("=" * 40)
         append_log("リサーチ結果から台本を生成します...")
         
@@ -1227,13 +1227,13 @@ def create_ui() -> gr.Blocks:
     assets = get_asset_choices()
     
     with gr.Blocks(
-        title="自動ラジオ動画生成システム v3.1.2 (JSON Mode)"
+        title="自動ラジオ動画生成システム v3.2.0 (JSON Mode)"
     ) as app:
         
         # ヘッダー
         gr.Markdown(
             """
-            # 🎙️ 自動ラジオ動画生成システム v3.1.2 (JSON Mode)
+            # 🎙️ 自動ラジオ動画生成システム v3.2.0 (JSON Mode)
             
             **Perplexity** でテーマをリサーチし、**Gemini** が台本を作成。
             **VOICEVOX** で音声合成、**FFmpeg** で動画を生成します。
@@ -1657,7 +1657,7 @@ def create_ui() -> gr.Blocks:
         gr.Markdown(
             """
             ---
-            *自動ラジオ動画生成システム v3.1.2 (JSON Mode) | Powered by Perplexity, Gemini, VOICEVOX, FFmpeg*
+            *自動ラジオ動画生成システム v3.2.0 (JSON Mode) | Powered by Perplexity, Gemini, VOICEVOX, FFmpeg*
             """
         )
         
