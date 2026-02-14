@@ -1112,7 +1112,7 @@ def run_workflow_sync(
                 cost_report=cost_report,
                 metadata_content=metadata_content,
                 formatted_title=formatted_title,
-                formatted_description=generated_metadata.get("description", scripting_result.script.description)
+                formatted_description=formatted_description
             )
             
         except Exception as e:
@@ -1303,16 +1303,23 @@ def _generate_youtube_metadata(
         print(f"[ERROR] メタデータ生成エラー: {str(e)}")
         print(f"[ERROR] Traceback:\n{error_detail}")
         
+        # フォールバック: 台本のタイトル・概要をmetadataに格納
+        metadata = {
+            "title": script.title or theme or "無題",
+            "thumbnail_title": script.title or theme or "",
+            "description": script.description or "",
+        }
+        
         lines = [
             "=" * 50,
             "YouTube 投稿用メタデータ",
             "=" * 50,
             "",
             "【タイトル】",
-            script.title,
+            metadata["title"],
             "",
             "【説明文】",
-            script.description,
+            metadata["description"],
             "",
             f"※ メタデータ生成エラー: {str(e)}",
             "",
