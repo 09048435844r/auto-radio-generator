@@ -130,12 +130,13 @@ class GeminiClient(IScriptGenerator):
             
             raise
     
-    def generate(self, theme: str, research_data: Optional[ResearchResult] = None) -> Script:
+    def generate(self, theme: str, research_data: Optional[ResearchResult] = None, avoid_topics: Optional[str] = None) -> Script:
         """テーマとリサーチデータに基づいて台本を生成する
         
         Args:
             theme: 台本のテーマ
             research_data: リサーチ結果（オプション）
+            avoid_topics: 避けてほしい話題（オプション）
         
         Note:
             API使用量は self.last_usage で取得可能
@@ -204,7 +205,7 @@ class GeminiClient(IScriptGenerator):
                 listener_mail_ratio=self.structure.listener_mail_ratio,
                 ending_ratio=self.structure.ending_ratio
             )
-        user_prompt = self._build_user_prompt(theme, research_data)
+        user_prompt = self._build_user_prompt(theme, research_data, avoid_topics)
         self.last_usage = None  # リセット
         
         try:
@@ -282,13 +283,22 @@ class GeminiClient(IScriptGenerator):
         
         return response.text, usage
     
-    def _build_user_prompt(self, theme: str, research_data: Optional[ResearchResult]) -> str:
+    def _build_user_prompt(self, theme: str, research_data: Optional[ResearchResult], avoid_topics: Optional[str] = None) -> str:
         """ユーザープロンプトを構築"""
         prompt = f"## テーマ\n{theme}\n\n"
         
         if research_data:
             prompt += f"## リサーチ結果（{research_data.mode}モード）\n"
             prompt += f"{research_data.content}\n\n"
+        
+        if avoid_topics and avoid_topics.strip():
+            prompt += (
+                "[NEGATIVE CONSTRAINTS]\n"
+                "The user has explicitly requested to AVOID the following topics/keywords in this script:\n"
+                f"\"{avoid_topics.strip()}\"\n\n"
+                "STRICTLY FOLLOW this instruction. Do not mention, discuss, or allude to these topics.\n"
+                "Focus on other aspects of the theme to ensure variety.\n\n"
+            )
         
         prompt += "上記の情報を基に、ラジオ台本をJSON形式で作成してください。"
         return prompt

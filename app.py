@@ -615,6 +615,7 @@ def generate_video(
     speed_scale: float,
     enable_spectrum: bool,
     use_mock: bool = False,
+    avoid_topics: str = "",
     progress=gr.Progress()
 ) -> tuple[str | None, str, str, str, str]:
     """動画生成を実行
@@ -629,6 +630,7 @@ def generate_video(
         speed_scale: 音声スピード (0.8-1.5)
         enable_spectrum: スペクトラム表示
         use_mock: Mockモードを使用するか
+        avoid_topics: 避けてほしい話題（Negative Prompt）
         progress: Gradio進捗バー
     
     Returns:
@@ -673,7 +675,8 @@ def generate_video(
         overrides=overrides,
         log_callback=log_callback,
         progress_callback=progress_callback,
-        use_mock=use_mock
+        use_mock=use_mock,
+        avoid_topics=avoid_topics if avoid_topics and avoid_topics.strip() else None
     )
     
     # 成功時に設定を保存
@@ -1267,6 +1270,13 @@ def create_ui() -> gr.Blocks:
                                         info="Perplexityによるリサーチの方向性を選択",
                                         scale=1
                                     )
+                                
+                                avoid_topics_input = gr.Textbox(
+                                    label="避けてほしい話題 (オプション)",
+                                    placeholder="例: 食事療法 運動不足 (スペースやカンマで区切って複数入力可)",
+                                    lines=1,
+                                    info="台本に含めたくないトピックを指定できます"
+                                )
                             
                             # ブロック2: 🎨 クリエイティブ設定
                             with gr.Group(elem_classes="group-container"):
@@ -1729,7 +1739,8 @@ def create_ui() -> gr.Blocks:
                 fade_time_slider,
                 speed_slider,
                 spectrum_checkbox,
-                use_mock  # Mockモードチェックボックス
+                use_mock,  # Mockモードチェックボックス
+                avoid_topics_input  # 避けてほしい話題
             ],
             outputs=[video_output, log_output, cost_output, title_output, description_output],
             show_progress="full"

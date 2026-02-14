@@ -247,6 +247,7 @@ async def execute_scripting_phase(
     output_dir: Path,
     enable_research: bool = True,
     excluded_topics: Optional[str] = None,
+    avoid_topics: Optional[str] = None,
     callbacks: Optional[ProgressCallback] = None
 ) -> ScriptingPhaseResult:
     """台本作成フェーズ: リサーチ → 台本生成
@@ -259,6 +260,7 @@ async def execute_scripting_phase(
         output_dir: 出力ディレクトリ（リサーチ結果保存用）
         enable_research: リサーチを実行するか
         excluded_topics: 除外すべき既出情報（オプション）
+        avoid_topics: 避けてほしい話題（Negative Prompt、オプション）
         callbacks: 進捗コールバック
     
     Returns:
@@ -310,7 +312,7 @@ async def execute_scripting_phase(
     
     script_start = time.time()
     script_generator = create_script_generator(config)
-    script = script_generator.generate(theme, research_data)
+    script = script_generator.generate(theme, research_data, avoid_topics=avoid_topics)
     
     gemini_usage = script_generator.last_usage
     script_duration = time.time() - script_start
@@ -891,7 +893,8 @@ def run_workflow_sync(
     overrides: Optional[UIOverrides] = None,
     log_callback: Optional[Callable[[str], None]] = None,
     progress_callback: Optional[Callable[[float, str], None]] = None,
-    use_mock: bool = False
+    use_mock: bool = False,
+    avoid_topics: Optional[str] = None
 ) -> WorkflowResult:
     """同期版ワークフロー実行（Gradioから呼び出し用）
     
@@ -904,6 +907,7 @@ def run_workflow_sync(
         log_callback: ログ出力用コールバック関数
         progress_callback: 進捗コールバック (ratio, description)
         use_mock: Mockモードを使用するか（開発・テスト用）
+        avoid_topics: 避けてほしい話題（Negative Prompt、オプション）
     
     Returns:
         WorkflowResult: 実行結果（Usage/Cost情報含む）
@@ -999,6 +1003,7 @@ def run_workflow_sync(
                 config=config,
                 output_dir=output_base,
                 enable_research=overrides_obj.enable_research,
+                avoid_topics=avoid_topics,
                 callbacks=callbacks
             )
             
