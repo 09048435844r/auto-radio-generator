@@ -42,6 +42,22 @@ class FfmpegRenderer(IVideoRenderer):
         # デフォルト
         return "ffmpeg"
     
+    def _escape_windows_path(self, path: str) -> str:
+        """Windows絶対パスをFFmpeg subtitlesフィルタ向けにエスケープ
+        
+        libass（subtitlesフィルタの内部ライブラリ）は独自のパス解析を行うため、
+        以下の処理が必須:
+          1. バックスラッシュ \\ → スラッシュ / に統一
+          2. ドライブレターのコロン : → \\: にエスケープ
+        
+        Args:
+            path: エスケープ対象のパス文字列
+        
+        Returns:
+            str: FFmpeg subtitlesフィルタ用にエスケープされたパス
+        """
+        return path.replace("\\", "/").replace(":", "\\:")
+    
     def check_ffmpeg_available(self) -> bool:
         """FFmpegが利用可能か確認"""
         try:
@@ -196,7 +212,7 @@ class FfmpegRenderer(IVideoRenderer):
             #   3. シングルクォートで囲む（スペース等の対策）
             # 相対パスでも同様の問題が起きるため、絶対パスに統一してエスケープする
             abs_path = str(subtitle_file.resolve())
-            safe_path = abs_path.replace("\\", "/").replace(":", "\\:")
+            safe_path = self._escape_windows_path(abs_path)
 
             console.print(f"[dim]DEBUG: subtitle original: {subtitle_file}[/dim]")
             console.print(f"[dim]DEBUG: subtitle escaped:  {safe_path}[/dim]")

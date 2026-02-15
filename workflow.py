@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Optional
+from urllib.parse import parse_qs, urlparse
 
 # プロジェクトルートをパスに追加
 PROJECT_ROOT = Path(__file__).parent
@@ -27,6 +28,7 @@ from services.audio_synthesis import VoicevoxClient
 from services.video_rendering import FfmpegRenderer
 from services.media_processing import ThumbnailGenerator
 from services.cost_calculator import CostCalculator
+from services.publishing import YouTubeClient
 
 
 @dataclass
@@ -63,6 +65,7 @@ class WorkflowResult:
     metadata_content: str = ""
     formatted_title: str = ""  # 日付入りタイトル（コピー用）
     formatted_description: str = ""  # 概要欄・チャプター結合版（コピー用）
+    uploaded_video_url: Optional[str] = None  # YouTubeアップロードURL（成功時）
 
 
 @dataclass
@@ -894,7 +897,8 @@ def run_workflow_sync(
     log_callback: Optional[Callable[[str], None]] = None,
     progress_callback: Optional[Callable[[float, str], None]] = None,
     use_mock: bool = False,
-    avoid_topics: Optional[str] = None
+    avoid_topics: Optional[str] = None,
+    upload_override: Optional[bool] = None,
 ) -> WorkflowResult:
     """同期版ワークフロー実行（Gradioから呼び出し用）
     
@@ -908,6 +912,7 @@ def run_workflow_sync(
         progress_callback: 進捗コールバック (ratio, description)
         use_mock: Mockモードを使用するか（開発・テスト用）
         avoid_topics: 避けてほしい話題（Negative Prompt、オプション）
+        upload_override: YouTubeアップロード実行のUI優先フラグ
     
     Returns:
         WorkflowResult: 実行結果（Usage/Cost情報含む）
@@ -1093,6 +1098,60 @@ def run_workflow_sync(
             cost_calculator = CostCalculator()
             cost = cost_calculator.calculate(total_usage)
             cost_report = cost_calculator.format_cost_report(total_usage, cost)
+
+            # YouTubeアップロード（失敗しても動画生成結果は成功扱い）
+            uploaded_video_url: Optional[str] = None
+            publishing_config = getattr(config.yaml, "publishing", None)
+            should_upload = (
+                upload_override
+                if upload_override is not None
+                else bool(publishing_config and getattr(publishing_config, "enable_upload", False))
+            )
+
+            if should_upload:
+                callbacks.log("[INFO] YouTubeアップロードを開始します...")
+                try:
+                    youtube_client = YouTubeClient(config)
+                    uploaded_video_url = youtube_client.upload_video(
+                        file_path=production_result.video_path,
+                        title=formatted_title,
+                        description=formatted_description,
+                        thumbnail_path=thumbnail_path,
+                    )
+                    callbacks.log(f"✓ YouTubeアップロード完了: {uploaded_video_url}")
+
+                    # 設定されている場合は再生リストへ追加（失敗しても非致命）
+                    playlist_id = getattr(publishing_config, "playlist_id", None)
+                    if isinstance(playlist_id, str):
+                        playlist_id = playlist_id.strip()
+
+                    if playlist_id:
+                        callbacks.log(f"[INFO] 再生リスト追加設定: {playlist_id}")
+                        try:
+                            parsed_url = urlparse(uploaded_video_url)
+                            video_id = parse_qs(parsed_url.query).get("v", [None])[0]
+                            if video_id:
+                                youtube_client.add_video_to_playlist(
+                                    video_id=video_id,
+                                    playlist_id=playlist_id,
+                                )
+                                callbacks.log(f"✓ 再生リストへ追加完了: {playlist_id}")
+                            else:
+                                callbacks.log(
+                                    "⚠ 再生リスト追加をスキップ: 動画IDの抽出に失敗しました"
+                                )
+                        except Exception as playlist_error:
+                            callbacks.log(
+                                f"⚠ 再生リストへの追加に失敗しました（動画生成は成功）: {playlist_error}"
+                            )
+                    else:
+                        callbacks.log("[INFO] 再生リスト追加設定: 未設定（playlist_id が空のためスキップ）")
+                except Exception as upload_error:
+                    callbacks.log(
+                        f"⚠ YouTubeアップロードに失敗しました（動画生成は成功）: {upload_error}"
+                    )
+            else:
+                callbacks.log("[INFO] YouTubeアップロード設定: 無効（UI設定優先）")
             
             callbacks.log(f"\n== 完了 ==")
             callbacks.log(f"動画: {production_result.video_path}")
@@ -1112,7 +1171,8 @@ def run_workflow_sync(
                 cost_report=cost_report,
                 metadata_content=metadata_content,
                 formatted_title=formatted_title,
-                formatted_description=formatted_description
+                formatted_description=formatted_description,
+                uploaded_video_url=uploaded_video_url,
             )
             
         except Exception as e:

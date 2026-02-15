@@ -1,4 +1,4 @@
-# 🎙️ 自動ラジオ動画生成システム v3.2.0
+# 🎙️ 自動ラジオ動画生成システム v3.3.0
 
 AIが台本を作成し、音声合成・BGM合成を行い、YouTube/Podcast用のラジオ動画（MP4）を自動生成するシステムです。
 
@@ -13,7 +13,7 @@ AIが台本を作成し、音声合成・BGM合成を行い、YouTube/Podcast用
 - **サムネイル生成**: センターセーフ方式で1:1トリミング対応
 - **YouTubeチャプター**: 自動生成されたセクションマーカーでチャプター対応
 
-### v3.2.0 新機能（Negative Prompt / Audio Pro / Quality）
+### v3.3.0 新機能（Negative Prompt / Audio Pro / Quality）
 - � **Manually Controlled Topics**: 「避けてほしい話題」(Negative Prompt) による生成内容の制御
   - UI上で除外トピックを自由入力し、Geminiプロンプトに自動反映
   - スペースやカンマ区切りで複数トピック指定可能
@@ -79,13 +79,18 @@ AIが台本を作成し、音声合成・BGM合成を行い、YouTube/Podcast用
 
 ## 🚀 セットアップ
 
-### 必要な外部ツール
+### システム要件 (Requirements)
 
 | ツール | バージョン | 備考 |
 |--------|-----------|------|
 | **Python** | 3.10+ | 必須 |
 | **FFmpeg** | 6.0+ | NVENC対応ビルド推奨（GPU高速化に必要） |
 | **VOICEVOX Engine** | 0.24+ | GPU版推奨（音声合成の高速化） |
+
+> **Pythonバージョン運用方針（メンテナンス注記）**  
+> 現在は **Python 3.10.6** で安定動作しており、**2026年10月（サポート期限）までは現行環境を維持**します。開発効率を優先しつつ、
+> Google API ライブラリ（`google-api-core` 系）の Python 3.10 サポート終了（**2026-10-04**）に伴い、
+> 将来的には **Python 3.11 以上** への移行が必要です。
 
 ### 1. 依存パッケージのインストール
 
@@ -134,6 +139,79 @@ python app.py
 ```bash
 python main.py
 ```
+
+## 🔑 YouTube API のセットアップ
+
+YouTube への自動アップロード機能を使う場合、プロジェクトルートに `client_secret.json` が必要です。
+
+### 必要ファイル
+
+- `client_secret.json`（OAuth クライアント情報）
+- `client_secret.json.example`（ダミー構成テンプレート、詳細はこのファイルを参照）
+
+### 取得方法（Google Cloud Console）
+
+1. Google Cloud Console でプロジェクトを作成
+2. **YouTube Data API v3** を有効化
+3. 「認証情報」から **OAuth クライアント ID** を作成（アプリケーション種別: **デスクトップアプリ**）
+4. ダウンロードした JSON をプロジェクトルートに `client_secret.json` として配置
+
+### セキュリティ上の注意（重要）
+
+- `client_secret.json` と `token.json` は **絶対にリポジトリへコミットしないでください**。
+- 本リポジトリでは `.gitignore` で除外設定済みです。
+- 構成の参考が必要な場合は `client_secret.json.example` を使用してください（ダミー値のみ）。
+
+## 🧪 開発・テスト (Development & Testing)
+
+### 手動テスト
+
+プロジェクトルートで以下を実行すると、単体テストを手動実行できます。
+
+```bash
+pytest
+```
+
+### 自動チェック（pre-commit hook）
+
+`git commit` 実行時に `.git/hooks/pre-commit` が自動で `pytest` を実行します。
+
+- テスト失敗時: `🚫 Tests Failed! Commit rejected.` を表示し、コミットを中止
+- テスト成功時: `✅ Tests Passed!` を表示し、コミットを許可
+
+### フック再生成手順（clone直後）
+
+`.git/hooks/` は通常リポジトリ管理対象外のため、clone 直後は pre-commit hook を再配置してください。
+
+```bash
+# プロジェクトルートで実行
+copy hooks\pre-commit .git\hooks\pre-commit
+```
+
+Git Bash を使う場合:
+
+```bash
+cp hooks/pre-commit .git/hooks/pre-commit
+chmod +x .git/hooks/pre-commit
+```
+
+※ `hooks/pre-commit` はリポジトリ管理されるフック実体です。clone 後に `.git/hooks/pre-commit` へコピーして利用してください。
+
+### 現在のテスト範囲
+
+現時点では、`services/video_rendering/ffmpeg_renderer.py` の Windows パス変換ロジック（例: 字幕パスのエスケープ処理）を中心に単体テストを整備しています。
+
+主な対象:
+- `_escape_windows_path()` のパス変換（`\\` → `/`, `:` → `\\:`）
+- スペース・日本語・UNC パスなどのエッジケース
+
+## 🔭 今後の展望 (Future Outlook)
+
+- **視聴者エンゲージメントの自動化**: 動画公開と同時に、参考文献や台本要約などの補足情報をコメント欄へ自動提供し、視聴者の利便性と信頼性を向上させる。
+- **メタデータの高度化**: タイムスタンプとリッチな概要欄により、視聴者の利便性を最大化し、YouTube 検索におけるプレゼンスを強化する。
+- **情報の透明性**: 参考文献の自動掲載により、AI 生成コンテンツとしての信頼性と価値を高める。
+- **設計ヒント**: `YouTubeClient` に `insert_comment(video_id, text)` のようなメソッドを追加し、`workflow.py` の最終工程で呼び出す構成を想定。
+- **実装ヒント（チャプター概要欄）**: `workflow.py` の動画生成フェーズで各パートの累積時間を計算し、チャプター付き説明文を `YouTubeClient.upload_video(..., description=...)` に渡す構成を想定。
 
 ## ⚙️ 設定
 

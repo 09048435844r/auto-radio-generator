@@ -22,3 +22,7 @@ Thumbs.db
 
 # User settings
 user_settings.json
+
+# YouTube OAuth secrets
+client_secret.json
+token.json

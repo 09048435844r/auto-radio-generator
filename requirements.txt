@@ -30,6 +30,15 @@ rich>=13.0.0             # コンソール出力装飾
 # Web UI
 gradio>=4.0.0            # ブラウザベースUI（タブ式インターフェース）
 
+# Publishing (YouTube Data API)
+google-api-python-client>=2.0.0  # YouTube Data API v3 クライアント
+google-auth-oauthlib>=1.0.0      # OAuth 2.0 認証フロー
+google-auth-httplib2>=0.2.0      # Google API HTTP 認証連携
+
+# Development & Testing
+pytest>=9.0.0            # 単体テスト実行
+pytest-mock>=3.15.0      # pytest 用モック拡張
+
 # External Dependencies (要手動インストール):
 # - VOICEVOX Engine: https://voicevox.hiroshiba.jp/
 # - FFmpeg: https://ffmpeg.org/

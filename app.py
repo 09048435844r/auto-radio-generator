@@ -2,7 +2,7 @@
 
 ブラウザ上でパラメータ調整と動画生成実行ができるWeb UIアプリケーション
 
-v3.2.0 機能:
+v3.3.0 機能:
 - タブ式UI: 自動生成とマニュアル制作を分離
 - マニュアル制作ワークフロー: Step A(台本) → Step B(音声) → Step C(動画)
 - 設定の永続化: ユーザー設定を自動保存・復元
@@ -616,8 +616,9 @@ def generate_video(
     enable_spectrum: bool,
     use_mock: bool = False,
     avoid_topics: str = "",
+    upload_to_youtube: bool = False,
     progress=gr.Progress()
-) -> tuple[str | None, str, str, str, str]:
+) -> tuple[str | None, str, str, str, str, str]:
     """動画生成を実行
     
     Args:
@@ -631,18 +632,19 @@ def generate_video(
         enable_spectrum: スペクトラム表示
         use_mock: Mockモードを使用するか
         avoid_topics: 避けてほしい話題（Negative Prompt）
+        upload_to_youtube: YouTubeへ自動アップロードするか（UI優先）
         progress: Gradio進捗バー
     
     Returns:
-        (動画パス, ログ出力, コストレポート, タイトル, 概要欄)
+        (動画パス, ログ出力, コストレポート, タイトル, 概要欄, YouTube状態)
     """
     # 入力検証
     if not theme or not theme.strip():
-        return None, "エラー: テーマを入力してください。", "", "", ""
+        return None, "エラー: テーマを入力してください。", "", "", "", "YouTube: 未実行"
     
     # ログをクリア
     clear_logs()
-    append_log("自動ラジオ動画生成システム v3.2.0")
+    append_log("自動ラジオ動画生成システム v3.3.0")
     append_log("=" * 40)
     
     # リサーチモードを変換
@@ -676,7 +678,8 @@ def generate_video(
         log_callback=log_callback,
         progress_callback=progress_callback,
         use_mock=use_mock,
-        avoid_topics=avoid_topics if avoid_topics and avoid_topics.strip() else None
+        avoid_topics=avoid_topics if avoid_topics and avoid_topics.strip() else None,
+        upload_override=upload_to_youtube,
     )
     
     # 成功時に設定を保存
@@ -705,13 +708,24 @@ def generate_video(
         cost_report = result.cost_report if result.cost_report else ""
         formatted_title = result.formatted_title if result.formatted_title else ""
         formatted_description = result.formatted_description if result.formatted_description else ""
+        if result.uploaded_video_url:
+            youtube_status = f"✅ YouTube: [公開リンクを開く]({result.uploaded_video_url})"
+        else:
+            youtube_status = "YouTube: 未実行"
         
-        return str(result.video_path), get_logs(), cost_report, formatted_title, formatted_description
+        return (
+            str(result.video_path),
+            get_logs(),
+            cost_report,
+            formatted_title,
+            formatted_description,
+            youtube_status,
+        )
     else:
         error_msg = result.error_message or "不明なエラーが発生しました"
         append_log("")
         append_log(f"❌ 生成失敗: {error_msg}")
-        return None, get_logs(), "", "", ""
+        return None, get_logs(), "", "", "", "YouTube: 未実行"
 
 
 def generate_script_only(
@@ -1159,7 +1173,7 @@ def generate_script_from_research(
     try:
         # ログをクリア
         clear_logs()
-        append_log("台本生成ツール v3.2.0")
+        append_log("台本生成ツール v3.3.0")
         append_log("=" * 40)
         append_log("リサーチ結果から台本を生成します...")
         
@@ -1222,18 +1236,23 @@ def create_ui() -> gr.Blocks:
     
     # 前回の設定を読み込む
     saved_settings = _settings_manager.load()
+    config = load_config(PROJECT_ROOT)
+    publishing_cfg = getattr(config.yaml, "publishing", None)
+    default_enable_upload = bool(
+        publishing_cfg and getattr(publishing_cfg, "enable_upload", False)
+    )
     
     # アセット一覧を取得
     assets = get_asset_choices()
     
     with gr.Blocks(
-        title="自動ラジオ動画生成システム v3.2.0 (JSON Mode)"
+        title="自動ラジオ動画生成システム v3.3.0 (JSON Mode)"
     ) as app:
         
         # ヘッダー
         gr.Markdown(
             """
-            # 🎙️ 自動ラジオ動画生成システム v3.2.0 (JSON Mode)
+            # 🎙️ 自動ラジオ動画生成システム v3.3.0 (JSON Mode)
             
             **Perplexity** でテーマをリサーチし、**Gemini** が台本を作成。
             **VOICEVOX** で音声合成、**FFmpeg** で動画を生成します。
@@ -1387,6 +1406,12 @@ def create_ui() -> gr.Blocks:
                                     value=False,
                                     info="APIを使わずにtests/mock_dataの固定データを使用します（開発・テスト用）"
                                 )
+
+                                upload_to_youtube_checkbox = gr.Checkbox(
+                                    label="YouTubeに自動アップロードする",
+                                    value=default_enable_upload,
+                                    info="チェック時は動画生成後にYouTubeへ自動アップロードを試行します"
+                                )
                                 
                                 # 実行ボタン
                                 with gr.Row():
@@ -1423,6 +1448,9 @@ def create_ui() -> gr.Blocks:
                             label="生成された動画",
                             height=360
                         )
+
+                        # YouTubeアップロード結果表示
+                        youtube_url_output = gr.Markdown(value="")
                         
                         # ログ出力
                         log_output = gr.Textbox(
@@ -1657,7 +1685,7 @@ def create_ui() -> gr.Blocks:
         gr.Markdown(
             """
             ---
-            *自動ラジオ動画生成システム v3.2.0 (JSON Mode) | Powered by Perplexity, Gemini, VOICEVOX, FFmpeg*
+            *自動ラジオ動画生成システム v3.3.0 (JSON Mode) | Powered by Perplexity, Gemini, VOICEVOX, FFmpeg*
             """
         )
         
@@ -1740,9 +1768,17 @@ def create_ui() -> gr.Blocks:
                 speed_slider,
                 spectrum_checkbox,
                 use_mock,  # Mockモードチェックボックス
-                avoid_topics_input  # 避けてほしい話題
+                avoid_topics_input,  # 避けてほしい話題
+                upload_to_youtube_checkbox,
             ],
-            outputs=[video_output, log_output, cost_output, title_output, description_output],
+            outputs=[
+                video_output,
+                log_output,
+                cost_output,
+                title_output,
+                description_output,
+                youtube_url_output,
+            ],
             show_progress="full"
         )
         

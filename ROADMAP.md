@@ -1,7 +1,7 @@
 # Auto Radio Generator - Development Roadmap
 
 > **Created:** 2026-02-07  
-> **Base Version:** v3.2.0 (GPU / Mock / UI)  
+> **Base Version:** v3.3.0 (GPU / Mock / UI)  
 > **Author:** AI Tech Lead (Cascade)
 
 ---
@@ -23,7 +23,7 @@
 
 ---
 
-## 📊 Current Status (v3.2.0)
+## 📊 Current Status (v3.3.0)
 
 ### Core Pipeline
 - [x] **Research Phase** — Perplexity API による5モード対応リサーチ（debate / voices / trivia / weekly_digest / lecture）
@@ -47,6 +47,14 @@
 - [x] **Dual Entry Points** — Gradio Web UI (`app.py`) + CLI (`main.py`)
 - [x] **Settings Persistence** — `user_settings.json` によるユーザー設定の永続化
 - [x] **Cost Calculator** — API 使用量トラッキング + コストレポート生成
+
+### Recent Achievements（直近の達成事項）
+- [x] **Unit Testing Environment** — `pytest` + `pytest-mock` を導入し、`tests/` 配下で単体テストを実行可能化
+- [x] **CI/CD Foundation (pre-commit)** — `git commit` 時に `pytest` を自動実行し、失敗時はコミットをブロックするフックを導入
+- [x] **Regression Prevention (FFmpeg Path Handling)** — Windows向けパスエスケープ処理をヘルパーメソッド化し、変換ロジックの回帰テストを追加
+
+### Next Priority（最優先）
+- [ ] ⭐ **YouTube Data API 自動アップロードの実装**（動画投稿の手動作業をゼロ化する最重要タスク）
 
 ### Known Gaps（哲学に基づく課題分析）
 
@@ -109,6 +117,7 @@
 > **目的:** 動画生成の「先」にある作業を自動化し、テーマ入力すら不要な完全自律運用を実現する。
 
 - [ ] **YouTube Auto-Uploader**
+  - ⭐ **NEXT PRIORITY:** YouTube Data API v3 自動アップロードを最優先で実装
   - Google YouTube Data API v3 による自動投稿
   - アップロード対象: 動画ファイル（`.mp4`）、サムネイル（`.png`）
   - 自動設定: タイトル、概要欄（チャプター付き）、タグ、カテゴリ、公開設定
@@ -138,7 +147,7 @@
 
 ---
 
-### 🎨 Phase 6: UX & Quality（品質向上）
+### 🎨 Phase 6: Advanced Content Optimization & SEO
 
 > **目的:** 生成物のクオリティを商用レベルに引き上げ、視聴者体験を最適化する。
 
@@ -165,11 +174,46 @@
   - 英語 / 中国語等の台本生成・音声合成
   - 字幕の多言語同時生成
 
+- [ ] **AI 駆動のリッチな概要欄生成**
+  - Gemini API 等を活用し、生成台本から要約（Summary）と重要キーワードを抽出して概要欄を構成
+  - Perplexity API 等で取得した参考文献リンクを自動で整理し、概要欄へ掲載
+
+- [ ] **自動タイムスタンプ（Chapters）の生成**
+  - 各セクションの音声生成時間を計算し、`00:00 オープニング` 形式のチャプターリストを概要欄へ自動挿入
+  - YouTube のキーモーメント機能に対応し、視聴者が目的情報へ即アクセスできる導線を最適化
+
+- [ ] **字幕・翻訳・コメント自動化**
+  - 字幕（SRT）の自動生成と YouTube への字幕トラック登録を実装
+  - タイトル・説明文・字幕の多言語翻訳を自動化し、Global SEO を強化
+  - 公開直後に台本要約 + 参考文献リストをコメント投稿し、可能であれば固定（Pin）を実施
+  - API 制約で固定不可の場合は、投稿のみ自動化 + 固定依頼通知を送る運用を検討
+
+- [ ] **設計メモ（実装ヒント）**
+  - `YouTubeClient` に `insert_comment(video_id, text)` などのメソッドを追加
+  - ワークフロー最終工程（アップロード・再生リスト追加の後段）でコメント投稿処理を呼び出す構成を想定
+  - `workflow.py` の動画生成フェーズで各パートの累積時間を算出し、チャプター付き概要欄を `YouTubeClient.upload_video(..., description=...)` へ渡す実装を想定
+
 ---
 
-## 📂 Tech Stack Overview
+## � Future Maintenance（今後の課題 / メンテナンス）
 
-### Current（v3.2.0）
+> **方針:** 現在は Python 3.10.6 環境で安定動作しているため、開発効率を優先して **2026年10月（サポート期限）まで現行環境を維持**する。  
+> 一方で、Google API ライブラリのサポート期限を踏まえ、中長期の保守性確保のため計画的に移行を進める。
+
+- [ ] **Python 3.11/3.12 への移行検討**
+  - 理由: `google-api-core` の Python 3.10 サポート終了への対応（期限: 2026-10-04）
+  - 時期目安: **2026年 夏〜秋頃**（プロジェクトが安定したタイミング）
+  - 注意点:
+    - Gradio 周辺ライブラリの互換性検証
+    - iZotope 関連ツール（利用時）の互換性検証
+    - FFmpeg 連携・既存レンダリング処理の回帰確認
+    - 既存の API クライアント（Gemini / Perplexity / YouTube）接続テスト
+
+---
+
+## �� Tech Stack Overview
+
+### Current（v3.3.0）
 
 | Layer | Technology | Role |
 |-------|-----------|------|
@@ -208,4 +252,4 @@
 
 ---
 
-*Auto Radio Generator v3.2.0 | "Input Minimal, Data Maximal"*
+*Auto Radio Generator v3.3.0 | "Input Minimal, Data Maximal"*

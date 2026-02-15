@@ -136,6 +136,14 @@ class DevConfig(BaseModel):
     mock_data_path: str = Field(default="tests/mock_data")
 
 
+class PublishingConfig(BaseModel):
+    """公開・配信設定（YouTube等）"""
+    enable_upload: bool = Field(default=False)
+    privacy_status: str = Field(default="unlisted")
+    category_id: str = Field(default="27")  # Education
+    playlist_id: str = Field(default="")
+
+
 class YamlConfig(BaseModel):
     """YAML設定ファイル全体"""
     researcher: ResearcherConfig = Field(default_factory=ResearcherConfig)
@@ -151,6 +159,7 @@ class YamlConfig(BaseModel):
     paths: PathsConfig = Field(default_factory=PathsConfig)
     personalities: PersonalitiesConfig = Field(default_factory=PersonalitiesConfig)
     dev: DevConfig = Field(default_factory=DevConfig)  # 開発用設定
+    publishing: PublishingConfig = Field(default_factory=PublishingConfig)
 
 
 # =============================================================================

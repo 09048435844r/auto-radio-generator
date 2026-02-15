@@ -1,8 +1,8 @@
-# 🎙️ Auto Radio Generator - Project Current Status Report
+# プロジェクト現況レポート: Auto Radio Generator
 
-**Generated:** 2026-02-07  
-**Version:** v3.2.0 (GPU / Mock / UI)  
-**Branch:** master
+**生成日時**: 2026-02-15 00:00:00
+**バージョン**: v3.2.0
+**ブランチ**: main
 
 ---
 
@@ -88,33 +88,33 @@ auto_radio_generator/
 
 ```txt
 # Configuration & Validation
-pydantic>=2.0.0          # Data model definitions
-pydantic-settings>=2.0.0 # Settings management
-python-dotenv>=1.0.0     # Environment variable loading
-PyYAML>=6.0.0            # YAML configuration files
+pydantic>=2.0.0          # データモデル定義
+pydantic-settings>=2.0.0 # 設定管理
+python-dotenv>=1.0.0     # 環境変数読み込み
+PyYAML>=6.0.0            # YAML設定ファイル
 
 # AI APIs
-google-genai>=1.0.0      # Gemini API (script generation)
-openai>=1.0.0            # Perplexity API (research, OpenAI-compatible)
+google-genai>=1.0.0      # Gemini API (台本生成)
+openai>=1.0.0            # Perplexity API (リサーチ、OpenAI互換)
 
 # Audio Processing
-pydub>=0.25.1            # Audio file manipulation
-numpy>=1.24.0            # Audio data processing
+pydub>=0.25.1            # 音声ファイル操作
+numpy>=1.24.0            # 音声データ処理
 
 # Image Processing
-Pillow>=10.0.0           # Thumbnail generation
-budoux>=0.6.0            # Natural Japanese line breaks
+Pillow>=10.0.0           # サムネイル生成
+budoux>=0.6.0            # 日本語の自然な改行
 
 # HTTP Client
-httpx>=0.27.0            # VOICEVOX API communication (async support)
+httpx>=0.27.0            # VOICEVOX API通信（非同期対応）
 
 # CLI & Utilities
-rich>=13.0.0             # Console output decoration
+rich>=13.0.0             # コンソール出力装飾
 
 # Web UI
-gradio>=4.0.0            # Browser-based UI (tab interface)
+gradio>=4.0.0            # ブラウザベースUI（タブ式インターフェース）
 
-# External Dependencies (manual installation required):
+# External Dependencies (要手動インストール):
 # - VOICEVOX Engine: https://voicevox.hiroshiba.jp/
 # - FFmpeg: https://ffmpeg.org/
 ```
@@ -128,18 +128,21 @@ PERPLEXITY_API_KEY=pplx-********************************
 # Google Gemini API Key (https://aistudio.google.com/)
 GEMINI_API_KEY=AIzaSy*************************************
 
-# VOICEVOX Engine URL (when running locally)
+# VOICEVOX Engine URL (ローカルで起動している場合)
 VOICEVOX_BASE_URL=http://localhost:50021
 ```
 
 ### 2.3 Configuration Overview (`config.yaml`)
 
-**Key Settings:**
-- **Researcher**: Perplexity API configuration (5 research modes)
-- **Script Generator**: Gemini API configuration (台本生成)
-- **Audio Synthesizer**: VOICEVOX settings (speaker IDs, speed, pitch)
-- **Video Renderer**: FFmpeg settings (resolution, codec, bitrate)
-- **Personalities**: Character definitions (main/sub speakers)
+| セクション | 内容 |
+|-----------|------|
+| `researcher` | Perplexity API設定（5つのリサーチモード: debate/voices/trivia/weekly_digest/lecture） |
+| `script_generator` | Gemini API設定（model: gemini-3-pro-preview, fallback: gemini-2.5-pro） |
+| `audio_synthesizer` | VOICEVOX設定（speaker IDs, speed, pitch, pause） |
+| `video_renderer` | FFmpeg設定（1920x1080, NVENC GPU対応, loudnorm, spectrum可視化） |
+| `paths` | アセット・出力ディレクトリ設定 |
+| `personalities` | キャラクター定義（ずんだもん / めたん） |
+| `dev` | 開発用設定（mock_mode, mock_data_path） |
 
 ---
 
@@ -147,132 +150,174 @@ VOICEVOX_BASE_URL=http://localhost:50021
 
 ### 3.1 Entry Points
 
-#### `app.py` - Gradio Web UI (Main Entry Point)
+#### `app.py` — Gradio Web UI (1885行)
 
 ```python
-"""自動ラジオ動画生成システム - Gradio Web UI
-v3.1.1 機能:
-- タブ式UI: 自動生成とマニュアル制作を分離
-- マニュアル制作ワークフロー: Step A(台本) → Step B(音声) → Step C(動画)
-- 設定の永続化: ユーザー設定を自動保存・復元
-- 処理ログ出力: 各実行の詳細ログをファイルに保存
-"""
+"""自動ラジオ動画生成システム - Gradio Web UI v3.2.0"""
+import gradio as gr
+from workflow import UIOverrides, run_workflow_sync, WorkflowResult, scan_assets, create_script_generator, load_config
+from core.models import Script
+from core.interfaces import ResearchResult
+from core.settings_manager import SettingsManager
 
-# Global state management
-_log_buffer: list[str] = []
-_settings_manager = SettingsManager(PROJECT_ROOT / "user_settings.json")
+_log_messages: list[str] = []
+_settings_manager = SettingsManager()
 
-def append_log(message: str) -> None:
-    """ログバッファに追加"""
-    # ...
+def clear_logs() -> None: ...
+def append_log(msg: str) -> None: ...
+def get_logs() -> str: ...
 
-def clear_logs() -> None:
-    """ログバッファをクリア"""
-    # ...
-
-def generate_video_auto(
-    theme: str,
-    research_mode: str,
-    enable_research: bool,
-    # ... other parameters
-) -> tuple[Path | None, str, str, str, str]:
-    """自動生成タブのメイン処理"""
-    # 1. リサーチ実行
-    # 2. 台本生成
-    # 3. 音声合成
-    # 4. 動画レンダリング
-    # 5. サムネイル生成
-    # 6. メタデータ生成
-    # ...
-
-def generate_script_step_a(
-    research_result: str,
-    theme: str,
+def generate_video(
+    theme: str, research_mode: str, background_image: str, bgm_file: str,
+    bgm_volume: float, fade_time: float, speed_scale: float,
+    enable_spectrum: bool, use_mock: bool = False, avoid_topics: str = "",
     progress=gr.Progress()
-) -> tuple[str, str]:
-    """Step A: 台本生成"""
-    # ...
+) -> tuple[str | None, str, str, str, str]:
+    """自動生成タブのメイン処理 → run_workflow_sync を呼び出し"""
+    ...
 
-def synthesize_audio_step_b(
-    script_json: str,
-    # ... audio parameters
-    progress=gr.Progress()
-) -> tuple[str, str, str]:
-    """Step B: 音声合成"""
-    # ...
+def generate_script_only(theme: str, research_mode: str, progress=gr.Progress()) -> tuple[str, str]:
+    """台本のみ生成（AIプロデューサー → リサーチ → 台本）"""
+    ...
 
-def render_video_step_c(
-    audio_path: str,
-    subtitle_path: str,
-    # ... video parameters
-    progress=gr.Progress()
-) -> tuple[str, str]:
-    """Step C: 動画レンダリング"""
-    # ...
+def synthesize_audio_from_script(script_json: str, progress=gr.Progress()) -> tuple[...]:
+    """台本JSONから音声合成"""
+    ...
+
+def render_video_from_assets(audio_path, subtitle_path, background_path, ..., progress=gr.Progress()) -> tuple[...]:
+    """アセットから動画レンダリング"""
+    ...
+
+def generate_script_from_research(research_text: str, theme: str, progress=gr.Progress()) -> tuple[str, str]:
+    """リサーチテキストから台本生成"""
+    ...
+
+# --- Step Mode (こだわりステップモード) ---
+def execute_step0_planning(theme, research_mode, progress) -> tuple[str, str, str, str]: ...
+def execute_step1_scripting(theme, research_mode, query1, query2, query3, progress) -> tuple[...]: ...
+def execute_step2_production(title, description, script_json, ..., progress) -> tuple[str | None, str]: ...
 
 def create_ui() -> gr.Blocks:
     """Gradio UIを作成"""
-    with gr.Blocks(title="自動ラジオ動画生成システム v3.1.1 (JSON Mode)") as app:
-        # Tab 1: 自動生成 (Classic)
-        # Tab 2: マニュアル制作 (Step-by-Step)
-        # Tab 3: 使い方
-        # ...
-    return app
+    # Tab 1: 🚀 動画生成（自動）
+    # Tab 2: 🎛️ こだわりステップモード（Step 0→1→2）
+    # Tab 3: 📝 マニュアル制作（台本→音声→動画）
+    # Tab 4: 📖 使い方
+    ...
 
-if __name__ == "__main__":
-    demo = create_ui()
-    demo.launch(server_name="0.0.0.0", server_port=7860, share=False)
+def main():
+    app = create_ui()
+    app.launch(server_name="0.0.0.0", server_port=7860)
 ```
 
-#### `workflow.py` - Core Workflow Orchestration
+#### `workflow.py` — Core Workflow Orchestration (1351行)
 
 ```python
-"""ワークフロー実行エンジン"""
+"""自動ラジオ動画生成システム - 共通ワークフロー関数"""
+
+@dataclass
+class UIOverrides:
+    research_mode: Optional[ResearchMode] = None
+    enable_research: bool = True
+    bgm_volume: Optional[float] = None
+    fade_in_sec: Optional[float] = None
+    fade_out_sec: Optional[float] = None
+    enable_spectrum: Optional[bool] = None
+    speed_scale: Optional[float] = None
+    background_image: Optional[str] = None
+    bgm_file: Optional[str] = None
 
 @dataclass
 class WorkflowResult:
-    """ワークフロー実行結果"""
     success: bool
-    video_path: Optional[Path]
-    script: Script
-    audio_path: Optional[Path]
-    subtitle_path: Optional[Path]
-    duration_sec: float
-    file_size_mb: float
-    usage: TotalUsage
-    cost: float
-    cost_report: str
-    metadata_content: str
-    formatted_title: str
-    formatted_description: str
+    video_path: Optional[Path] = None
+    script: Optional[Script] = None
+    audio_path: Optional[Path] = None
+    subtitle_path: Optional[Path] = None
+    duration_sec: float = 0.0
+    file_size_mb: float = 0.0
+    error_message: Optional[str] = None
+    usage: Optional[TotalUsage] = None
+    cost: Optional[CostBreakdown] = None
+    cost_report: str = ""
+    metadata_content: str = ""
+    formatted_title: str = ""
+    formatted_description: str = ""
 
-def workflow(
-    theme: str,
-    config: Config,
-    # ... parameters
+@dataclass
+class PlanningPhaseResult:
+    queries: list[str]; angle: str; gemini_usage: Optional[GeminiUsage] = None; ...
+
+@dataclass
+class ScriptingPhaseResult:
+    script: Script; research_content: Optional[str] = None; ...
+
+@dataclass
+class ProductionPhaseResult:
+    video_path: Path; audio_path: Path; subtitle_path: Path; chapters: list[ChapterMarker]; ...
+
+@dataclass
+class ProgressCallback:
+    log_callback: Optional[Callable] = None
+    progress_callback: Optional[Callable] = None
+    def log(self, msg: str): ...
+    def progress(self, ratio: float, description: str): ...
+
+class LogFileWriter:
+    def __init__(self, output_dir: Path): ...
+    def write(self, msg: str): ...
+    def finalize(self): ...
+
+async def execute_planning_phase(theme, mode, config, instruction=None, callbacks=None) -> PlanningPhaseResult:
+    """Phase 1: AIプロデューサーが検索計画を作成"""
+    ...
+
+async def execute_scripting_phase(
+    theme, mode, queries, config, output_dir,
+    enable_research=True, excluded_topics=None, avoid_topics=None, callbacks=None
+) -> ScriptingPhaseResult:
+    """Phase 2: リサーチ → 台本生成（avoid_topics=Negative Prompt対応）"""
+    ...
+
+async def execute_production_phase(script, config, output_dir, project_root, speed_scale=None, callbacks=None) -> ProductionPhaseResult:
+    """Phase 3: 音声合成 → 動画生成 → サムネイル"""
+    ...
+
+def run_workflow_sync(
+    theme, overrides=None, log_callback=None, progress_callback=None,
+    use_mock=False, avoid_topics=None
 ) -> WorkflowResult:
-    """メインワークフロー実行"""
-    # 1. リサーチフェーズ
-    # 2. 台本生成フェーズ
-    # 3. 音声合成フェーズ
-    # 4. 動画レンダリングフェーズ
-    # 5. サムネイル生成フェーズ
-    # 6. メタデータ生成フェーズ (packaging)
-    # ...
+    """同期ワークフロー実行（app.pyから呼び出し）"""
+    # Phase 1: 企画（検索計画作成）
+    # Phase 2: 台本作成（リサーチ + 台本生成）
+    # Phase 3: 制作（音声合成 + 動画生成）
+    # Phase 4: 後処理（YouTubeメタデータ + サムネイル + コスト計算）
+    ...
 
-def _generate_youtube_metadata(
-    script: Script,
-    chapters: list[ChapterMarker],
-    output_path: Path,
-    theme: str = ""
-) -> dict:
-    """YouTube投稿用のメタデータファイルを生成（packagingプロンプト使用）"""
-    # Gemini APIでメタデータ生成
-    # - title: AI生成タイトル
-    # - thumbnail_title: サムネイル用キャッチフレーズ
-    # - description: AI生成概要文
-    # チャプター情報を概要欄の先頭に配置
-    # ...
+def _generate_youtube_metadata(script, chapters, output_path, theme="") -> dict:
+    """YouTube投稿用メタデータ生成（Gemini packaging prompt使用）"""
+    # 成功時: {"title": ..., "thumbnail_title": ..., "description": ...}
+    # 失敗時: フォールバックでscript.title/descriptionを使用
+    ...
+```
+
+#### `main.py` — CLI Entry Point (162行)
+
+```python
+"""自動ラジオ動画生成システム - メインエントリーポイント"""
+from rich.console import Console
+from rich.panel import Panel
+from rich.prompt import Prompt
+
+def create_script_generator(config) -> IScriptGenerator: ...
+
+async def main():
+    # 1. 設定読み込み
+    # 2. VOICEVOX/FFmpeg確認
+    # 3. テーマ入力
+    # 4. 台本生成 → プレビュー → 続行確認
+    # 5. 音声合成 → 動画生成
+    ...
 ```
 
 ---
@@ -282,362 +327,365 @@ def _generate_youtube_metadata(
 #### `core/models/script.py`
 
 ```python
-"""台本データモデル"""
-from pydantic import BaseModel, Field
-from typing import Literal, Optional
+SpeakerID = Literal["A", "B"]
 
 class DialogueLine(BaseModel):
-    """対話の1行を表すモデル"""
-    speaker_id: Literal["main", "sub"]
-    text: str
-    section: Optional[str] = None  # セクションマーカー
+    speaker: SpeakerID          # "A" or "B"
+    text: str                   # セリフ本文（空文字不可）
+    emotion: Optional[str]      # 感情指定
+    section: Optional[str]      # セクションマーカー（チャプター用）
+
+    @model_validator(mode='before')
+    def upgrade_legacy_data(cls, data): ...  # speaker_id → speaker 自動変換
 
 class Script(BaseModel):
-    """台本全体を表すモデル"""
-    title: str
-    thumbnail_title: str = ""
-    description: str
-    dialogue: list[DialogueLine] = []
-    
-    def to_prompt_format(self) -> str:
-        """プロンプト表示用のフォーマット"""
-        # ...
+    title: str                          # ラジオのタイトル
+    theme: str = ""                     # テーマ
+    sections: List[DialogueLine]        # 会話リスト（最低10ターン）
+    thumbnail_title: Optional[str]      # サムネイル用タイトル
+    description: Optional[str]          # 概要欄テキスト
+
+    @model_validator(mode='before')
+    def convert_dialogue_to_sections(cls, data): ...  # dialogue → sections 自動変換
+
+    @property
+    def dialogue(self) -> List[DialogueLine]: return self.sections  # 後方互換
+```
+
+#### `core/models/config.py`
+
+```python
+class EnvSettings(BaseSettings):
+    """環境変数（.env）"""
+    perplexity_api_key: str = Field(default="", alias="PERPLEXITY_API_KEY")
+    gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
+    voicevox_base_url: str = Field(default="http://localhost:50021", alias="VOICEVOX_BASE_URL")
+
+class YamlConfig(BaseModel):
+    """config.yaml全体"""
+    researcher: ResearcherConfig
+    script_generator: ScriptGeneratorConfig
+    audio_synthesizer: AudioSynthesizerConfig
+    video_renderer: VideoRendererConfig
+    paths: PathsConfig
+    personalities: PersonalitiesConfig
+    dev: DevConfig  # mock_mode, mock_data_path
+
+class AppConfig(BaseModel):
+    """統合設定"""
+    env: EnvSettings
+    yaml: YamlConfig
+    project_root: Path
+
+def load_config(project_root=None, config_file="config.yaml") -> AppConfig: ...
 ```
 
 #### `core/models/research.py`
 
 ```python
-"""リサーチ結果データモデル"""
-from pydantic import BaseModel
+class ResearchSource(BaseModel):
+    title: str; url: str; snippet: Optional[str]
 
 class ResearchResult(BaseModel):
-    """リサーチ結果を表すモデル"""
-    mode: str          # リサーチモード
-    content: str       # リサーチ内容
-    usage: dict        # API使用量
+    query: str; raw_content: str; sources: List[ResearchSource]
+    timestamp: Optional[str]; provider: str = "perplexity"
+    mode: Optional[str]; content: Optional[str]  # 後方互換
+
+class ResearchPlan(BaseModel):
+    queries: list[str]  # 検索クエリリスト（1-5個）
+    angle: str          # 台本の切り口
 ```
 
 #### `core/models/usage.py`
 
 ```python
-"""API使用量トラッキングモデル"""
-from pydantic import BaseModel
-
-class GeminiUsage(BaseModel):
-    """Gemini API使用量"""
-    input_tokens: int = 0
-    output_tokens: int = 0
+@dataclass
+class PerplexityUsage:
     request_count: int = 0
-    model_name: str = ""
 
-class PerplexityUsage(BaseModel):
-    """Perplexity API使用量"""
-    # ...
+@dataclass
+class GeminiUsage:
+    input_tokens: int = 0; output_tokens: int = 0; request_count: int = 0; model_name: str = ""
 
-class VoicevoxUsage(BaseModel):
-    """VOICEVOX使用量"""
-    # ...
+@dataclass
+class VoicevoxUsage:
+    phrase_count: int = 0; total_duration_sec: float = 0.0
 
-class TotalUsage(BaseModel):
-    """全体の使用量"""
-    gemini: GeminiUsage
-    perplexity: PerplexityUsage
-    voicevox: VoicevoxUsage
-    total_duration_sec: float = 0.0
+@dataclass
+class TotalUsage:
+    perplexity: PerplexityUsage; gemini: GeminiUsage; voicevox: VoicevoxUsage
+    total_duration_sec: float = 0.0; research_duration_sec: float = 0.0; ...
+
+@dataclass
+class CostBreakdown:
+    perplexity_usd: float = 0.0; gemini_input_usd: float = 0.0; ...
+    total_usd: float = 0.0; total_jpy: float = 0.0; is_free_tier: bool = False
 ```
 
 ---
 
-### 3.3 Service Layer
-
-#### `services/script_generation/gemini_client.py`
+### 3.3 Interfaces (`core/interfaces/`)
 
 ```python
-"""Gemini API クライアント（台本生成）"""
+# researcher.py
+ResearchMode = Literal["debate", "voices", "trivia", "weekly_digest", "lecture"]
 
+@dataclass
+class ResearchResult:
+    topic: str; mode: ResearchMode; content: str; sources: list[str] | None; usage: PerplexityUsage | None
+
+class IResearcher(ABC):
+    async def research(self, topic: str, mode: ResearchMode) -> ResearchResult: ...
+    async def check_api_status(self) -> bool: ...
+
+# script_generator.py
+class IScriptGenerator(ABC):
+    async def generate(self, theme: str, research_data: Optional[ResearchResult] = None) -> Script: ...
+
+# audio_synthesizer.py
+@dataclass
+class ChapterMarker:
+    start_time_sec: float; title: str; section_id: str
+
+@dataclass
+class SynthesisResult:
+    audio_path: Path; subtitle_path: Path; total_duration_sec: float; chapters: list[ChapterMarker]
+
+class IAudioSynthesizer(ABC):
+    async def synthesize(self, script: Script, output_dir: Path) -> SynthesisResult: ...
+    async def check_engine_status(self) -> bool: ...
+
+# video_renderer.py
+@dataclass
+class RenderResult:
+    video_path: Path; duration_sec: float; file_size_mb: float
+
+class IVideoRenderer(ABC):
+    async def render(self, synthesis_result, background_image, bgm_file, output_path, subtitle_path=None) -> RenderResult: ...
+    def check_ffmpeg_available(self) -> bool: ...
+```
+
+---
+
+### 3.4 Service Layer
+
+#### `services/script_generation/gemini_client.py` (446行)
+
+```python
 class GeminiClient(IScriptGenerator):
-    """Gemini APIを使用した台本生成クライアント"""
-    
-    def __init__(self, config: Config):
-        self.config = config
-        self.client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
-        self.model_name = config.yaml.script_generator.model
-        self.max_tokens = config.yaml.script_generator.max_tokens
-    
-    async def generate(
-        self,
-        theme: str,
-        research_data: Optional[ResearchResult] = None
-    ) -> Script:
-        """台本を生成"""
-        # 1. システムプロンプト取得
-        # 2. ユーザープロンプト構築
-        # 3. Gemini API呼び出し (JSON Mode有効)
-        # 4. レスポンス解析
-        # ...
-    
-    def _call_api(self, system_prompt: str, user_prompt: str) -> tuple[str, GeminiUsage]:
-        """Gemini APIを呼び出す"""
-        response = self.client.models.generate_content(
-            model=self.model_name,
-            contents=[...],
-            config=types.GenerateContentConfig(
-                max_output_tokens=self.max_tokens,
-                temperature=0.85,
-                response_mime_type="application/json",  # ★ JSON Mode有効化
-            )
-        )
-        return response.text, usage
-    
-    def _parse_response(self, response_text: str) -> Script:
-        """APIレスポンスからScriptオブジェクトを生成
-        
-        JSONモード有効化により、response_textは常に正しいJSON形式で返される
-        """
-        data = json.loads(response_text.strip())  # ★ シンプルな直接解析
-        # Scriptオブジェクトに変換
-        # ...
-    
-    def generate_packaging_prompt(self, theme: str, script_summary: str) -> str:
-        """パッケージング用プロンプトでメタデータ生成"""
-        # タイトル・サムネイル文字・概要文を生成
-        # ...
+    def __init__(self, config: AppConfig):
+        self.client = genai.Client(api_key=config.env.gemini_api_key)
+        self.model_name = config.yaml.script_generator.gemini.model          # gemini-3-pro-preview
+        self.fallback_model = config.yaml.script_generator.gemini.fallback_model  # gemini-2.5-pro
+        self.prompt_manager = PromptManager()
+        self.last_usage: GeminiUsage | None = None
+
+    async def create_research_plan(self, theme, mode, instruction=None) -> ResearchPlan:
+        """AIプロデューサー: テーマから検索計画を作成（フォールバックモデル対応）"""
+        ...
+
+    def generate(self, theme, research_data=None, avoid_topics=None) -> Script:
+        """台本生成（Mock対応、Negative Prompt対応、フォールバックモデル対応）"""
+        # response_schema=Script でPydantic構造化出力を強制
+        ...
+
+    def _call_api(self, system_prompt, user_prompt, use_schema=False) -> tuple[str, GeminiUsage]:
+        """Gemini API呼び出し（JSON Mode + response_schema）"""
+        ...
+
+    def _build_user_prompt(self, theme, research_data, avoid_topics=None) -> str:
+        """ユーザープロンプト構築（avoid_topics → [NEGATIVE CONSTRAINTS]セクション注入）"""
+        ...
+
+    def _parse_response(self, response_text) -> Script:
+        """JSONパース → Pydanticバリデーション"""
+        ...
+
+    def generate_packaging_prompt(self, theme, script_summary) -> str:
+        """packagingプロンプトでYouTubeメタデータ生成"""
+        ...
 ```
 
-#### `services/research/perplexity_client.py`
+#### `services/research/perplexity_client.py` (222行)
 
 ```python
-"""Perplexity API クライアント（リサーチ）"""
+class PerplexityResearcher(IResearcher):
+    def __init__(self, config: AppConfig):
+        self.client = OpenAI(api_key=config.env.perplexity_api_key, base_url="https://api.perplexity.ai")
+        self.prompt_manager = PromptManager()
 
-class PerplexityClient(IResearcher):
-    """Perplexity APIを使用したリサーチクライアント"""
-    
-    def __init__(self, config: Config):
-        # ...
-    
-    async def research(self, theme: str, mode: str) -> ResearchResult:
-        """テーマをリサーチ"""
-        # 5つのモード: debate/voices/trivia/weekly_digest/lecture
-        # ...
+    async def research(self, topic, mode) -> ResearchResult:
+        """単一クエリリサーチ（Mock対応）"""
+        ...
+
+    async def research_multi(self, queries: list[str], mode) -> ResearchResult:
+        """複数クエリ並列リサーチ（asyncio.gather）+ 引用情報抽出"""
+        ...
+
+    async def check_api_status(self) -> bool: ...
 ```
 
-#### `services/audio_synthesis/voicevox_client.py`
+#### `services/audio_synthesis/voicevox_client.py` (343行)
 
 ```python
-"""VOICEVOX API クライアント（音声合成）"""
-
 class VoicevoxClient(IAudioSynthesizer):
-    """VOICEVOX APIを使用した音声合成クライアント"""
-    
-    async def synthesize_dialogue(
-        self,
-        script: Script,
-        output_dir: Path,
-        # ...
-    ) -> AudioSynthesisResult:
-        """台本から音声を合成"""
-        # 1. 各セリフを音声合成
-        # 2. 音声ファイルを結合
-        # 3. 字幕ファイル生成 (ASS形式)
-        # 4. チャプターマーカー生成
-        # ...
+    def __init__(self, config: AppConfig):
+        self.base_url = config.env.voicevox_base_url
+        self.speakers = config.yaml.audio_synthesizer.speakers  # main=3(ずんだもん), sub=2(めたん)
+
+    async def synthesize(self, script, output_dir, speed_scale_override=None) -> SynthesisResult:
+        """台本→音声合成（Mock対応、チャプターマーカー生成、ASS字幕生成）"""
+        # 冒頭2秒 + 音声合成 + 末尾5秒の無音追加
+        ...
+
+    async def _synthesize_phrase(self, client, text, speaker_id, speed_scale) -> bytes: ...
+    def _combine_audio(self, phrase_data, pause_ms) -> AudioSegment: ...
+    def _generate_ass(self, phrase_data, output_path) -> None:
+        """ASS字幕生成（話者ごとに色分け、BudouXで自然な改行）"""
+        ...
+    def _get_chapter_title(self, section_id, text) -> str: ...
 ```
 
-#### `services/video_rendering/ffmpeg_renderer.py`
+#### `services/video_rendering/ffmpeg_renderer.py` (319行)
 
 ```python
-"""FFmpeg ラッパー（動画レンダリング）"""
+class FfmpegRenderer(IVideoRenderer):
+    def __init__(self, config: AppConfig):
+        self.video_config = config.yaml.video_renderer
+        self.ffmpeg_path = self._find_ffmpeg()
 
-class FfmpegRenderer:
-    """FFmpegを使用した動画レンダリング"""
-    
-    def render_video(
-        self,
-        audio_path: Path,
-        background_path: Path,
-        subtitle_path: Path,
-        output_path: Path,
-        # ...
-    ) -> VideoRenderResult:
-        """動画をレンダリング"""
-        # FFmpegコマンド構築・実行
-        # - 背景画像
-        # - 音声トラック
-        # - BGM（フェードイン・フェードアウト）
-        # - 字幕（ASS形式）
-        # - 音声スペクトラム可視化
-        # ...
+    async def render(self, synthesis_result, background_image, bgm_file, output_path, subtitle_path=None) -> RenderResult:
+        """動画生成（デバッグログ付き）"""
+        ...
+
+    def _build_ffmpeg_command(self, background_image, audio_file, bgm_file, subtitle_file, output_path, ...) -> list[str]:
+        """FFmpegコマンド構築"""
+        # BGMフィルタ: volume → afade in/out
+        # 音声ミックス: amix → loudnorm (I=-14, TP=-1, LRA=11) ← YouTube推奨
+        # 字幕: Windows絶対パスエスケープ（\→/, :→\:）
+        # 日付表示: drawtext（右上透かし）
+        # スペクトラム: showwaves → overlay
+        # GPU切替: use_gpu → h264_nvenc (p4/vbr/cq23) or libx264 (medium/crf23)
+        ...
+
+    def check_ffmpeg_available(self) -> bool: ...
 ```
 
-#### `services/media_processing/thumbnail_generator.py`
+#### `services/media_processing/thumbnail_generator.py` (552行)
 
 ```python
-"""サムネイル画像生成"""
-
 class ThumbnailGenerator:
-    """サムネイル画像を生成"""
-    
-    def generate(
-        self,
-        title: str,
-        background_path: Path,
-        output_path: Path,
-        thumbnail_title: str = "",
-        # ...
-    ) -> Path:
-        """サムネイル画像を生成"""
-        # 1. 背景画像読み込み・リサイズ (1280x720)
-        # 2. 背景を暗くしてブラー
-        # 3. タイトルテキスト描画（中央）
-        # 4. 日付バッジ描画（右上）
-        # センターセーフ方式で1:1トリミング対応
-        # ...
-    
-    def _draw_title_text(self, img: Image.Image, title: str) -> Image.Image:
-        """タイトルテキストを描画（中央）"""
-        # AI生成のthumbnail_titleを使用
-        # ...
-    
-    def _draw_date_badge(self, img: Image.Image) -> Image.Image:
-        """日付バッジを描画（右上）"""
-        # "YYYY.MM.DD制作" 形式
-        # ...
+    THUMBNAIL_WIDTH = 1280; THUMBNAIL_HEIGHT = 720
+
+    def generate(self, title, background_path, output_path, thumbnail_title="", ...) -> Path:
+        """サムネイル生成（センターセーフ方式: 1:1トリミング対応）"""
+        ...
+
+    def _draw_title_text(self, img, title) -> Image.Image:
+        """BudouXで自然改行、フォントサイズ自動調整（180→40px）、黒フチ白文字"""
+        ...
+
+    def _draw_date_badge(self, img) -> Image.Image:
+        """セーフエリア内右上に赤バッジ "YYYY.MM.DD制作" """
+        ...
+```
+
+#### `services/cost_calculator.py` (171行)
+
+```python
+class CostCalculator:
+    def calculate(self, usage: TotalUsage) -> CostBreakdown:
+        """Perplexity: $0.005/req, Gemini: $1.25/$5.00 per 1M tokens, VOICEVOX: $0"""
+        ...
+
+    def format_cost_report(self, usage, cost) -> str:
+        """Markdown形式のコストレポート生成"""
+        ...
 ```
 
 ---
 
-### 3.4 Core Utilities
+### 3.5 Core Utilities
 
-#### `core/prompt_manager.py`
+#### `core/prompt_manager.py` (120行)
 
 ```python
-"""プロンプトテンプレート管理"""
-
 class PromptManager:
-    """プロンプトテンプレートを管理"""
-    
-    def __init__(self, prompts_path: Path):
-        # config/prompts.yaml を読み込み
-        # ...
-    
-    def get_script_prompt(self, mode: str, title_prefix: str = "") -> str:
-        """台本生成プロンプトを取得"""
-        # ...
-    
-    def get_packaging_prompt(self) -> str:
-        """パッケージングプロンプトを取得"""
-        # メタデータ生成用
-        # ...
+    """config/prompts.yaml からプロンプトを読み込むシングルトン"""
+    def get_research_prompt(self, mode: str) -> str: ...
+    def get_script_prompt(self, prompt_type: str, **kwargs) -> str: ...
+    def get_prompt(self, section: str, key: str = "default") -> str: ...
+    def get_component(self, name: str) -> str: ...
+    def reload(self) -> None: ...
 ```
 
-#### `core/settings_manager.py`
+#### `core/settings_manager.py` (113行)
 
 ```python
-"""ユーザー設定の永続化"""
+@dataclass
+class UserSettings:
+    research_mode: str = "トリビア (雑学)"
+    background_image: Optional[str] = None
+    bgm_file: Optional[str] = None
+    bgm_volume: float = 0.15; fade_time: float = 3.0
+    speed_scale: float = 1.1; enable_spectrum: bool = True
 
 class SettingsManager:
-    """ユーザー設定を管理"""
-    
-    def load(self) -> dict:
-        """設定を読み込み"""
-        # user_settings.json から読み込み
-        # ...
-    
-    def save(self, settings: dict) -> None:
-        """設定を保存"""
-        # user_settings.json に保存
-        # ...
+    def load(self) -> UserSettings: ...
+    def save(self, settings: UserSettings): ...
+    def update_from_ui(self, research_mode, background_image, ...): ...
 ```
 
 ---
 
 ## 4. Current Status & Issues
 
-### 4.1 Latest Changes (v3.1.1 - JSON Mode)
+### 4.1 Git History (直近10コミット)
 
-**Branch:** `fix/smart-json-parsing`
+```
+42aede6 Fix: Metadata (title/description) missing bug
+3e4d6bd Refactor: Release v3.2.0 (Added Negative Prompt, Loudness Norm, Progress UI)
+96cfcec Backup: Before maintenance v3.2.0
+79dd263 Feat: Add negative prompt (avoid_topics) to UI and script generation (Retry)
+56a69bc Feat: Add audio loudness normalization (-14 LUFS) for YouTube
+09429d9 Refactor: Cleanup code and update docs for v3.1.2 (GPU/Mock/UI)
+4d7f2ca Feat: Add progress visualization with Gradio progress bar
+ec163cf Fix: Replace all speaker_id references with speaker attribute
+03b764c Fix: Replace speaker_id with speaker attribute in voicevox_client
+186ad8b Fix: Add missing 'section' field to DialogueLine model
+```
 
-**Key Improvements:**
-1. ✅ **Native JSON Mode Enabled**
-   - Added `response_mime_type="application/json"` to Gemini API calls
-   - Removed ~30 lines of regex-based JSON extraction logic
-   - Simplified error handling (no more markdown block parsing)
-   - Direct `json.loads()` parsing for reliability
+### 4.2 v3.2.0 新機能（直近で追加）
 
-2. ✅ **Code Simplification**
-   - `gemini_client.py`: Removed complex `_parse_response` logic
-   - `workflow.py`: Removed regex patterns in `_generate_youtube_metadata`
-   - Cleaner, more maintainable codebase
-
-**Files Modified:**
-- `services/script_generation/gemini_client.py`
-- `workflow.py`
-- `app.py` (version bump to v3.1.1)
-- `README.md` (added v3.1.1 features)
-
-### 4.2 Recent Version History
-
-**v3.1 (Phase 2):**
-- 🏷 Automated Metadata: AI-generated title, description, thumbnail text
-- 📜 High-Density Script: 50+ phrase generation logic
-- 🎨 Modern UI: Tab-based interface with settings persistence
-- 🛡️ Stability: Improved error handling and theme inheritance
-
-**v3.0 (Phase 1):**
-- Tab-based UI: Auto-generation vs Manual workflow separation
-- Manual workflow: Step A (Script) → Step B (Audio) → Step C (Video)
-- Settings persistence: `user_settings.json`
-- Processing logs: Detailed execution logs per run
+| 機能 | 対象ファイル | 状態 |
+|------|------------|------|
+| **Negative Prompt** (避けてほしい話題) | `app.py`, `workflow.py`, `gemini_client.py` | ✅ 実装済み |
+| **Loudness Normalization** (-14 LUFS) | `ffmpeg_renderer.py` | ✅ 実装済み |
+| **Visual Progress Bar** | `app.py`, `workflow.py` | ✅ 実装済み |
+| **Mock Mode** (API課金なしテスト) | 全サービスファイル | ✅ 実装済み |
+| **NVENC GPU Acceleration** | `ffmpeg_renderer.py`, `config.yaml` | ✅ 実装済み |
+| **Metadata Bug Fix** (タイトル/概要欄が空になるバグ) | `workflow.py` | ✅ 修正済み |
 
 ### 4.3 Known Issues & TODOs
 
-**No Critical Issues** ✅
+**TODOコメント**: プロジェクト内に `TODO` / `FIXME` コメントは **0件**。
 
-**Potential Improvements:**
-1. **Performance Optimization**
-   - Consider caching Gemini API responses for similar themes
-   - Parallel audio synthesis for multiple speakers
-
-2. **Feature Enhancements**
-   - Add more research modes (e.g., "comparison", "timeline")
-   - Support for custom voice models beyond VOICEVOX
-   - Multi-language support (currently Japanese-only)
-
-3. **Testing**
-   - Add unit tests for core models
-   - Integration tests for API clients
-   - End-to-end workflow tests
+**既知の課題:**
+1. **YouTube自動アップロード未実装** — 現在は手動でアップロード
+2. **ログの長期保存未対応** — 各実行ごとのテキストログのみ（DB/JSONL蓄積なし）
+3. **コスト追跡の永続化なし** — 月次推移の可視化ができない
+4. **テスト不足** — ユニットテスト・統合テストが未整備
+5. **`_generate_youtube_metadata`** — Gemini packaging呼び出しが失敗するとフォールバック動作（script.title使用）
 
 ### 4.4 Dependencies Status
 
-**External Dependencies:**
-- ✅ VOICEVOX Engine: Must be running on `http://localhost:50021`
-- ✅ FFmpeg: Must be installed and available in PATH
-- ✅ Gemini API: Requires valid `GEMINI_API_KEY`
-- ✅ Perplexity API: Requires valid `PERPLEXITY_API_KEY`
-
-**Python Environment:**
-- Python 3.10+ required
-- All dependencies in `requirements.txt` are stable versions
-
-### 4.5 Output Structure
-
-**Generated Files per Execution:**
-```
-output/YYYYMMDD_HHMMSS/
-├── research.json           # Raw research data
-├── research_report.md      # Formatted research report
-├── script.json             # Generated script (JSON)
-├── video_metadata.json     # AI-generated metadata
-├── metadata.txt            # YouTube metadata (formatted)
-├── thumbnail.png           # Thumbnail image (1280x720)
-├── processing_log.txt      # Execution log
-├── audio/
-│   ├── combined_audio.wav  # Final audio track
-│   └── subtitles.ass       # Subtitle file (ASS format)
-└── videos/
-    └── radio_*.mp4         # Final video output
-```
+| 依存 | 状態 | 備考 |
+|------|------|------|
+| VOICEVOX Engine | ✅ | `http://localhost:50021` で起動必須 |
+| FFmpeg | ✅ | PATH上に必要、NVENC使用時はNVIDIA GPU必須 |
+| Gemini API | ✅ | `GEMINI_API_KEY` 必須 |
+| Perplexity API | ✅ | `PERPLEXITY_API_KEY` 必須 |
+| Python | ✅ | 3.10+ 必須 |
 
 ---
 
@@ -646,79 +694,62 @@ output/YYYYMMDD_HHMMSS/
 ### 5.1 Workflow Pipeline
 
 ```
-User Input (Theme)
+User Input (Theme + avoid_topics)
     ↓
-[1] Research Phase (Perplexity API)
+[Phase 1] 企画 — AIプロデューサーが検索計画を作成 (Gemini)
     ↓
-[2] Script Generation (Gemini API + JSON Mode)
+[Phase 2-1] リサーチ — 複数クエリ並列実行 (Perplexity)
     ↓
-[3] Audio Synthesis (VOICEVOX)
+[Phase 2-2] 台本生成 — JSON Mode + response_schema (Gemini)
     ↓
-[4] Video Rendering (FFmpeg)
+[Phase 3-1] 音声合成 — 話者別合成 + ASS字幕 + チャプター (VOICEVOX)
     ↓
-[5] Thumbnail Generation (Pillow)
+[Phase 3-2] 動画生成 — BGM + loudnorm + spectrum + NVENC (FFmpeg)
     ↓
-[6] Metadata Packaging (Gemini API + JSON Mode)
+[Phase 3-3] サムネイル生成 — BudouX改行 + センターセーフ (Pillow)
     ↓
-Final Output (MP4 + Metadata)
+[Phase 4] 後処理 — YouTubeメタデータ + コスト計算 (Gemini packaging)
+    ↓
+Final Output (MP4 + metadata.txt + thumbnail.png + video_metadata.json)
 ```
 
 ### 5.2 Key Design Patterns
 
-1. **Interface-Based Architecture**
-   - `IScriptGenerator`, `IResearcher`, `IAudioSynthesizer`
-   - Easy to swap implementations (e.g., Gemini ↔ Claude)
-
-2. **Configuration-Driven**
-   - All settings in `config.yaml`
-   - Environment variables for secrets (`.env`)
-
-3. **Pydantic Models**
-   - Type-safe data validation
-   - Automatic JSON serialization/deserialization
-
-4. **Async/Await**
-   - Non-blocking API calls
-   - Efficient I/O operations
-
-5. **Rich Console Output**
-   - Beautiful CLI feedback
-   - Progress indicators for long operations
+1. **Interface First** — `core/interfaces/` に抽象クラスを定義してから実装
+2. **Config Driven** — 全設定値は `config.yaml` + `.env` で管理
+3. **Pydantic Models** — 型安全なデータバリデーション + 後方互換性バリデータ
+4. **Async/Await** — 非同期API呼び出し + asyncio.gather並列実行
+5. **Graceful Degradation** — GPU→CPU, API→Mock, メインモデル→フォールバックモデル
 
 ---
 
-## 6. Next Steps & Recommendations
+## 6. Output Structure
 
-### For Design/Requirements AI:
-
-1. **Review Current Architecture**
-   - Validate the interface-based design
-   - Suggest improvements for scalability
-
-2. **Feature Prioritization**
-   - Evaluate potential new features (see 4.3)
-   - Define requirements for next phase (v3.2?)
-
-3. **Testing Strategy**
-   - Define test coverage goals
-   - Specify integration test scenarios
-
-4. **Documentation**
-   - API documentation (docstrings → Sphinx?)
-   - User guide for manual workflow
-
-5. **Performance Benchmarks**
-   - Define acceptable execution times
-   - Identify bottlenecks for optimization
+```
+output/YYYYMMDD_HHMMSS/
+├── research.json           # リサーチ生データ
+├── research_report.md      # リサーチレポート（Markdown）
+├── full_research_report.md # Perplexity全文レポート
+├── script.json             # 生成された台本（Pydantic JSON）
+├── video_metadata.json     # AI生成メタデータ（title, thumbnail_title, description）
+├── metadata.txt            # YouTube投稿用メタデータ（整形済み）
+├── thumbnail.png           # サムネイル画像（1280x720）
+├── processing_log.txt      # 実行ログ
+├── audio/
+│   ├── combined_audio.wav  # 最終音声トラック
+│   └── subtitles.ass       # ASS字幕ファイル（話者色分け）
+└── videos/
+    └── radio_*.mp4         # 最終動画出力
+```
 
 ---
 
 ## 7. Contact & Support
 
-**Project Repository:** (Not specified)  
-**Tech Lead:** AI Assistant (Cascade)  
-**Current Branch:** `fix/smart-json-parsing`  
-**Last Updated:** 2026-02-05
+**Project Repository:** https://github.com/09048435844r/auto-radio-generator
+**Tech Lead:** AI Assistant (Cascade)
+**Current Branch:** `main`
+**Last Updated:** 2026-02-15
 
 ---
 
