@@ -617,6 +617,7 @@ def generate_video(
     use_mock: bool = False,
     avoid_topics: str = "",
     upload_to_youtube: bool = False,
+    footer_text: str = "",
     progress=gr.Progress()
 ) -> tuple[str | None, str, str, str, str, str]:
     """動画生成を実行
@@ -633,6 +634,7 @@ def generate_video(
         use_mock: Mockモードを使用するか
         avoid_topics: 避けてほしい話題（Negative Prompt）
         upload_to_youtube: YouTubeへ自動アップロードするか（UI優先）
+        footer_text: 概要欄フッター文（UI入力優先）
         progress: Gradio進捗バー
     
     Returns:
@@ -680,6 +682,7 @@ def generate_video(
         use_mock=use_mock,
         avoid_topics=avoid_topics if avoid_topics and avoid_topics.strip() else None,
         upload_override=upload_to_youtube,
+        footer_text_override=footer_text,
     )
     
     # 成功時に設定を保存
@@ -1241,6 +1244,9 @@ def create_ui() -> gr.Blocks:
     default_enable_upload = bool(
         publishing_cfg and getattr(publishing_cfg, "enable_upload", False)
     )
+    default_footer_text = (
+        getattr(publishing_cfg, "footer_text", "") if publishing_cfg else ""
+    )
     
     # アセット一覧を取得
     assets = get_asset_choices()
@@ -1411,6 +1417,13 @@ def create_ui() -> gr.Blocks:
                                     label="YouTubeに自動アップロードする",
                                     value=default_enable_upload,
                                     info="チェック時は動画生成後にYouTubeへ自動アップロードを試行します"
+                                )
+
+                                footer_text_input = gr.Textbox(
+                                    label="概要欄フッター（固定文）",
+                                    value=default_footer_text,
+                                    lines=3,
+                                    info="著作権表示・免責事項などを設定できます（UI入力が優先）"
                                 )
                                 
                                 # 実行ボタン
@@ -1770,6 +1783,7 @@ def create_ui() -> gr.Blocks:
                 use_mock,  # Mockモードチェックボックス
                 avoid_topics_input,  # 避けてほしい話題
                 upload_to_youtube_checkbox,
+                footer_text_input,
             ],
             outputs=[
                 video_output,

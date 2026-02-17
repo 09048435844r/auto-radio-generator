@@ -1,7 +1,7 @@
 """設定モデル（Pydantic）"""
 import os
 from pathlib import Path
-from typing import Literal, Dict, Optional
+from typing import Literal, Dict, Optional, List
 
 import yaml
 from pydantic import BaseModel, Field
@@ -142,6 +142,18 @@ class PublishingConfig(BaseModel):
     privacy_status: str = Field(default="unlisted")
     category_id: str = Field(default="27")  # Education
     playlist_id: str = Field(default="")
+    default_tags: List[str] = Field(
+        default_factory=lambda: ["#ずんだもん", "#VOICEVOX", "#AI", "#ラジオ"]
+    )
+    footer_text: str = Field(
+        default=(
+            "-----------------------------------\n"
+            "■使用音声\n"
+            "VOICEVOX:ずんだもん\n"
+            "VOICEVOX:四国めたん\n"
+            "-----------------------------------"
+        )
+    )
 
 
 class YamlConfig(BaseModel):

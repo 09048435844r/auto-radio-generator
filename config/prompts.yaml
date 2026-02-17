@@ -189,6 +189,7 @@ script:
     ## 出力形式（JSON）
     
     ※タイトル(title)、サムネイル(thumbnail_title)、概要(description)は空文字("")または仮の文字列で出力してください（後工程で生成するため）。
+    ※`hashtags` は日本語中心で5個前後、`references` はURL文字列の配列で出力してください（不明な場合は空配列）。
 
     必ず以下のJSON形式で出力してください：
 
@@ -197,6 +198,8 @@ script:
       "title": "",
       "thumbnail_title": "",
       "description": "",
+      "hashtags": ["#生成AI", "#テクノロジー", "#学び", "#ニュース解説", "#ラジオ"],
+      "references": ["https://example.com/source-1", "https://example.com/source-2"],
       "dialogue": [
         {{"speaker_id": "main", "text": "セリフ内容", "section": "intro"}},
         {{"speaker_id": "sub", "text": "セリフ内容"}},
@@ -214,6 +217,7 @@ script:
     - `"intro"` - 第1部の最初
     - `"main"` - 第2部の最初
     - `"ending"` - 第3部の最初
+    - `section` を付けるセリフ本文は、チャプター見出しとして使える**日本語の魅力的な見出し**で開始してください（例: 「AIがコードを書く時代、何が変わる？」）
 
     ## 対話のルール（密度と深掘りを最優先）
     1. **「わかったつもり」の禁止**:
@@ -282,6 +286,7 @@ script:
     ## 出力形式（JSON）
     
     ※タイトル(title)、サムネイル(thumbnail_title)、概要(description)は空文字("")または仮の文字列で出力してください（後工程で生成するため）。
+    ※`hashtags` は日本語中心で5個前後、`references` はURL文字列の配列で出力してください（不明な場合は空配列）。
 
     必ず以下のJSON形式で出力してください：
 
@@ -290,6 +295,8 @@ script:
       "title": "",
       "thumbnail_title": "",
       "description": "",
+      "hashtags": ["#今週のニュース", "#時事解説", "#社会トレンド", "#学び", "#ラジオ"],
+      "references": ["https://example.com/news-1", "https://example.com/news-2"],
       "dialogue": [
         {{"speaker_id": "main", "text": "セリフ内容", "section": "intro"}},
         {{"speaker_id": "sub", "text": "セリフ内容"}},
@@ -313,6 +320,7 @@ script:
     - `"news_2"` - ニュース2の最初
     - `"news_3"` - ニュース3の最初
     - `"ending"` - エンディングの最初
+    - `section` を付けるセリフ本文は、チャプター見出しとして使える**日本語の魅力的な見出し**で開始してください
 
     ## 対話のルール（密度と深掘りを最優先）
     1. **「わかったつもり」の禁止**:
@@ -374,11 +382,10 @@ script:
     ## 番組構成（厳守）
 
     ### イントロ（学習動機付けから入る）
-    1. **{sub_char.name}**: 「今日はこんな面白いことを学ぶのだ！」と学ぶ意義を語る
-    2. **{main_char.name}**: テーマについて完全に勘違いしたボケを言う
+    1. **{main_char.name}**: テーマについて完全に勘違いしたボケを言う（「〜なのだ」口調）
        - 例: 「AIって、愛のことなのだ？」「ブロックチェーンって、ブロックで作った鎖なのだ？」
-    3. **{sub_char.name}**: 「違うわよ、でもいい質問ね」と優しく訂正し、正しい定義を簡単に説明
-    4. **{main_char.name}**: 「じゃあ何なのだ？もっと知りたいのだ！」と興味を示す
+    2. **{sub_char.name}**: 「違うわよ、でもいい質問ね」と優しく訂正し、学ぶ意義を語る（「〜わよ」口調）
+    3. **{main_char.name}**: 「じゃあ何なのだ？もっと知りたいのだ！」と興味を示す
 
     ### 本編: マンツーマン指導スタイル
     以下の流れを繰り返しながら、深く理解させる：
@@ -406,14 +413,20 @@ script:
     ## 出力形式（JSON）
     
     ※タイトル(title)、サムネイル(thumbnail_title)、概要(description)は空文字("")または仮の文字列で出力してください（後工程で生成するため）。
+    ※`hashtags` は日本語中心で5個前後、`references` はURL文字列の配列で出力してください（不明な場合は空配列）。
 
     必ず以下のJSON形式で出力してください：
+    - `speaker_id: "main"` は **{main_char.name}（生徒役・「〜なのだ」口調）**
+    - `speaker_id: "sub"` は **{sub_char.name}（先生役・「〜わよ」口調）**
+    - 上記の対応を**絶対に入れ替えないこと**
 
     ```json
     {{
       "title": "",
       "thumbnail_title": "",
       "description": "",
+      "hashtags": ["#初心者向け", "#わかりやすい解説", "#学習", "#テクノロジー", "#ラジオ"],
+      "references": ["https://example.com/lecture-1", "https://example.com/lecture-2"],
       "dialogue": [
         {{"speaker_id": "main", "text": "セリフ内容", "section": "intro"}},
         {{"speaker_id": "sub", "text": "セリフ内容"}},
@@ -436,7 +449,8 @@ script:
     - `"definition"` - 基本定義の最初
     - `"metaphor"` - 比喩説明の最初
     - `"example"` - 具体例の最初
-    - `"ending"` - エンディングの最初
+    - `"ending"` - まとめの最初
+    - `section` を付けるセリフ本文は、チャプター見出しとして使える**日本語の魅力的な見出し**で開始してください
 
     ## 対話のルール（密度と深掘りを最優先）
     1. **「わかったつもり」の禁止**:

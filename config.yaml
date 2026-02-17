@@ -211,4 +211,17 @@ publishing:
   # YouTubeカテゴリID (27 = Education)
   category_id: "27"
   # YouTube再生リスト ID
-  playlist_id: "PL4WSMEk7zObEZ3vRI_0qVg7T9sgHPIeVR" 
+  playlist_id: "PL4WSMEk7zObEZ3vRI_0qVg7T9sgHPIeVR"
+  # 概要欄末尾に必ず含める固定タグ
+  default_tags:
+    - "#ずんだもん"
+    - "#VOICEVOX"
+    - "#AI"
+    - "#ラジオ"
+  # 概要欄末尾の定型フッター（著作権表示・免責等）
+  footer_text: |
+    -----------------------------------
+    ■使用音声
+    VOICEVOX:ずんだもん
+    VOICEVOX:四国めたん
+    -----------------------------------

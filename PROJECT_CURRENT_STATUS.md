@@ -744,7 +744,43 @@ output/YYYYMMDD_HHMMSS/
 
 ---
 
-## 7. Contact & Support
+## 7. 現状仕様メモ（YouTube概要欄・チャプター生成）
+
+### 7.1 Description の構築元
+
+- YouTubeアップロード時の `description` は `workflow.py` の `formatted_description` を使用。
+- 構成は以下の順序:
+  1. チャプター行（`MM:SS タイトル`、存在する場合のみ）
+  2. `script.description`
+  3. 固定ハッシュタグ（`#ずんだもん #VOICEVOX #AI #ラジオ`）
+- `_generate_youtube_metadata()` でも AI 生成の説明文を作るが、アップロード時の payload は `formatted_description` 側が優先される。
+
+### 7.2 チャプター時刻の算出
+
+- `start_time_sec` は VOICEVOX 合成処理中に、各フレーズの実際の音声長（ms）を累積して算出。
+- そのため時刻は予測値ではなく、実測ベースの累積時間。
+- ただし冒頭2秒の無音を入れる設計のため、チャプター時刻には `+2.0s` オフセットが加算される。
+
+### 7.3 モード差分
+
+- **Topic Mode（テーマ入力）**
+  - チャプタータイトルは `line.section` と発話テキストから `_get_chapter_title()` で生成。
+  - タイトル文言の元データは LLM 出力台本に依存するため、英語混在を抑止する専用正規化は現状なし。
+- **URL Mode（記事URL入力）**
+  - URL専用の入力フロー/分岐は現状未実装。
+  - 記事要約やURLリンクを概要欄へ特化挿入する専用ロジックも未実装。
+- **Mock Mode**
+  - planning/research はダミークエリで進行。
+  - 音声合成のMock結果では `chapters=[]` になるため、概要欄は実質 `script.description + 固定ハッシュタグ` 構成になりやすい。
+
+### 7.4 UI表示テキストとの一致性
+
+- `YouTubeClient.upload_video(..., description=...)` には `formatted_description` をそのまま渡している。
+- `WorkflowResult.formatted_description` も同じ文字列を保持し、UI「一括コピー用」表示に使うため、両者は同一。
+
+---
+
+## 8. Contact & Support
 
 **Project Repository:** https://github.com/09048435844r/auto-radio-generator
 **Tech Lead:** AI Assistant (Cascade)

@@ -4,6 +4,7 @@
 動画生成ワークフローを提供します。
 """
 import asyncio
+import re
 import sys
 import time
 from dataclasses import dataclass
@@ -28,7 +29,7 @@ from services.audio_synthesis import VoicevoxClient
 from services.video_rendering import FfmpegRenderer
 from services.media_processing import ThumbnailGenerator
 from services.cost_calculator import CostCalculator
-from services.publishing import YouTubeClient
+from services.publishing import YouTubeClient, build_video_description
 
 
 @dataclass
@@ -100,6 +101,84 @@ class ProductionPhaseResult:
     voicevox_usage: VoicevoxUsage
     audio_duration_sec: float = 0.0
     render_duration_sec: float = 0.0
+
+
+def _normalize_non_empty_strings(values: list[str]) -> list[str]:
+    """空要素を除去しつつ順序を維持して重複排除する。"""
+    seen = set()
+    result: list[str] = []
+    for value in values:
+        text = (value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
+
+
+def _format_chapter_lines(chapters: list[ChapterMarker]) -> list[str]:
+    """チャプター情報を `MM:SS タイトル` 形式に整形する。"""
+    chapter_lines: list[str] = []
+    for chapter in chapters or []:
+        total_seconds = int(chapter.start_time_sec)
+        minutes = total_seconds // 60
+        seconds = total_seconds % 60
+        timestamp_str = f"{minutes:02d}:{seconds:02d}"
+        chapter_lines.append(f"{timestamp_str} {chapter.title}")
+    return chapter_lines
+
+
+def _extract_urls(text: str) -> list[str]:
+    """テキスト中のURLを抽出する。"""
+    if not text:
+        return []
+    return re.findall(r"https?://[^\s\)\]]+", text)
+
+
+def _resolve_dynamic_tags(script: Script, fallback_description: str) -> list[str]:
+    """台本ハッシュタグを優先し、未設定時は説明文から抽出する。"""
+    if script.hashtags:
+        return _normalize_non_empty_strings(script.hashtags)
+    extracted = re.findall(r"#\S+", fallback_description or "")
+    return _normalize_non_empty_strings(extracted)
+
+
+def _resolve_references(script: Script, theme: str, fallback_description: str) -> list[str]:
+    """参考文献リストを台本優先で解決し、必要に応じてURLを補完する。"""
+    references = list(script.references or [])
+    references.extend(_extract_urls(fallback_description or ""))
+
+    stripped_theme = (theme or "").strip()
+    if stripped_theme.startswith(("http://", "https://")):
+        references.append(stripped_theme)
+
+    return _normalize_non_empty_strings(references)
+
+
+def _build_speaker_diagnostics(script: Script) -> tuple[list[str], bool]:
+    """話者分布と口調ヒントの診断ログを作成する。"""
+    lines = list(script.dialogue)
+    count_a = sum(1 for line in lines if line.speaker == "A")
+    count_b = sum(1 for line in lines if line.speaker == "B")
+
+    a_nanoda = sum(1 for line in lines if line.speaker == "A" and "なのだ" in line.text)
+    b_nanoda = sum(1 for line in lines if line.speaker == "B" and "なのだ" in line.text)
+    a_wayo = sum(
+        1 for line in lines if line.speaker == "A" and ("わよ" in line.text or "かしら" in line.text)
+    )
+    b_wayo = sum(
+        1 for line in lines if line.speaker == "B" and ("わよ" in line.text or "かしら" in line.text)
+    )
+
+    diagnostics = [
+        "[DEBUG] 話者分布診断:",
+        f"  - A行数: {count_a}, B行数: {count_b}",
+        f"  - 「なのだ」検出: A={a_nanoda}, B={b_nanoda}",
+        f"  - 「わよ/かしら」検出: A={a_wayo}, B={b_wayo}",
+    ]
+
+    suspected_swap = (b_nanoda > a_nanoda) and (a_wayo > b_wayo)
+    return diagnostics, suspected_swap
 
 
 @dataclass
@@ -316,6 +395,12 @@ async def execute_scripting_phase(
     script_start = time.time()
     script_generator = create_script_generator(config)
     script = script_generator.generate(theme, research_data, avoid_topics=avoid_topics)
+
+    diagnostics, suspected_swap = _build_speaker_diagnostics(script)
+    for msg in diagnostics:
+        cb.log(msg)
+    if suspected_swap:
+        cb.log("[yellow][WARN] 口調ヒント上、A/B話者の役割逆転の疑いがあります[/yellow]")
     
     gemini_usage = script_generator.last_usage
     script_duration = time.time() - script_start
@@ -726,6 +811,12 @@ async def generate_video_workflow(
         script_start = time.time()
         script_generator = create_script_generator(config)
         script = script_generator.generate(theme, research_data)
+
+        diagnostics, suspected_swap = _build_speaker_diagnostics(script)
+        for msg in diagnostics:
+            log(msg)
+        if suspected_swap:
+            log("[yellow][WARN] 口調ヒント上、A/B話者の役割逆転の疑いがあります[/yellow]")
         
         # Usage記録
         if script_generator.last_usage:
@@ -833,23 +924,38 @@ async def generate_video_workflow(
         ai_title = generated_metadata.get("title", script.title)
         formatted_title = f"{ai_title} ({creation_date}制作)"
         
-        # チャプターリストを生成
-        chapter_lines = []
-        if synthesis_result.chapters:
-            for chapter in synthesis_result.chapters:
-                total_seconds = int(chapter.start_time_sec)
-                minutes = total_seconds // 60
-                seconds = total_seconds % 60
-                timestamp = f"{minutes:02d}:{seconds:02d}"
-                chapter_lines.append(f"{timestamp} {chapter.title}")
-        
-        # 概要欄結合（チャプター + 概要文 + ハッシュタグ）
-        formatted_description_parts = []
-        if chapter_lines:
-            formatted_description_parts.append("\n".join(chapter_lines))
-        formatted_description_parts.append(script.description)
-        formatted_description_parts.append("#ずんだもん #VOICEVOX #AI #ラジオ")
-        formatted_description = "\n\n".join(formatted_description_parts)
+        publishing_config = getattr(config.yaml, "publishing", None)
+        chapter_lines = _format_chapter_lines(synthesis_result.chapters)
+
+        script_description = (
+            generated_metadata.get("description")
+            or script.description
+            or ""
+        )
+        dynamic_tags = _resolve_dynamic_tags(script, fallback_description=script_description)
+        references = _resolve_references(
+            script,
+            theme=theme,
+            fallback_description=script_description,
+        )
+
+        configured_tags = getattr(publishing_config, "default_tags", []) if publishing_config else []
+        if not isinstance(configured_tags, list):
+            configured_tags = []
+        fixed_tags = _normalize_non_empty_strings([str(tag) for tag in configured_tags])
+
+        configured_footer = (
+            getattr(publishing_config, "footer_text", "") if publishing_config else ""
+        )
+
+        formatted_description = build_video_description(
+            script_description=script_description,
+            chapters=chapter_lines,
+            references=references,
+            dynamic_tags=dynamic_tags,
+            fixed_tags=fixed_tags,
+            footer_text=(configured_footer or "").strip(),
+        )
         
         # 総所要時間
         total_usage.total_duration_sec = time.time() - workflow_start
@@ -899,6 +1005,7 @@ def run_workflow_sync(
     use_mock: bool = False,
     avoid_topics: Optional[str] = None,
     upload_override: Optional[bool] = None,
+    footer_text_override: Optional[str] = None,
 ) -> WorkflowResult:
     """同期版ワークフロー実行（Gradioから呼び出し用）
     
@@ -913,6 +1020,7 @@ def run_workflow_sync(
         use_mock: Mockモードを使用するか（開発・テスト用）
         avoid_topics: 避けてほしい話題（Negative Prompt、オプション）
         upload_override: YouTubeアップロード実行のUI優先フラグ
+        footer_text_override: 概要欄フッター文（UI入力優先）
     
     Returns:
         WorkflowResult: 実行結果（Usage/Cost情報含む）
@@ -1072,24 +1180,48 @@ def run_workflow_sync(
             creation_date = datetime.now().strftime("%Y.%m.%d")
             ai_title = generated_metadata.get("title", scripting_result.script.title)
             formatted_title = f"{ai_title} ({creation_date}制作)"
-            
-            # チャプターリストを生成
-            chapter_lines = []
-            if production_result.chapters:
-                for chapter in production_result.chapters:
-                    total_seconds = int(chapter.start_time_sec)
-                    minutes = total_seconds // 60
-                    seconds = total_seconds % 60
-                    timestamp_str = f"{minutes:02d}:{seconds:02d}"
-                    chapter_lines.append(f"{timestamp_str} {chapter.title}")
-            
-            # 概要欄結合（チャプター + 概要文 + ハッシュタグ）
-            formatted_description_parts = []
-            if chapter_lines:
-                formatted_description_parts.append("\n".join(chapter_lines))
-            formatted_description_parts.append(scripting_result.script.description)
-            formatted_description_parts.append("#ずんだもん #VOICEVOX #AI #ラジオ")
-            formatted_description = "\n\n".join(formatted_description_parts)
+
+            publishing_config = getattr(config.yaml, "publishing", None)
+            chapter_lines = _format_chapter_lines(production_result.chapters)
+
+            script_description = (
+                generated_metadata.get("description")
+                or scripting_result.script.description
+                or ""
+            )
+
+            dynamic_tags = _resolve_dynamic_tags(
+                scripting_result.script,
+                fallback_description=script_description,
+            )
+            references = _resolve_references(
+                scripting_result.script,
+                theme=theme,
+                fallback_description=script_description,
+            )
+
+            configured_tags = getattr(publishing_config, "default_tags", []) if publishing_config else []
+            if not isinstance(configured_tags, list):
+                configured_tags = []
+            fixed_tags = _normalize_non_empty_strings([str(tag) for tag in configured_tags])
+
+            configured_footer = (
+                getattr(publishing_config, "footer_text", "") if publishing_config else ""
+            )
+            resolved_footer = (
+                (footer_text_override or "").strip()
+                if isinstance(footer_text_override, str) and footer_text_override.strip()
+                else (configured_footer or "").strip()
+            )
+
+            formatted_description = build_video_description(
+                script_description=script_description,
+                chapters=chapter_lines,
+                references=references,
+                dynamic_tags=dynamic_tags,
+                fixed_tags=fixed_tags,
+                footer_text=resolved_footer,
+            )
             
             # 総所要時間
             total_usage.total_duration_sec = time.time() - workflow_start
@@ -1101,7 +1233,6 @@ def run_workflow_sync(
 
             # YouTubeアップロード（失敗しても動画生成結果は成功扱い）
             uploaded_video_url: Optional[str] = None
-            publishing_config = getattr(config.yaml, "publishing", None)
             should_upload = (
                 upload_override
                 if upload_override is not None

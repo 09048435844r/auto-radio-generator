@@ -54,6 +54,8 @@ class Script(BaseModel):
     # メタデータ（デフォルトNone）
     thumbnail_title: Optional[str] = None
     description: Optional[str] = None
+    hashtags: List[str] = Field(default_factory=list, description="動画向けハッシュタグ一覧")
+    references: List[str] = Field(default_factory=list, description="参考文献URL一覧")
     
     # 後方互換性のため、dialogueフィールドも受け入れる
     @model_validator(mode='before')
