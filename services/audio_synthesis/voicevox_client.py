@@ -111,7 +111,7 @@ class VoicevoxClient(IAudioSynthesizer):
                     # セクション開始を検出してチャプターを記録
                     # Note: 冒頭に2秒の無音が追加されるため、チャプタータイムスタンプを2秒オフセット
                     if line.section:
-                        chapter_title = self._get_chapter_title(line.section, line.text)
+                        chapter_title = self._get_chapter_title(line.section, line.text, line.chapter_title)
                         pre_roll_offset_sec = 2.0  # 冒頭の無音時間（秒）
                         adjusted_time_sec = (current_time_ms / 1000.0) + pre_roll_offset_sec
                         chapters.append(ChapterMarker(
@@ -317,11 +317,27 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         centiseconds = (ms % 1000) // 10
         return f"{hours:01d}:{minutes:02d}:{seconds:02d}.{centiseconds:02d}"
     
-    def _get_chapter_title(self, section_id: str, text: str) -> str:
-        """セクションIDからチャプタータイトルを生成"""
-        # セクションIDのマッピング
+    def _get_chapter_title(self, section_id: str, text: str, chapter_title: Optional[str] = None) -> str:
+        """セクションIDからチャプタータイトルを生成
+        
+        Args:
+            section_id: セクションID (例: 'intro', 'news_1')
+            text: セリフテキスト
+            chapter_title: AI生成のチャプタータイトル（優先使用）
+        
+        Returns:
+            チャプタータイトル文字列
+        """
+        # 優先度1: AI生成のchapter_titleがあれば使用
+        if chapter_title and chapter_title.strip():
+            return chapter_title.strip()
+        
+        # 優先度2: 固定マッピングにフォールバック（後方互換性のため）
         section_titles = {
             "intro": "オープニング",
+            "definition": "基礎解説",
+            "metaphor": "たとえで理解",
+            "example": "活用例",
             "main": "本題",
             "news_1": "ニュース1",
             "news_2": "ニュース2",

@@ -38,8 +38,8 @@ def build_video_description(
     5. 【参考文献】(references - 箇条書き)
     6. <空行>
     7. 【タグ】(dynamic_tags + fixed_tags)
-    8. <--------------------> (区切り線)
-    9. 【Footer】(footer_text)
+    8. <空行>
+    9. footer_text
     """
     description_text = (script_description or "").strip() or "（概要未設定）"
     chapter_lines = _normalize_non_empty(chapters)
@@ -71,8 +71,6 @@ def build_video_description(
         lines.append("#ラジオ")
     lines.append("")
 
-    lines.append("--------------------")
-    lines.append("【Footer】")
     lines.append(footer)
 
     return "\n".join(lines)

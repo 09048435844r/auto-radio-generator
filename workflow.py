@@ -1418,26 +1418,8 @@ def _generate_youtube_metadata(
             print(f"[DEBUG] JSONレスポンス: {metadata_result[:200]}...")
             metadata = json.loads(metadata_result.strip())
             
-            # チャプター情報をテキスト化
-            chapters_text = ""
-            if chapters:
-                chapter_lines = []
-                for chapter in chapters:
-                    # 秒をMM:SS形式に変換
-                    total_seconds = int(chapter.start_time_sec)
-                    minutes = total_seconds // 60
-                    seconds = total_seconds % 60
-                    timestamp = f"{minutes:02d}:{seconds:02d}"
-                    chapter_lines.append(f"{timestamp} {chapter.title}")
-                
-                chapters_text = "\n".join(chapter_lines)
-            
-            # チャプター情報を概要欄の先頭に配置
-            ai_description = metadata.get("description", "")
-            if chapters_text:
-                metadata["description"] = "【目次】\n" + chapters_text + "\n\n" + ai_description
-            else:
-                metadata["description"] = ai_description
+            # 概要欄は後工程のmetadata_builderで構造化するため、ここではAI生成本文のみ保持
+            metadata["description"] = (metadata.get("description", "") or "").strip()
             
             lines = [
                 "=" * 50,

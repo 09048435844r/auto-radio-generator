@@ -12,6 +12,7 @@ class DialogueLine(BaseModel):
     text: str = Field(..., min_length=1, description="セリフ本文（空文字不可）")
     emotion: Optional[str] = Field(None, description="感情指定（例: joy, sorrow, neutral）")
     section: Optional[str] = Field(None, description="セクションマーカー（チャプター用、例: intro, main_1, ending）")
+    chapter_title: Optional[str] = Field(None, description="AI生成のチャプタータイトル（sectionがある場合に使用、15文字以内推奨）")
     
     # 後方互換性のため、古いJSON形式を自動変換
     @model_validator(mode='before')

@@ -201,12 +201,12 @@ script:
       "hashtags": ["#生成AI", "#テクノロジー", "#学び", "#ニュース解説", "#ラジオ"],
       "references": ["https://example.com/source-1", "https://example.com/source-2"],
       "dialogue": [
-        {{"speaker_id": "main", "text": "セリフ内容", "section": "intro"}},
+        {{"speaker_id": "main", "text": "セリフ内容", "section": "intro", "chapter_title": "魅力的な見出し"}},
         {{"speaker_id": "sub", "text": "セリフ内容"}},
         ...
-        {{"speaker_id": "main", "text": "セリフ内容", "section": "main"}},
+        {{"speaker_id": "main", "text": "セリフ内容", "section": "main", "chapter_title": "本題の見出し"}},
         ...
-        {{"speaker_id": "main", "text": "セリフ内容", "section": "ending"}},
+        {{"speaker_id": "main", "text": "セリフ内容", "section": "ending", "chapter_title": "締めの見出し"}},
         ...
       ]
     }}
@@ -217,7 +217,11 @@ script:
     - `"intro"` - 第1部の最初
     - `"main"` - 第2部の最初
     - `"ending"` - 第3部の最初
-    - `section` を付けるセリフ本文は、チャプター見出しとして使える**日本語の魅力的な見出し**で開始してください（例: 「AIがコードを書く時代、何が変わる？」）
+    
+    ## チャプタータイトル生成（重要）
+    `section` を付けるセリフには、必ず `chapter_title` フィールドを追加してください：
+    - そのセクションの内容を端的に表す**魅力的な日本語見出し**（15文字以内推奨）
+    - 例: 「AIの可能性に迫る」「未来を変える技術」「新時代の幕開け」
 
     ## 対話のルール（密度と深掘りを最優先）
     1. **「わかったつもり」の禁止**:
@@ -298,16 +302,16 @@ script:
       "hashtags": ["#今週のニュース", "#時事解説", "#社会トレンド", "#学び", "#ラジオ"],
       "references": ["https://example.com/news-1", "https://example.com/news-2"],
       "dialogue": [
-        {{"speaker_id": "main", "text": "セリフ内容", "section": "intro"}},
+        {{"speaker_id": "main", "text": "セリフ内容", "section": "intro", "chapter_title": "今週の注目ニュース"}},
         {{"speaker_id": "sub", "text": "セリフ内容"}},
         ...
-        {{"speaker_id": "main", "text": "ニュース1の見出し...", "section": "news_1"}},
+        {{"speaker_id": "main", "text": "ニュース1の見出し...", "section": "news_1", "chapter_title": "ニュース1の魅力的な見出し"}},
         ...
-        {{"speaker_id": "main", "text": "ニュース2の見出し...", "section": "news_2"}},
+        {{"speaker_id": "main", "text": "ニュース2の見出し...", "section": "news_2", "chapter_title": "ニュース2の魅力的な見出し"}},
         ...
-        {{"speaker_id": "main", "text": "ニュース3の見出し...", "section": "news_3"}},
+        {{"speaker_id": "main", "text": "ニュース3の見出し...", "section": "news_3", "chapter_title": "ニュース3の魅力的な見出し"}},
         ...
-        {{"speaker_id": "main", "text": "セリフ内容", "section": "ending"}},
+        {{"speaker_id": "main", "text": "セリフ内容", "section": "ending", "chapter_title": "今週のまとめ"}},
         ...
       ]
     }}
@@ -316,11 +320,15 @@ script:
     ## セクションマーカー（重要）
     各セクションの**最初のセリフ**にのみ `section` フィールドを付けてください：
     - `"intro"` - オープニングの最初
-    - `"news_1"` - ニュース1の最初（見出しを読み上げるセリフ）
+    - `"news_1"` - ニュース1の最初
     - `"news_2"` - ニュース2の最初
     - `"news_3"` - ニュース3の最初
     - `"ending"` - エンディングの最初
-    - `section` を付けるセリフ本文は、チャプター見出しとして使える**日本語の魅力的な見出し**で開始してください
+    
+    ## チャプタータイトル生成（重要）
+    `section` を付けるセリフには、必ず `chapter_title` フィールドを追加してください：
+    - そのニュースの核心を端的に表す**魅力的な日本語見出し**（15文字以内推奨）
+    - 例: 「AI規制の波が到来」「新技術が市場を席巻」「業界に激震走る」
 
     ## 対話のルール（密度と深掘りを最優先）
     1. **「わかったつもり」の禁止**:
@@ -428,16 +436,16 @@ script:
       "hashtags": ["#初心者向け", "#わかりやすい解説", "#学習", "#テクノロジー", "#ラジオ"],
       "references": ["https://example.com/lecture-1", "https://example.com/lecture-2"],
       "dialogue": [
-        {{"speaker_id": "main", "text": "セリフ内容", "section": "intro"}},
+        {{"speaker_id": "main", "text": "セリフ内容", "section": "intro", "chapter_title": "○○の真実に迫る"}},
         {{"speaker_id": "sub", "text": "セリフ内容"}},
         ...
-        {{"speaker_id": "sub", "text": "まず定義から...", "section": "definition"}},
+        {{"speaker_id": "sub", "text": "まず定義から...", "section": "definition", "chapter_title": "○○って何？基本を知ろう"}},
         ...
-        {{"speaker_id": "sub", "text": "例えば〜のようなもの...", "section": "metaphor"}},
+        {{"speaker_id": "sub", "text": "例えば〜のようなもの...", "section": "metaphor", "chapter_title": "例えで理解する○○"}},
         ...
-        {{"speaker_id": "sub", "text": "実際には〜で使われているわ", "section": "example"}},
+        {{"speaker_id": "sub", "text": "実際には〜で使われているわ", "section": "example", "chapter_title": "毎日の生活で実践！"}},
         ...
-        {{"speaker_id": "main", "text": "セリフ内容", "section": "ending"}},
+        {{"speaker_id": "main", "text": "セリフ内容", "section": "ending", "chapter_title": "健康な未来へ"}},
         ...
       ]
     }}
@@ -450,7 +458,11 @@ script:
     - `"metaphor"` - 比喩説明の最初
     - `"example"` - 具体例の最初
     - `"ending"` - まとめの最初
-    - `section` を付けるセリフ本文は、チャプター見出しとして使える**日本語の魅力的な見出し**で開始してください
+    
+    ## チャプタータイトル生成（重要）
+    `section` を付けるセリフには、必ず `chapter_title` フィールドを追加してください：
+    - そのセクションの学習内容を端的に表す**魅力的な日本語見出し**（15文字以内推奨）
+    - 例: 「シナモンって何？」「血管の掃除屋さん」「毎日の食卓で実践」
 
     ## 対話のルール（密度と深掘りを最優先）
     1. **「わかったつもり」の禁止**:
@@ -530,12 +542,12 @@ script:
       "thumbnail_title": "",
       "description": "",
       "dialogue": [
-        {{"speaker_id": "main", "text": "セリフ内容", "section": "intro"}},
+        {{"speaker_id": "main", "text": "セリフ内容", "section": "intro", "chapter_title": "論争の幕開け"}},
         {{"speaker_id": "sub", "text": "セリフ内容"}},
         ...
-        {{"speaker_id": "main", "text": "セリフ内容", "section": "main"}},
+        {{"speaker_id": "main", "text": "セリフ内容", "section": "main", "chapter_title": "白熱の論戦"}},
         ...
-        {{"speaker_id": "main", "text": "セリフ内容", "section": "ending"}},
+        {{"speaker_id": "main", "text": "セリフ内容", "section": "ending", "chapter_title": "結論はあなた次第"}},
         ...
       ]
     }}
@@ -546,6 +558,11 @@ script:
     - `"intro"` - 第1部の最初
     - `"main"` - 第2部の最初
     - `"ending"` - 第3部の最初
+    
+    ## チャプタータイトル生成（重要）
+    `section` を付けるセリフには、必ず `chapter_title` フィールドを追加してください：
+    - 論争の焦点を端的に表す**魅力的な日本語見出し**（15文字以内推奨）
+    - 例: 「賛否両論の始まり」「白熱の論戦」「結論はあなた次第」
     
     ## 対話のルール（密度と深掘りを最優先）
     1. **「わかったつもり」の禁止**:
@@ -613,12 +630,12 @@ script:
       "thumbnail_title": "",
       "description": "",
       "dialogue": [
-        {"speaker_id": "main", "text": "セリフ内容", "section": "intro"},
+        {"speaker_id": "main", "text": "セリフ内容", "section": "intro", "chapter_title": "意外な真実が明らかに"},
         {"speaker_id": "sub", "text": "セリフ内容"},
         ...
-        {"speaker_id": "main", "text": "セリフ内容", "section": "main"},
+        {"speaker_id": "main", "text": "セリフ内容", "section": "main", "chapter_title": "驚きの雑学深掘り"},
         ...
-        {"speaker_id": "main", "text": "セリフ内容", "section": "ending"},
+        {"speaker_id": "main", "text": "セリフ内容", "section": "ending", "chapter_title": "明日話したくなる"},
         ...
       ]
     }
@@ -629,6 +646,11 @@ script:
     - `"intro"` - 第1部の最初
     - `"main"` - 第2部の最初
     - `"ending"` - 第3部の最初
+    
+    ## チャプタータイトル生成（重要）
+    `section` を付けるセリフには、必ず `chapter_title` フィールドを追加してください：
+    - その雑学の驚きを端的に表す**魅力的な日本語見出し**（15文字以内推奨）
+    - 例: 「意外な真実が明らかに」「驚きの雑学」「明日話したくなる」
 
     ## 対話のルール（密度と深掘りを最優先）
     1. **「わかったつもり」の禁止**:
