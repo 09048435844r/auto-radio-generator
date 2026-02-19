@@ -167,22 +167,41 @@ def _resolve_references(
     fallback_description: str,
     research_sources: Optional[list[ResearchSource]] = None,
 ) -> list[ReferenceEntry]:
-    """参考文献リストを解決し、可能ならタイトル付きソースを優先する。"""
+    """参考文献リストを解決し、可能ならタイトル付きソースを優先する。
+    
+    AI Editor方式: Geminiが選択したURLとResearchSourceを突き合わせて、
+    選択されたURLのみをタイトル付きで表示する。
+    """
     references: list[ReferenceEntry] = []
 
-    # 優先度1: リサーチ由来の構造化ソース（title/url）
-    for source in research_sources or []:
-        url = (source.url or "").strip()
-        if url:
-            references.append(source)
+    # Geminiが選択したURLを取得（優先度最高）
+    selected_urls = _normalize_non_empty_strings(list(script.references or []))
+    
+    if selected_urls and research_sources:
+        # AI Editor方式: Geminiが選択したURLに対応するResearchSourceのみを抽出
+        url_to_source = {source.url.strip(): source for source in research_sources if source.url and source.url.strip()}
+        
+        for url in selected_urls:
+            if url in url_to_source:
+                # 選択されたURLに対応するResearchSourceを追加
+                references.append(url_to_source[url])
+            else:
+                # 選択されたURLがResearchSourceにない場合は文字列として追加
+                references.append(url)
+    else:
+        # 従来方式: 選択がない場合は全リサーチソースを使用
+        for source in research_sources or []:
+            url = (source.url or "").strip()
+            if url:
+                references.append(source)
 
-    # 優先度2: 台本に含まれるURL文字列
-    references.extend(_normalize_non_empty_strings(list(script.references or [])))
+        # 台本に含まれるURL文字列を追加
+        references.extend(_normalize_non_empty_strings(list(script.references or [])))
 
-    # 優先度3: 生成概要文から抽出したURL
+    # 生成概要文から抽出したURLを追加
     references.extend(_extract_urls(fallback_description or ""))
 
-    # 優先度4: テーマ入力がURLなら追加
+    # テーマ入力がURLなら追加
     stripped_theme = (theme or "").strip()
     if stripped_theme.startswith(("http://", "https://")):
         references.append(stripped_theme)

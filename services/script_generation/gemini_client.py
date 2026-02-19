@@ -288,6 +288,19 @@ class GeminiClient(IScriptGenerator):
         if research_data:
             prompt += f"## リサーチ結果（{research_data.mode}モード）\n"
             prompt += f"{research_data.content}\n\n"
+            
+            # 参考リンク候補を追加
+            if research_data.sources:
+                prompt += "## <参考リンク候補>\n"
+                prompt += "以下のリンク候補の中から、台本の内容に最も関連が深く、視聴者に有益なものを厳選してください。\n\n"
+                
+                for i, source in enumerate(research_data.sources, 1):
+                    title = (source.title or "").strip() or f"ソース{i}"
+                    url = (source.url or "").strip()
+                    if url:
+                        prompt += f"{i}. {title}: {url}\n"
+                
+                prompt += "\n"
         
         if avoid_topics and avoid_topics.strip():
             prompt += (
