@@ -11,6 +11,7 @@ from core.interfaces import IResearcher, ResearchResult, ResearchMode
 from core.models import AppConfig, PerplexityUsage
 from core.models.research import ResearchSource
 from core.prompt_manager import PromptManager
+from .title_fetcher import fetch_page_title
 
 console = Console()
 
@@ -193,13 +194,48 @@ class PerplexityResearcher(IResearcher):
         # 使用量を記録
         usage = PerplexityUsage(request_count=len(queries))
         
+        # タイトルが未設定のソースについて、実際のページタイトルを取得
+        enhanced_sources = await self._enhance_sources_with_titles(all_sources)
+        
         return ResearchResult(
             topic=", ".join(queries),
             mode=mode,
             content=combined_content,
-            sources=self._dedupe_sources(all_sources) or None,
+            sources=self._dedupe_sources(enhanced_sources) or None,
             usage=usage
         )
+    
+    async def _enhance_sources_with_titles(self, sources: list[ResearchSource]) -> list[ResearchSource]:
+        """URLから実際のページタイトルを取得してResearchSourceを更新する（並列処理）。"""
+        if not sources:
+            return sources
+        
+        # タイトルが未設定のソースのみ抽出
+        urls_to_fetch = []
+        sources_needing_titles = []
+        
+        for source in sources:
+            if not source.title or source.title.strip() == "":
+                urls_to_fetch.append(source.url)
+                sources_needing_titles.append(source)
+        
+        if not urls_to_fetch:
+            return sources
+        
+        try:
+            # 並列でタイトル取得
+            titles = await fetch_page_titles_async(urls_to_fetch)
+            
+            # 取得したタイトルでResearchSourceを更新
+            for source, title in zip(sources_needing_titles, titles):
+                source.title = title
+                
+            console.print(f"  [green]✓ タイトル取得完了: {len(titles)}件[/green]")
+            
+        except Exception as e:
+            console.print(f"  [yellow]⚠ タイトル取得エラー（フォールバック使用）: {e}[/yellow]")
+        
+        return sources
     
     def _extract_sources_from_citations(self, response) -> list[ResearchSource]:
         """Perplexityレスポンスのcitation情報から構造化ソースを抽出する。"""
@@ -278,8 +314,12 @@ class PerplexityResearcher(IResearcher):
         return deduped
 
     def _build_source_title(self, url: str) -> str:
-        """タイトル未提供時にURLから人間可読な仮タイトルを生成する。"""
-        parsed = urlparse(url)
-        if parsed.netloc:
-            return parsed.netloc
-        return url
+        """タイトル未提供時にURLから実際のページタイトルを取得する。"""
+        try:
+            return fetch_page_title(url)
+        except Exception:
+            # フォールバック: ドメイン名
+            parsed = urlparse(url)
+            if parsed.netloc:
+                return parsed.netloc
+            return url
