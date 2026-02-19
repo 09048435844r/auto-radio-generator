@@ -3,11 +3,13 @@ import asyncio
 import os
 import json
 from pathlib import Path
+from urllib.parse import urlparse
 from openai import OpenAI
 from rich.console import Console
 
 from core.interfaces import IResearcher, ResearchResult, ResearchMode
 from core.models import AppConfig, PerplexityUsage
+from core.models.research import ResearchSource
 from core.prompt_manager import PromptManager
 
 console = Console()
@@ -84,7 +86,9 @@ class PerplexityResearcher(IResearcher):
             content = response.choices[0].message.content
             
             # ソース情報の抽出（Perplexityの場合、レスポンスに含まれることがある）
-            sources = self._extract_sources(content)
+            sources = self._extract_sources_from_citations(response)
+            if not sources:
+                sources = self._extract_sources(content)
             
             console.print(f"[green]✓ リサーチ完了[/green] ({len(content)}文字)")
             
@@ -140,7 +144,7 @@ class PerplexityResearcher(IResearcher):
             system_prompt = self.prompt_manager.get_research_prompt(mode)
         
         # 各クエリを並列に実行
-        async def fetch_single(query: str, index: int) -> tuple[int, str]:
+        async def fetch_single(query: str, index: int) -> tuple[int, str, list[ResearchSource]]:
             console.print(f"  [{index+1}/{len(queries)}] {query}")
             try:
                 # クエリに詳細要求を追加
@@ -156,42 +160,21 @@ class PerplexityResearcher(IResearcher):
                     temperature=0.7
                 )
                 content = response.choices[0].message.content
-                
-                # 引用情報を抽出して追記
-                # Perplexity APIのレスポンス構造をデバッグ
-                message = response.choices[0].message
-                
-                # 複数の可能性のある属性名をチェック
-                citations = None
-                for attr_name in ['citations', 'citation', 'sources', 'references']:
-                    citations = getattr(message, attr_name, None)
-                    if citations:
-                        console.print(f"  [dim]引用情報を '{attr_name}' 属性から取得[/dim]")
-                        break
-                
-                # レスポンスオブジェクト全体から引用を探す
-                if not citations and hasattr(response, 'citations'):
-                    citations = response.citations
-                    console.print(f"  [dim]引用情報をレスポンスルートから取得[/dim]")
-                
-                if citations and len(citations) > 0:
+                sources = self._extract_sources_from_citations(response)
+
+                if sources:
                     content += "\n\n## 📚 出典・参考文献\n"
-                    for i, citation in enumerate(citations, 1):
-                        if isinstance(citation, str):
-                            content += f"[{i}] [{citation}]({citation})\n"
-                        elif hasattr(citation, 'url'):
-                            content += f"[{i}] [{citation.url}]({citation.url})\n"
-                        elif isinstance(citation, dict) and 'url' in citation:
-                            content += f"[{i}] [{citation['url']}]({citation['url']})\n"
-                    console.print(f"  [green]✓ 引用情報追加: {len(citations)}件[/green]")
+                    for i, source in enumerate(sources, 1):
+                        content += f"[{i}] [{source.title}]({source.url})\n"
+                    console.print(f"  [green]✓ 引用情報追加: {len(sources)}件[/green]")
                 else:
                     console.print(f"  [yellow]⚠ 引用情報なし（Perplexity APIが返さなかった可能性）[/yellow]")
                 
                 console.print(f"  ✓ [{index+1}] 完了 ({len(content)}文字)")
-                return (index, content)
+                return (index, content, sources)
             except Exception as e:
                 console.print(f"  [red]✗ [{index+1}] エラー: {e}[/red]")
-                return (index, f"[エラー: {query}]")
+                return (index, f"[エラー: {query}]", [])
         
         # asyncio.gatherで並列実行
         tasks = [fetch_single(q, i) for i, q in enumerate(queries)]
@@ -200,8 +183,10 @@ class PerplexityResearcher(IResearcher):
         # 結果をインデックス順にソートして結合
         results.sort(key=lambda x: x[0])
         combined_content = ""
-        for i, (idx, content) in enumerate(results):
+        all_sources: list[ResearchSource] = []
+        for i, (idx, content, sources) in enumerate(results):
             combined_content += f"\n\n## 検索結果 {i+1}: {queries[idx]}\n\n{content}"
+            all_sources.extend(sources)
         
         console.print(f"[green]✓ 並列リサーチ完了[/green] (合計{len(combined_content)}文字)")
         
@@ -212,10 +197,89 @@ class PerplexityResearcher(IResearcher):
             topic=", ".join(queries),
             mode=mode,
             content=combined_content,
-            sources=None,
+            sources=self._dedupe_sources(all_sources) or None,
             usage=usage
         )
     
-    def _extract_sources(self, content: str) -> list[str] | None:
-        """コンテンツからソース情報を抽出（あれば）"""
-        return None
+    def _extract_sources_from_citations(self, response) -> list[ResearchSource]:
+        """Perplexityレスポンスのcitation情報から構造化ソースを抽出する。"""
+        message = response.choices[0].message
+
+        citations = None
+        for attr_name in ["citations", "citation", "sources", "references"]:
+            citations = getattr(message, attr_name, None)
+            if citations:
+                console.print(f"  [dim]引用情報を '{attr_name}' 属性から取得[/dim]")
+                break
+
+        if not citations and hasattr(response, "citations"):
+            citations = response.citations
+            console.print("  [dim]引用情報をレスポンスルートから取得[/dim]")
+
+        if not citations:
+            return []
+
+        sources: list[ResearchSource] = []
+        for citation in citations:
+            url = ""
+            title = ""
+
+            if isinstance(citation, str):
+                url = citation.strip()
+            elif hasattr(citation, "url"):
+                url = (getattr(citation, "url", "") or "").strip()
+                title = (getattr(citation, "title", "") or "").strip()
+            elif isinstance(citation, dict):
+                url = str(citation.get("url", "") or "").strip()
+                title = str(citation.get("title", "") or "").strip()
+
+            if not url:
+                continue
+
+            if not title:
+                title = self._build_source_title(url)
+
+            sources.append(ResearchSource(title=title, url=url))
+
+        return self._dedupe_sources(sources)
+
+    def _extract_sources(self, content: str) -> list[ResearchSource] | None:
+        """コンテンツ中のMarkdownリンクからソース情報を抽出する（フォールバック）。"""
+        if not content:
+            return None
+
+        import re
+
+        matches = re.findall(r"\[([^\]]+)\]\((https?://[^\s\)]+)\)", content)
+        if not matches:
+            return None
+
+        sources = [
+            ResearchSource(
+                title=(title or self._build_source_title(url)).strip(),
+                url=url.strip(),
+            )
+            for title, url in matches
+            if url and url.strip()
+        ]
+        deduped = self._dedupe_sources(sources)
+        return deduped or None
+
+    def _dedupe_sources(self, sources: list[ResearchSource]) -> list[ResearchSource]:
+        """URL基準でソース重複を除去し、順序を維持する。"""
+        seen: set[str] = set()
+        deduped: list[ResearchSource] = []
+        for source in sources:
+            url = (source.url or "").strip()
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            deduped.append(source)
+        return deduped
+
+    def _build_source_title(self, url: str) -> str:
+        """タイトル未提供時にURLから人間可読な仮タイトルを生成する。"""
+        parsed = urlparse(url)
+        if parsed.netloc:
+            return parsed.netloc
+        return url

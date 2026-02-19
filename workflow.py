@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 from urllib.parse import parse_qs, urlparse
 
 # プロジェクトルートをパスに追加
@@ -30,6 +30,10 @@ from services.video_rendering import FfmpegRenderer
 from services.media_processing import ThumbnailGenerator
 from services.cost_calculator import CostCalculator
 from services.publishing import YouTubeClient, build_video_description
+from core.models.research import ResearchSource
+
+
+ReferenceEntry = str | ResearchSource
 
 
 @dataclass
@@ -83,6 +87,7 @@ class ScriptingPhaseResult:
     """台本作成フェーズの実行結果"""
     script: Script
     research_content: Optional[str] = None
+    research_sources: Optional[list[ResearchSource]] = None
     perplexity_usage: Optional[PerplexityUsage] = None
     gemini_usage: Optional[GeminiUsage] = None
     research_duration_sec: float = 0.0
@@ -116,6 +121,19 @@ def _normalize_non_empty_strings(values: list[str]) -> list[str]:
     return result
 
 
+def _to_json_safe(value: Any) -> Any:
+    """Pydanticモデル等をJSONシリアライズ可能な形に再帰変換する。"""
+    if hasattr(value, "model_dump") and callable(value.model_dump):
+        return _to_json_safe(value.model_dump())
+    if isinstance(value, dict):
+        return {k: _to_json_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_to_json_safe(item) for item in value]
+    if isinstance(value, tuple):
+        return [_to_json_safe(item) for item in value]
+    return value
+
+
 def _format_chapter_lines(chapters: list[ChapterMarker]) -> list[str]:
     """チャプター情報を `MM:SS タイトル` 形式に整形する。"""
     chapter_lines: list[str] = []
@@ -143,16 +161,48 @@ def _resolve_dynamic_tags(script: Script, fallback_description: str) -> list[str
     return _normalize_non_empty_strings(extracted)
 
 
-def _resolve_references(script: Script, theme: str, fallback_description: str) -> list[str]:
-    """参考文献リストを台本優先で解決し、必要に応じてURLを補完する。"""
-    references = list(script.references or [])
+def _resolve_references(
+    script: Script,
+    theme: str,
+    fallback_description: str,
+    research_sources: Optional[list[ResearchSource]] = None,
+) -> list[ReferenceEntry]:
+    """参考文献リストを解決し、可能ならタイトル付きソースを優先する。"""
+    references: list[ReferenceEntry] = []
+
+    # 優先度1: リサーチ由来の構造化ソース（title/url）
+    for source in research_sources or []:
+        url = (source.url or "").strip()
+        if url:
+            references.append(source)
+
+    # 優先度2: 台本に含まれるURL文字列
+    references.extend(_normalize_non_empty_strings(list(script.references or [])))
+
+    # 優先度3: 生成概要文から抽出したURL
     references.extend(_extract_urls(fallback_description or ""))
 
+    # 優先度4: テーマ入力がURLなら追加
     stripped_theme = (theme or "").strip()
     if stripped_theme.startswith(("http://", "https://")):
         references.append(stripped_theme)
 
-    return _normalize_non_empty_strings(references)
+    # URL基準で重複排除（ResearchSourceを優先保持）
+    seen_urls: set[str] = set()
+    deduped: list[ReferenceEntry] = []
+    for ref in references:
+        if isinstance(ref, ResearchSource):
+            key = (ref.url or "").strip()
+        else:
+            key = (ref or "").strip()
+
+        if not key or key in seen_urls:
+            continue
+
+        seen_urls.add(key)
+        deduped.append(ref)
+
+    return deduped
 
 
 def _build_speaker_diagnostics(script: Script) -> tuple[list[str], bool]:
@@ -418,6 +468,7 @@ async def execute_scripting_phase(
     return ScriptingPhaseResult(
         script=script,
         research_content=research_content,
+        research_sources=getattr(research_data, "sources", None),
         perplexity_usage=perplexity_usage,
         gemini_usage=gemini_usage,
         research_duration_sec=research_duration,
@@ -547,7 +598,7 @@ def _save_research_results(
         research_path = output_dir / "research.json"
         research_path.parent.mkdir(parents=True, exist_ok=True)
         
-        research_dict = asdict(research_data)
+        research_dict = _to_json_safe(asdict(research_data))
         json_str = json.dumps(research_dict, ensure_ascii=False, indent=2)
         research_path.write_text(json_str, encoding="utf-8")
         
@@ -758,7 +809,7 @@ async def generate_video_workflow(
                 log(f"[DEBUG] 保存先パス: {research_path}")
                 log(f"[DEBUG] ディレクトリ存在: {research_path.parent.exists()}")
                 
-                research_dict = asdict(research_data)
+                research_dict = _to_json_safe(asdict(research_data))
                 log(f"[DEBUG] dataclass→dict変換完了")
                 
                 # usageは既にasdict()により辞書化済み
@@ -937,6 +988,7 @@ async def generate_video_workflow(
             script,
             theme=theme,
             fallback_description=script_description,
+            research_sources=getattr(research_data, "sources", None),
         )
 
         configured_tags = getattr(publishing_config, "default_tags", []) if publishing_config else []
@@ -1198,6 +1250,7 @@ def run_workflow_sync(
                 scripting_result.script,
                 theme=theme,
                 fallback_description=script_description,
+                research_sources=scripting_result.research_sources,
             )
 
             configured_tags = getattr(publishing_config, "default_tags", []) if publishing_config else []

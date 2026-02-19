@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import Literal, TYPE_CHECKING
 
 from core.models import AppConfig
+from core.models.research import ResearchSource
 
 if TYPE_CHECKING:
     from core.models.usage import PerplexityUsage
@@ -18,7 +19,7 @@ class ResearchResult:
     topic: str
     mode: ResearchMode
     content: str
-    sources: list[str] | None = None
+    sources: list[ResearchSource] | None = None
     usage: "PerplexityUsage | None" = None
 
 
