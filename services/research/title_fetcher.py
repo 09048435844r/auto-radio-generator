@@ -2,9 +2,7 @@
 import asyncio
 import concurrent.futures
 import logging
-from pathlib import Path
 from urllib.parse import urlparse
-from typing import Optional
 
 import requests
 from bs4 import BeautifulSoup

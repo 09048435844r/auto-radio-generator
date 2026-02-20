@@ -1,8 +1,16 @@
 # 🎙️ 自動ラジオ動画生成システム v3.3.0
 
-AIが台本を作成し、音声合成・BGM合成を行い、YouTube/Podcast用のラジオ動画（MP4）を自動生成するシステムです。
+Perplexity + Gemini + VOICEVOX + FFmpeg を連携し、
+リサーチから台本生成、音声合成、動画レンダリング、YouTube投稿用メタデータ作成までを一気通貫で自動化するプロジェクトです。
 
-## 📋 機能
+## 📋 Project Overview
+
+- **目的**: YouTube/Podcast向けラジオ動画（MP4）の制作工数を削減し、品質を安定化する
+- **入出力**: テーマ入力から `script.json` / `metadata.txt` / `thumbnail.png` / `video.mp4` を生成
+- **実行形態**: Gradio Web UI (`app.py`) と CLI (`main.py`) の両対応
+- **ワークフロー中心**: `workflow.py` が各サービスを統合して処理順序を管理
+
+## 📋 Current Features
 
 ### コア機能
 - **リサーチ**: Perplexity API でテーマを事前調査（5モード対応）
@@ -12,9 +20,14 @@ AIが台本を作成し、音声合成・BGM合成を行い、YouTube/Podcast用
 - **動画生成**: FFmpeg で背景画像・音声・BGM・字幕を合成
 - **サムネイル生成**: センターセーフ方式で1:1トリミング対応
 - **YouTubeチャプター**: 自動生成されたセクションマーカーでチャプター対応
+- **概要欄の堅牢化**:
+  - YouTube向けサニタイズ（制御文字除去、Unicode正規化、5000文字制限）
+  - 参考文献の3行構造（📄タイトル / 🔗URL / 空行）
+  - セクション間余白ルール（見出し前2行、見出し後0〜1行）
+  - エンコーディング耐性のあるWebタイトル取得（`chardet`）
 
 ### v3.3.0 新機能（Negative Prompt / Audio Pro / Quality）
-- � **Manually Controlled Topics**: 「避けてほしい話題」(Negative Prompt) による生成内容の制御
+- 🧭 **Manually Controlled Topics**: 「避けてほしい話題」(Negative Prompt) による生成内容の制御
   - UI上で除外トピックを自由入力し、Geminiプロンプトに自動反映
   - スペースやカンマ区切りで複数トピック指定可能
 - 🔊 **Pro-Level Audio**: ラウドネスノーマライゼーション (-14 LUFS) による音圧自動調整
@@ -86,6 +99,8 @@ AIが台本を作成し、音声合成・BGM合成を行い、YouTube/Podcast用
 | **Python** | 3.10+ | 必須 |
 | **FFmpeg** | 6.0+ | NVENC対応ビルド推奨（GPU高速化に必要） |
 | **VOICEVOX Engine** | 0.24+ | GPU版推奨（音声合成の高速化） |
+
+Pythonパッケージは `requirements.txt` で管理しています（主な依存: `google-genai`, `openai`, `gradio`, `requests`, `beautifulsoup4`, `chardet`, `pytest`）。
 
 > **Pythonバージョン運用方針（メンテナンス注記）**  
 > 現在は **Python 3.10.6** で安定動作しており、**2026年10月（サポート期限）までは現行環境を維持**します。開発効率を優先しつつ、
@@ -307,10 +322,12 @@ auto_radio_generator/
 │   ├── research/            # リサーチ (Perplexity)
 │   ├── script_generation/   # 台本生成 (Gemini)
 │   ├── audio_synthesis/     # 音声合成 (VOICEVOX)
-│   ├── video_rendering/     # 動画生成 (FFmpeg)
+│   ├── video_rendering/     # 動画生成 (FFmpeg)・字幕生成
+│   ├── publishing/          # YouTube投稿メタデータ生成・アップロード
 │   ├── media_processing/    # メディア処理
 │   │   └── thumbnail_generator.py  # サムネイル生成
-│   └── cost_calculator.py   # コスト計算
+│   ├── cost_calculator.py   # APIコスト計算
+│   └── ...                  # 補助ユーティリティ
 ├── assets/                  # 静的リソース
 │   ├── backgrounds/         # 背景画像 (10枚以上)
 │   └── bgm/                 # BGM音楽 (8曲以上)

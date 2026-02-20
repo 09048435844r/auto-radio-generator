@@ -213,12 +213,17 @@ publishing:
   # YouTube再生リスト ID
   playlist_id: "PL4WSMEk7zObEZ3vRI_0qVg7T9sgHPIeVR"
   # 概要欄末尾に必ず含める固定タグ
+  # metadata_builder.py 側で dynamic_tags と結合され、重複除去の上で出力されます。
   default_tags:
     - "#ずんだもん"
     - "#VOICEVOX"
     - "#AI"
     - "#ラジオ"
   # 概要欄末尾の定型フッター（著作権表示・免責等）
+  # 参考:
+  # - セクション見出し前は2行空行（視認性を確保）
+  # - 見出し直後は0〜1行で内容を開始（情報チャンクを明確化）
+  # - 参考文献は「📄 タイトル / 🔗 URL / 空行」の3行構造で出力
   footer_text: |
     -----------------------------------
     ■使用音声

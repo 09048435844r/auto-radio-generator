@@ -1,7 +1,6 @@
 """YouTube概要欄用テキストサニタイズユーティリティ"""
 import re
 import unicodedata
-from typing import Optional
 from urllib.parse import urlparse
 
 # YouTubeで問題になりやすい文字の制御
