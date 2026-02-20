@@ -1,12 +1,18 @@
 """URLからウェブページのタイトルを取得するユーティリティ"""
 import asyncio
 import concurrent.futures
+import logging
 from pathlib import Path
 from urllib.parse import urlparse
 from typing import Optional
 
 import requests
 from bs4 import BeautifulSoup
+import chardet
+
+from services.publishing.text_sanitizer import sanitize_title
+
+logger = logging.getLogger(__name__)
 
 # ユーザーエージェント（一般的なブラウザを模倣）
 USER_AGENT = (
@@ -42,33 +48,54 @@ def fetch_page_title(url: str) -> str:
         )
         response.raise_for_status()
         
+        # エンコーディング検出とデコード
+        detected_encoding = None
+        if 'content-type' in response.headers:
+            content_type = response.headers['content-type']
+            if 'charset=' in content_type:
+                detected_encoding = content_type.split('charset=')[1].strip()
+        
+        if not detected_encoding:
+            # chardetでエンコーディングを検出
+            detected = chardet.detect(response.content)
+            detected_encoding = detected.get('encoding', 'utf-8')
+        
+        # HTMLをデコード（エラー時はreplace）
+        try:
+            html = response.content.decode(detected_encoding or 'utf-8', errors='replace')
+        except (UnicodeDecodeError, LookupError):
+            html = response.content.decode('utf-8', errors='replace')
+        
         # HTMLパースして<title>を抽出
-        soup = BeautifulSoup(response.text, 'html.parser')
+        soup = BeautifulSoup(html, 'html.parser')
         title_tag = soup.find('title')
         
         if title_tag and title_tag.string:
             title = title_tag.string.strip()
             # タイトルが空または短すぎる場合はフォールバック
             if len(title) >= 3:
-                # 日本語文字を含む場合のエンコーディング対策
-                try:
-                    title.encode('cp932')
-                    return title
-                except UnicodeEncodeError:
-                    # CP932でエンコードできない場合はASCII文字のみに変換
-                    return title.encode('ascii', 'ignore').decode('ascii').strip() or title
+                # サニタイズして返す
+                sanitized = sanitize_title(title)
+                if sanitized:
+                    return sanitized
         
         # フォールバック: ドメイン名
         parsed = urlparse(url)
         return parsed.netloc or url
         
+    except requests.exceptions.Timeout:
+        logger.warning(f"Title fetch timeout for {url}")
+    except requests.exceptions.HTTPError as e:
+        logger.warning(f"Title fetch HTTP error for {url}: {e}")
+    except Exception as e:
+        logger.warning(f"Title fetch failed for {url}: {e}")
+    
+    # 例外発生時はフォールバック: ドメイン名
+    try:
+        parsed = urlparse(url)
+        return parsed.netloc or url
     except Exception:
-        # 例外発生時はフォールバック: ドメイン名
-        try:
-            parsed = urlparse(url)
-            return parsed.netloc or url
-        except Exception:
-            return url
+        return url
 
 
 async def fetch_page_titles_async(urls: list[str]) -> list[str]:

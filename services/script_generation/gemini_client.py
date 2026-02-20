@@ -12,6 +12,9 @@ from core.interfaces import IScriptGenerator, ResearchResult
 from core.models import Script, AppConfig, GeminiUsage, ResearchPlan
 from core.prompt_manager import PromptManager
 from .time_expressions import get_time_expression
+import logging
+
+logger = logging.getLogger(__name__)
 
 console = Console()
 
@@ -211,6 +214,11 @@ class GeminiClient(IScriptGenerator):
             response_text, usage = self._call_api(system_prompt, user_prompt, use_schema=True)
             self.last_usage = usage
             script = self._parse_response(response_text)
+            
+            # 参考文献の件数をチェックし、超過している場合は警告と切り詰め
+            if script.references and len(script.references) > 5:
+                logger.warning(f"Geminiが{len(script.references)}件の参考文献を生成、5件に切り詰めます")
+                script.references = script.references[:5]
             
             console.print(f"[green]✓ 台本生成完了[/green] 対話数: {len(script.dialogue)}")
             if usage:

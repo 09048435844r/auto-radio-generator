@@ -1,11 +1,13 @@
-"""Utilities for building rich YouTube metadata text blocks."""
-
+"""YouTube動画メタデータ構築ユーティリティ"""
 from __future__ import annotations
 
+import logging
 from typing import List
 
+from services.publishing.text_sanitizer import sanitize_for_youtube, validate_chapter_format
 from core.models.research import ResearchSource
 
+logger = logging.getLogger(__name__)
 
 ReferenceEntry = str | ResearchSource
 
@@ -112,4 +114,12 @@ def build_video_description(
 
     lines.append(footer)
 
-    return "\n".join(lines)
+    # 最終的なサニタイズと検証
+    final_text = "\n".join(lines)
+    final_text = sanitize_for_youtube(final_text, max_length=5000)
+    
+    # チャプター形式の検証
+    if chapter_lines and not validate_chapter_format(chapter_lines):
+        logger.warning("チャプター形式がYouTubeに認識されない可能性があります")
+
+    return final_text

@@ -117,6 +117,13 @@ class CostCalculator:
                 f"| Gemini ({usage.gemini.model_name}) | "
                 f"入力 {usage.gemini.input_tokens:,} / 出力 {usage.gemini.output_tokens:,} tokens |"
             )
+            
+            # 参考文献候補によるトークン増分を表示
+            ref_overhead = usage.gemini.input_tokens - 264  # 推定ベースライン
+            if ref_overhead > 0:
+                lines.append(
+                    f"|  ├─ 参考文献候補 | +{ref_overhead:,} tokens (推定: 264) |"
+                )
         
         # VOICEVOX
         if usage.voicevox.phrase_count > 0:

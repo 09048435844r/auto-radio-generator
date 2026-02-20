@@ -30,6 +30,7 @@ from services.video_rendering import FfmpegRenderer
 from services.media_processing import ThumbnailGenerator
 from services.cost_calculator import CostCalculator
 from services.publishing import YouTubeClient, build_video_description
+from services.publishing.text_sanitizer import validate_url, normalize_url
 from core.models.research import ResearchSource
 
 
@@ -172,6 +173,9 @@ def _resolve_references(
     AI Editor方式: Geminiが選択したURLとResearchSourceを突き合わせて、
     選択されたURLのみをタイトル付きで表示する。
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     references: list[ReferenceEntry] = []
 
     # Geminiが選択したURLを取得（優先度最高）
@@ -179,31 +183,47 @@ def _resolve_references(
     
     if selected_urls and research_sources:
         # AI Editor方式: Geminiが選択したURLに対応するResearchSourceのみを抽出
-        url_to_source = {source.url.strip(): source for source in research_sources if source.url and source.url.strip()}
+        url_to_source = {}
+        for source in research_sources:
+            if source.url and source.url.strip():
+                normalized_url = normalize_url(source.url.strip())
+                if validate_url(normalized_url):
+                    url_to_source[normalized_url] = source
         
         for url in selected_urls:
-            if url in url_to_source:
+            normalized_url = normalize_url(url.strip())
+            
+            if not validate_url(normalized_url):
+                logger.warning(f"Geminiから無効なURL: {url}")
+                continue
+                
+            if normalized_url in url_to_source:
                 # 選択されたURLに対応するResearchSourceを追加
-                references.append(url_to_source[url])
+                references.append(url_to_source[normalized_url])
             else:
                 # 選択されたURLがResearchSourceにない場合は文字列として追加
+                logger.info(f"Geminiが候補にないURLを選択: {url}")
                 references.append(url)
     else:
         # 従来方式: 選択がない場合は全リサーチソースを使用
         for source in research_sources or []:
             url = (source.url or "").strip()
-            if url:
+            if url and validate_url(url):
                 references.append(source)
 
         # 台本に含まれるURL文字列を追加
-        references.extend(_normalize_non_empty_strings(list(script.references or [])))
+        for url in _normalize_non_empty_strings(list(script.references or [])):
+            if validate_url(url):
+                references.append(url)
 
     # 生成概要文から抽出したURLを追加
-    references.extend(_extract_urls(fallback_description or ""))
+    for url in _extract_urls(fallback_description or ""):
+        if validate_url(url):
+            references.append(url)
 
     # テーマ入力がURLなら追加
     stripped_theme = (theme or "").strip()
-    if stripped_theme.startswith(("http://", "https://")):
+    if stripped_theme.startswith(("http://", "https://")) and validate_url(stripped_theme):
         references.append(stripped_theme)
 
     # URL基準で重複排除（ResearchSourceを優先保持）
@@ -211,9 +231,9 @@ def _resolve_references(
     deduped: list[ReferenceEntry] = []
     for ref in references:
         if isinstance(ref, ResearchSource):
-            key = (ref.url or "").strip()
+            key = normalize_url((ref.url or "").strip())
         else:
-            key = (ref or "").strip()
+            key = normalize_url((ref or "").strip())
 
         if not key or key in seen_urls:
             continue
