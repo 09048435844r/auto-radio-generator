@@ -46,6 +46,9 @@ class GeminiClient(IScriptGenerator):
         
         # 最後のAPI呼び出しの使用量を保持
         self.last_usage: GeminiUsage | None = None
+        
+        # 実行ログ用: プロンプト記録リスト
+        self.prompt_records: list = []
     
     async def create_research_plan(self, theme: str, mode: str, instruction: str | None = None) -> ResearchPlan:
         """AIプロデューサー: テーマから検索計画を作成
@@ -73,7 +76,7 @@ class GeminiClient(IScriptGenerator):
         user_prompt += "上記のテーマについて、検索計画をJSON形式で作成してください。"
         
         try:
-            response_text, usage = self._call_api(system_prompt, user_prompt)
+            response_text, usage = self._call_api(system_prompt, user_prompt, use_schema=False, phase="planning")
             self.last_usage = usage
             
             # JSONを抽出してパース
@@ -241,13 +244,14 @@ class GeminiClient(IScriptGenerator):
                     self.model_name = original_model
             raise
     
-    def _call_api(self, system_prompt: str, user_prompt: str, use_schema: bool = False) -> tuple[str, GeminiUsage]:
+    def _call_api(self, system_prompt: str, user_prompt: str, use_schema: bool = False, phase: str = "scripting") -> tuple[str, GeminiUsage]:
         """Gemini APIを呼び出す
         
         Args:
             system_prompt: システムプロンプト
             user_prompt: ユーザープロンプト
             use_schema: Scriptスキーマを使用するかどうか
+            phase: 実行フェーズ名（ログ記録用）
         
         Returns:
             tuple[str, GeminiUsage]: (レスポンステキスト, 使用量)
@@ -286,6 +290,19 @@ class GeminiClient(IScriptGenerator):
             meta = response.usage_metadata
             usage.input_tokens = getattr(meta, 'prompt_token_count', 0) or 0
             usage.output_tokens = getattr(meta, 'candidates_token_count', 0) or 0
+        
+        # 実行ログ用: プロンプトとレスポンスを記録
+        from datetime import datetime
+        prompt_record = {
+            "phase": phase,
+            "api_provider": "gemini",
+            "model_name": self.model_name,
+            "system_prompt": system_prompt,
+            "user_prompt": user_prompt,
+            "raw_response": response.text,
+            "timestamp": datetime.now().isoformat()
+        }
+        self.prompt_records.append(prompt_record)
         
         return response.text, usage
     

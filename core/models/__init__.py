@@ -8,6 +8,8 @@ from .usage import (
     CostBreakdown,
 )
 from .research import ResearchPlan
+from .execution_log import ExecutionLogEntry, PromptRecord, ConfigSnapshot
+from .cost_log import CostLogEntry
 
 __all__ = [
     "AppConfig",
@@ -20,4 +22,8 @@ __all__ = [
     "TotalUsage",
     "CostBreakdown",
     "ResearchPlan",
+    "ExecutionLogEntry",
+    "PromptRecord",
+    "ConfigSnapshot",
+    "CostLogEntry",
 ]

@@ -41,6 +41,9 @@ class PerplexityResearcher(IResearcher):
         self.max_tokens = config.yaml.researcher.max_tokens
         self.modes = config.yaml.researcher.modes
         self.prompt_manager = PromptManager()
+        
+        # 実行ログ用: プロンプト記録リスト
+        self.prompt_records: list = []
     
     async def research(self, topic: str, mode: ResearchMode) -> ResearchResult:
         """テーマについてリサーチを実行する"""
@@ -74,17 +77,32 @@ class PerplexityResearcher(IResearcher):
             system_prompt = self.prompt_manager.get_research_prompt(mode)
         
         try:
+            user_prompt = f"テーマ: {topic}"
+            
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"テーマ: {topic}"}
+                    {"role": "user", "content": user_prompt}
                 ],
                 max_tokens=self.max_tokens,
                 temperature=0.7
             )
             
             content = response.choices[0].message.content
+            
+            # 実行ログ用: プロンプトとレスポンスを記録
+            from datetime import datetime
+            prompt_record = {
+                "phase": "research",
+                "api_provider": "perplexity",
+                "model_name": self.model,
+                "system_prompt": system_prompt,
+                "user_prompt": user_prompt,
+                "raw_response": content,
+                "timestamp": datetime.now().isoformat()
+            }
+            self.prompt_records.append(prompt_record)
             
             # ソース情報の抽出（Perplexityの場合、レスポンスに含まれることがある）
             sources = self._extract_sources_from_citations(response)

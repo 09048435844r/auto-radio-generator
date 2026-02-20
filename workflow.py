@@ -20,7 +20,8 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.models import (
     load_config, Script, AppConfig,
-    TotalUsage, PerplexityUsage, GeminiUsage, VoicevoxUsage, CostBreakdown
+    TotalUsage, PerplexityUsage, GeminiUsage, VoicevoxUsage, CostBreakdown,
+    ExecutionLogEntry, PromptRecord, ConfigSnapshot, CostLogEntry
 )
 from core.interfaces import ResearchMode, ChapterMarker
 from services.script_generation import GeminiClient
@@ -32,6 +33,10 @@ from services.cost_calculator import CostCalculator
 from services.publishing import YouTubeClient, build_video_description
 from services.publishing.text_sanitizer import validate_url, normalize_url
 from core.models.research import ResearchSource
+from services.execution_logger import ExecutionLogger
+
+# アプリケーションバージョン
+APP_VERSION = "v3.3.0"
 
 
 ReferenceEntry = str | ResearchSource
@@ -242,6 +247,29 @@ def _resolve_references(
         deduped.append(ref)
 
     return deduped
+
+
+def _capture_config_snapshot(config: AppConfig, overrides: UIOverrides) -> ConfigSnapshot:
+    """設定スナップショットをキャプチャ（再現性確保用）
+    
+    Args:
+        config: アプリケーション設定
+        overrides: UI上書き設定
+    
+    Returns:
+        ConfigSnapshot: 設定スナップショット
+    """
+    from dataclasses import asdict
+    
+    return ConfigSnapshot(
+        yaml_config=config.yaml.model_dump(),
+        ui_overrides=asdict(overrides),
+        env_vars={
+            "VOICEVOX_BASE_URL": config.env.voicevox_base_url,
+            "GEMINI_API_KEY": "***MASKED***",
+            "PERPLEXITY_API_KEY": "***MASKED***"
+        }
+    )
 
 
 def _build_speaker_diagnostics(script: Script) -> tuple[list[str], bool]:
@@ -1171,6 +1199,12 @@ def run_workflow_sync(
             # Usage集約用
             total_usage = TotalUsage()
             
+            # 実行ログ用: API クライアントインスタンスを保持
+            api_clients = {
+                'script_generator': None,
+                'researcher': None
+            }
+            
             # ========== Phase 1: 企画（検索計画作成） ==========
             planning_result = None
             queries = []
@@ -1376,6 +1410,83 @@ def run_workflow_sync(
             else:
                 callbacks.log("[INFO] YouTubeアップロード設定: 無効（UI設定優先）")
             
+            # ========== 実行ログ・コスト履歴の記録 ==========
+            try:
+                from uuid import uuid4
+                execution_id = str(uuid4())
+                
+                # プロンプト記録を収集（実際に使用されたインスタンスから）
+                all_prompt_records = []
+                
+                # Note: Mock モードではプロンプト記録が空の場合がある
+                # 実際のAPI呼び出しがあった場合のみ記録される
+                
+                # 設定スナップショットをキャプチャ
+                config_snapshot = _capture_config_snapshot(config, overrides_obj)
+                
+                # 生成ファイルパスを記録
+                from pathlib import Path as PathLib
+                generated_files = {
+                    "script": str(output_base / "script.json"),
+                    "video": str(production_result.video_path),
+                    "audio": str(production_result.audio_path),
+                    "subtitle": str(production_result.subtitle_path),
+                    "thumbnail": str(thumbnail_path),
+                    "metadata": str(metadata_path)
+                }
+                
+                # ExecutionLogEntryを作成
+                execution_log = ExecutionLogEntry(
+                    execution_id=execution_id,
+                    app_version=APP_VERSION,
+                    timestamp=datetime.now().isoformat(),
+                    output_directory=str(output_base),
+                    theme=theme,
+                    config_snapshot=config_snapshot,
+                    prompts=[PromptRecord(**rec) for rec in all_prompt_records],
+                    generated_files=generated_files,
+                    success=True,
+                    error_message=None,
+                    total_duration_sec=total_usage.total_duration_sec
+                )
+                
+                # CostLogEntryを作成
+                cost_log = CostLogEntry(
+                    execution_id=execution_id,
+                    timestamp=datetime.now().isoformat(),
+                    output_directory=str(output_base),
+                    perplexity_requests=total_usage.perplexity.request_count,
+                    perplexity_model_name=config.yaml.researcher.model,
+                    gemini_input_tokens=total_usage.gemini.input_tokens,
+                    gemini_output_tokens=total_usage.gemini.output_tokens,
+                    gemini_model_name=total_usage.gemini.model_name,
+                    voicevox_phrases=total_usage.voicevox.phrase_count,
+                    voicevox_duration_sec=total_usage.voicevox.total_duration_sec,
+                    perplexity_usd=cost.perplexity_usd,
+                    gemini_input_usd=cost.gemini_input_usd,
+                    gemini_output_usd=cost.gemini_output_usd,
+                    total_usd=cost.total_usd,
+                    total_jpy=cost.total_jpy,
+                    is_free_tier=cost.is_free_tier,
+                    research_duration_sec=total_usage.research_duration_sec,
+                    script_duration_sec=total_usage.script_duration_sec,
+                    audio_duration_sec=total_usage.audio_duration_sec,
+                    render_duration_sec=total_usage.render_duration_sec,
+                    total_duration_sec=total_usage.total_duration_sec
+                )
+                
+                # ログを書き込み
+                logger = ExecutionLogger(PROJECT_ROOT / "logs")
+                logger.append_execution_log(execution_log)
+                logger.append_cost_log(cost_log)
+                
+                callbacks.log(f"✓ 実行ログ記録完了: execution_id={execution_id}")
+            
+            except Exception as log_error:
+                import traceback
+                callbacks.log(f"⚠ 実行ログ記録エラー（動画生成は成功）: {log_error}")
+                callbacks.log(f"[DEBUG] Traceback: {traceback.format_exc()}")
+            
             callbacks.log(f"\n== 完了 ==")
             callbacks.log(f"動画: {production_result.video_path}")
             callbacks.log(f"総所要時間: {total_usage.total_duration_sec:.1f}秒")
@@ -1405,6 +1516,35 @@ def run_workflow_sync(
             # エラー時もログファイルを完了
             if log_writer:
                 log_writer.finalize()
+            
+            # エラー時も実行ログを記録（失敗として）
+            try:
+                from uuid import uuid4
+                execution_id = str(uuid4())
+                
+                config_snapshot = _capture_config_snapshot(config, overrides_obj)
+                
+                execution_log = ExecutionLogEntry(
+                    execution_id=execution_id,
+                    app_version=APP_VERSION,
+                    timestamp=datetime.now().isoformat(),
+                    output_directory=str(output_base) if 'output_base' in locals() else "",
+                    theme=theme,
+                    config_snapshot=config_snapshot,
+                    prompts=[],
+                    generated_files={},
+                    success=False,
+                    error_message=error_msg,
+                    total_duration_sec=time.time() - workflow_start
+                )
+                
+                logger = ExecutionLogger(PROJECT_ROOT / "logs")
+                logger.append_execution_log(execution_log)
+                
+                callbacks.log(f"✓ エラーログ記録完了: execution_id={execution_id}")
+            
+            except Exception as log_error:
+                callbacks.log(f"⚠ エラーログ記録失敗: {log_error}")
             
             return WorkflowResult(success=False, error_message=error_msg)
         

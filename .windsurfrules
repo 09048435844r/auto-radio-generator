@@ -1,0 +1,17 @@
+# Auto Radio Generator - AI Agent Rules (Cascade)
+
+## 1. Language & Communication Policy (推論精度とUXの両立)
+- **User Communication (日本語):** ユーザーへの説明、提案のサマリー、確認事項、レポートなどの「対話」はすべて **日本語** で行うこと。
+- **Code & Logic (英語):** 推論精度とコーディングの質を最高レベルに保つため、以下の項目は **英語** を使用すること。
+  - コード内のコメント、関数名、変数名
+  - Gitのコミットメッセージ
+  - 複雑なロジックを設計・推論する際の内部的な思考プロセス（Chain of Thought）
+
+## 2. Project Philosophy (開発哲学)
+- **Input Minimal, Data Maximal:** 手作業を極限まで減らし、生成プロセスの中間データ（プロンプト、APIレスポンス、コスト等）は資産として永続化する。
+- **Append-Only:** ログやデータは既存データを破壊・上書きせず、JSONL等の形式で「追記」していくこと。
+- **Future-Proof:** インターフェース単位で差し替え可能な疎結合（Clean Architecture）を維持すること。
+
+## 3. Tech Stack & Environment
+- Python 3.10+
+- 常に `config.yaml` を駆動元（Config Driven）とし、ソースコードへのハードコードを避けること。
