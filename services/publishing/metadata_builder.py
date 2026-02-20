@@ -91,9 +91,14 @@ def build_video_description(
             if isinstance(ref, ResearchSource):
                 title = (ref.title or "").strip() or f"参考文献{idx}"
                 url = (ref.url or "").strip()
-                lines.append(f"- {title}: {url}")
+                lines.append(f"📄 {title}")
+                lines.append(f"🔗 {url}")
+                lines.append("")  # 空行で区切り
             else:
-                lines.append(f"- 参考文献{idx}: {ref}")
+                # 文字列（URL）の場合
+                lines.append(f"📄 参考文献{idx}")
+                lines.append(f"🔗 {ref}")
+                lines.append("")  # 空行で区切り
     else:
         lines.append("- 参考文献なし")
     lines.append("")
