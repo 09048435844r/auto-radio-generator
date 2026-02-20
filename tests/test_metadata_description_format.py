@@ -15,7 +15,7 @@ def test_reference_title_url_newline_preserved_after_sanitize():
 
 
 def test_build_video_description_section_spacing_and_reference_block():
-    """セクション間の2行空行と参考文献3行構造を検証"""
+    """セクション間(2行) > セクション内(0〜1行) と参考文献3行構造を検証"""
     description = build_video_description(
         script_description="概要テキスト",
         chapters=["00:00 オープニング", "01:00 本編"],
@@ -28,12 +28,15 @@ def test_build_video_description_section_spacing_and_reference_block():
         footer_text="footer",
     )
 
-    # セクション見出し前後の2行空行（目次見出し後の例）
-    assert "【目次】\n\n\n00:00 オープニング" in description
+    # セクション間は2行空行、見出し直後は0行
+    assert "概要テキスト\n\n\n【目次】\n00:00 オープニング" in description
 
     # 参考文献は厳密に3行構造
     assert "📄 Example Title\n🔗 https://example.com\n\n" in description
     assert "📄 参考文献2\n🔗 https://example.org\n\n" in description
 
-    # 参考文献セクションの視認性（見出し後に2行空行）
-    assert "【参考文献】\n\n\n📄 Example Title" in description
+    # 参考文献セクションも見出し直後は0行
+    assert "【参考文献】\n📄 Example Title" in description
+
+    # 末尾に不要な空行を残さない
+    assert description.endswith("footer")

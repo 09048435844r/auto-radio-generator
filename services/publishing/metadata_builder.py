@@ -27,11 +27,16 @@ def _normalize_non_empty(items: List[str]) -> List[str]:
     return normalized
 
 
-def _append_section_heading(lines: List[str], heading: str) -> None:
-    """見出し前の空行を正規化し、必ず2行空けて見出しを追加する。"""
+def _append_section_heading(lines: List[str], heading: str, below_blank_lines: int = 0) -> None:
+    """見出し前は2行、見出し後は0〜1行の空行で見出しを追加する。"""
     while lines and lines[-1] == "":
         lines.pop()
     lines.extend(["", "", heading])
+
+    if below_blank_lines not in (0, 1):
+        raise ValueError("below_blank_lines must be 0 or 1")
+
+    lines.extend([""] * below_blank_lines)
 
 
 def _normalize_references(items: List[ReferenceEntry]) -> List[ReferenceEntry]:
@@ -87,14 +92,12 @@ def build_video_description(
 
     lines: List[str] = ["【動画の概要】", description_text]
 
-    _append_section_heading(lines, "【目次】")
-    lines.extend(["", ""])
+    _append_section_heading(lines, "【目次】", below_blank_lines=0)
     if chapter_lines:
         lines.extend(chapter_lines)
     else:
         lines.append("- チャプター情報なし")
-    _append_section_heading(lines, "【参考文献】")
-    lines.extend(["", ""])
+    _append_section_heading(lines, "【参考文献】", below_blank_lines=0)
     if reference_lines:
         for idx, ref in enumerate(reference_lines, start=1):
             if isinstance(ref, ResearchSource):
@@ -110,19 +113,18 @@ def build_video_description(
                 lines.append("")  # 3行構造の3行目（空行）
     else:
         lines.append("- 参考文献なし")
-    _append_section_heading(lines, "【タグ】")
-    lines.extend(["", ""])
+    _append_section_heading(lines, "【タグ】", below_blank_lines=0)
     if merged_tags:
         lines.append(" ".join(merged_tags))
     else:
         lines.append("#ラジオ")
-    lines.extend(["", ""])
 
     lines.append(footer)
 
     # 最終的なサニタイズと検証
-    final_text = "\n".join(lines)
+    final_text = "\n".join(lines).strip()
     final_text = sanitize_for_youtube(final_text, max_length=5000)
+    final_text = final_text.strip()
     
     # チャプター形式の検証
     if chapter_lines and not validate_chapter_format(chapter_lines):
