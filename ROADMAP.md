@@ -2,6 +2,7 @@
 
 > **Created:** 2026-02-07  
 > **Base Version:** v3.3.0 (GPU / Mock / UI)  
+> **Last Updated:** 2026-02-20  
 > **Author:** AI Tech Lead (Cascade)
 
 ---
@@ -34,6 +35,15 @@
 - [x] **Thumbnail Generation** — Pillow + BudouX による自動サムネイル画像生成
 - [x] **Metadata Packaging** — Gemini によるタイトル・概要文・チャプター自動生成
 
+### YouTube Description Robustness（2026-02 更新）
+- [x] **Text Sanitizer Module** — `services/publishing/text_sanitizer.py` を新設し、YouTube向けテキスト正規化・制御文字除去・長さ制限を実装
+- [x] **Line Break Preservation** — サニタイズ時に `\x09(Tab)`, `\x0A(LF)`, `\x0D(CR)` を保持し、概要欄の構造崩れを防止
+- [x] **Resilient Title Fetching** — `chardet` によるエンコーディング検出を導入し、URLタイトル取得の耐障害性を強化
+- [x] **Reference 3-line Format** — 参考文献を `📄 タイトル / 🔗 URL / 空行` の3行構造に統一
+- [x] **Section Spacing Rule** — セクション見出し前2行、見出し後0〜1行の余白ルールを `metadata_builder.py` に実装
+- [x] **Output Tail Trimming** — 概要欄末尾の不要空行をトリムし、投稿フォーマットを安定化
+- [x] **Regression Tests Added** — `tests/test_text_sanitizer.py` / `tests/test_metadata_description_format.py` を追加し、改行保持と書式を自動検証
+
 ### v3.1.x New Features
 - [x] **NVENC GPU Acceleration** — NVIDIA GPU によるハードウェアエンコード（h264_nvenc）、CPU 自動フォールバック付き
 - [x] **Mock Development Mode** — API 課金なしでワークフロー全体をテスト可能（`tests/mock_data/` 使用）
@@ -52,6 +62,7 @@
 - [x] **Unit Testing Environment** — `pytest` + `pytest-mock` を導入し、`tests/` 配下で単体テストを実行可能化
 - [x] **CI/CD Foundation (pre-commit)** — `git commit` 時に `pytest` を自動実行し、失敗時はコミットをブロックするフックを導入
 - [x] **Regression Prevention (FFmpeg Path Handling)** — Windows向けパスエスケープ処理をヘルパーメソッド化し、変換ロジックの回帰テストを追加
+- [x] **Docs & Config Maintenance** — README/requirements/configコメントを現行実装に合わせて更新
 
 ### Next Priority（最優先）
 - [ ] ⭐ **YouTube Data API 自動アップロードの実装**（動画投稿の手動作業をゼロ化する最重要タスク）
@@ -195,7 +206,7 @@
 
 ---
 
-## � Future Maintenance（今後の課題 / メンテナンス）
+## 🔧 Future Maintenance（今後の課題 / メンテナンス）
 
 > **方針:** 現在は Python 3.10.6 環境で安定動作しているため、開発効率を優先して **2026年10月（サポート期限）まで現行環境を維持**する。  
 > 一方で、Google API ライブラリのサポート期限を踏まえ、中長期の保守性確保のため計画的に移行を進める。
@@ -211,7 +222,7 @@
 
 ---
 
-## �� Tech Stack Overview
+## 🧩 Tech Stack Overview
 
 ### Current（v3.3.0）
 
