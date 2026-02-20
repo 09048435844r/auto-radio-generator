@@ -5,7 +5,8 @@ from typing import Optional
 from urllib.parse import urlparse
 
 # YouTubeで問題になりやすい文字の制御
-CONTROL_CHARS = re.compile(r'[\x00-\x1F\x7F-\x9F]')
+# NOTE: \x09(Tab), \x0A(LF), \x0D(CR) は構造維持のため除外する
+CONTROL_CHARS = re.compile(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]')
 
 # YouTubeチャプター認識を妨げる可能性のある文字
 CHAPTER_PROBLEMATIC = re.compile(r'[^\w\s\-:().\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]')

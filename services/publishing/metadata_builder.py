@@ -27,6 +27,13 @@ def _normalize_non_empty(items: List[str]) -> List[str]:
     return normalized
 
 
+def _append_section_heading(lines: List[str], heading: str) -> None:
+    """見出し前の空行を正規化し、必ず2行空けて見出しを追加する。"""
+    while lines and lines[-1] == "":
+        lines.pop()
+    lines.extend(["", "", heading])
+
+
 def _normalize_references(items: List[ReferenceEntry]) -> List[ReferenceEntry]:
     """Trim values, drop empties, and preserve order while deduplicating by URL/string."""
     seen = set()
@@ -78,16 +85,16 @@ def build_video_description(
     merged_tags = _normalize_non_empty([*dynamic_tags, *fixed_tags])
     footer = (footer_text or "").strip() or "（フッター未設定）"
 
-    lines: List[str] = ["【動画の概要】", description_text, ""]
+    lines: List[str] = ["【動画の概要】", description_text]
 
-    lines.append("【目次】")
+    _append_section_heading(lines, "【目次】")
+    lines.extend(["", ""])
     if chapter_lines:
         lines.extend(chapter_lines)
     else:
         lines.append("- チャプター情報なし")
-    lines.append("")
-
-    lines.append("【参考文献】")
+    _append_section_heading(lines, "【参考文献】")
+    lines.extend(["", ""])
     if reference_lines:
         for idx, ref in enumerate(reference_lines, start=1):
             if isinstance(ref, ResearchSource):
@@ -95,22 +102,21 @@ def build_video_description(
                 url = (ref.url or "").strip()
                 lines.append(f"📄 {title}")
                 lines.append(f"🔗 {url}")
-                lines.append("")  # 空行で区切り
+                lines.append("")  # 3行構造の3行目（空行）
             else:
                 # 文字列（URL）の場合
                 lines.append(f"📄 参考文献{idx}")
                 lines.append(f"🔗 {ref}")
-                lines.append("")  # 空行で区切り
+                lines.append("")  # 3行構造の3行目（空行）
     else:
         lines.append("- 参考文献なし")
-    lines.append("")
-
-    lines.append("【タグ】")
+    _append_section_heading(lines, "【タグ】")
+    lines.extend(["", ""])
     if merged_tags:
         lines.append(" ".join(merged_tags))
     else:
         lines.append("#ラジオ")
-    lines.append("")
+    lines.extend(["", ""])
 
     lines.append(footer)
 
