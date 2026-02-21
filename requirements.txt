@@ -32,6 +32,8 @@ rich>=13.0.0             # コンソール出力装飾
 
 # Web UI
 gradio>=4.0.0            # ブラウザベースUI（タブ式インターフェース）
+pandas>=2.0.0            # ダッシュボード集計（実行履歴/コスト履歴）
+plotly>=5.0.0            # ダッシュボード可視化（コスト推移/モデル利用率）
 
 # Publishing (YouTube Data API)
 google-api-python-client>=2.0.0  # YouTube Data API v3 クライアント

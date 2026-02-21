@@ -29,7 +29,7 @@
 ### Core Pipeline
 - [x] **Research Phase** — Perplexity API による5モード対応リサーチ（debate / voices / trivia / weekly_digest / lecture）
 - [x] **AI Producer** — Gemini による検索計画の自動作成（テーマ → 検索クエリ生成）
-- [x] **Script Generation** — Gemini Pro + JSON Mode による構造化台本生成
+- [x] **Script Generation** — Gemini Pro による構造化台本生成
 - [x] **Audio Synthesis** — VOICEVOX による2話者音声合成 + ASS字幕生成
 - [x] **Video Rendering** — FFmpeg による動画レンダリング（背景 + BGM + 字幕 + スペクトラム）
 - [x] **Thumbnail Generation** — Pillow + BudouX による自動サムネイル画像生成
@@ -65,17 +65,15 @@
 - [x] **Docs & Config Maintenance** — README/requirements/configコメントを現行実装に合わせて更新
 
 ### Next Priority（最優先）
-- [ ] ⭐ **YouTube Data API 自動アップロードの実装**（動画投稿の手動作業をゼロ化する最重要タスク）
+- [ ] ⭐ **Scheduler（定期自動生成）の運用実装**（テーマ入力の手動作業をゼロ化）
 
 ### Known Gaps（哲学に基づく課題分析）
 
 | カテゴリ | 課題 | 影響 |
 |---------|------|------|
-| **データ損失** | プロンプト履歴が保存されていない | 「どのプロンプトが良い台本を生んだか」の分析不可 |
-| **データ損失** | 生成パラメータ（config + overrides）のスナップショットなし | 再現性がない |
-| **データ損失** | API 生レスポンスを `json.loads()` 後に破棄 | モデル出力の品質分析不可 |
-| **データ損失** | コスト情報が UI 表示のみで永続化されていない | ランニングコストの推移把握が不可能 |
-| **手動運用** | YouTube へのアップロードが完全手動 | 毎回 metadata.txt をコピペ |
+| **データ活用** | プロンプト履歴の分析UIが未整備 | 良い生成パターンの再利用に手間がかかる |
+| **データ活用** | 実行ログの横断検索機能が弱い | 過去実行の比較がしづらい |
+| **運用自動化** | テーマ選定が毎回人間入力 | 定期運用に人手が必要 |
 | **手動運用** | テーマ選定が毎回人間入力 | 定期運用に人手が必要 |
 | **手動運用** | BGM / 背景画像の選定が手動 | テーマとの不一致リスク |
 
@@ -87,7 +85,7 @@
 
 > **目的:** 生成プロセスの中間データを「資産」として蓄積し、将来の分析・自己改善の基盤を構築する。
 
-- [ ] **Structured Execution Log**
+- [x] **Structured Execution Log**
   - 実行ごとに `execution_record.jsonl` へ以下を追記:
     - 実行日時、テーマ、リサーチモード、使用モデル
     - 送信したプロンプト（system / user）の全文
@@ -96,7 +94,7 @@
     - 出力ファイルパス一覧
   - フォーマット: JSONL（1行1レコード、append-only で高速書き込み）
 
-- [ ] **Cost Tracking（コスト追跡・月次推移）** ⭐ 重点項目
+- [x] **Cost Tracking（コスト追跡・月次推移）** ⭐ 重点項目
   - 各生成ごとの API コスト（Gemini / Perplexity / VOICEVOX）を `cost_history.jsonl` に記録
   - 記録項目:
     - `timestamp`: 実行日時
@@ -127,8 +125,8 @@
 
 > **目的:** 動画生成の「先」にある作業を自動化し、テーマ入力すら不要な完全自律運用を実現する。
 
-- [ ] **YouTube Auto-Uploader**
-  - ⭐ **NEXT PRIORITY:** YouTube Data API v3 自動アップロードを最優先で実装
+- [x] **YouTube Auto-Uploader**
+  - YouTube Data API v3 自動アップロードを実装済み
   - Google YouTube Data API v3 による自動投稿
   - アップロード対象: 動画ファイル（`.mp4`）、サムネイル（`.png`）
   - 自動設定: タイトル、概要欄（チャプター付き）、タグ、カテゴリ、公開設定

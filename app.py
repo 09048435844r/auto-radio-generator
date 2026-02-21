@@ -2317,28 +2317,6 @@ def create_ui() -> gr.Blocks:
     return app
 
 
-def main():
-    """メインエントリーポイント"""
-    import sys
-    import io
-    
-    # Windows用UTF-8出力設定
-    if sys.platform == "win32":
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    
-    print("自動ラジオ動画生成システム - Web UI を起動中...")
-    print("=" * 50)
-    
-    app = create_ui()
-    app.launch(
-        server_name="127.0.0.1",
-        server_port=None,  # 自動的に空いているポートを検索
-        share=False,
-        inbrowser=True,
-        theme=gr.themes.Soft(),
-        css=CUSTOM_CSS  # Gradio 6.0: CSSはlaunch()で指定
-    )
-
-
 if __name__ == "__main__":
-    main()
+    app = create_ui()
+    app.launch()
