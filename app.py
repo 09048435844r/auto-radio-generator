@@ -28,6 +28,13 @@ from core.models import Script
 from core.interfaces import ResearchResult
 from core.settings_manager import SettingsManager
 import json
+import os
+import socket
+import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
+from datetime import datetime
+from urllib.parse import urlparse
 
 
 # ログメッセージを蓄積するためのグローバル変数
@@ -672,6 +679,9 @@ def generate_video(
     
     def progress_callback(ratio: float, desc: str):
         progress(ratio, desc=desc)
+
+    if use_mock and upload_to_youtube:
+        append_log("[INFO] Mockモード実行のため、YouTubeアップロード設定は無効化されます")
     
     # ワークフロー実行
     result: WorkflowResult = run_workflow_sync(
@@ -757,7 +767,7 @@ def generate_script_only(
     
     # ログをクリア
     clear_logs()
-    append_log("🎬 AIプロデューサーモード (松コース)")
+    append_log("🎬 AIプロデューサーモード")
     append_log("=" * 40)
     append_log("多角的深掘り検索で台本を生成します")
     
@@ -1234,6 +1244,726 @@ def generate_script_from_research(
         return error_msg, error_msg
 
 
+# Dashboard functions
+def load_execution_logs(year_month: str) -> pd.DataFrame:
+    """Load execution logs from JSONL file"""
+    logs_dir = PROJECT_ROOT / "logs"
+    file_path = logs_dir / f"execution_record_{year_month}.jsonl"
+    
+    if not file_path.exists():
+        return pd.DataFrame()
+    
+    data = []
+    with open(file_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            data.append(json.loads(line))
+    
+    return pd.DataFrame(data)
+
+def load_cost_logs(year_month: str) -> pd.DataFrame:
+    """Load cost logs from JSONL file"""
+    logs_dir = PROJECT_ROOT / "logs"
+    file_path = logs_dir / f"cost_history_{year_month}.jsonl"
+    
+    if not file_path.exists():
+        return pd.DataFrame()
+    
+    data = []
+    with open(file_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            data.append(json.loads(line))
+    
+    return pd.DataFrame(data)
+
+def calculate_summary_stats(df_cost: pd.DataFrame, df_exec: pd.DataFrame) -> dict:
+    """Calculate summary statistics"""
+    if df_cost.empty:
+        return {
+            "total_executions": 0,
+            "total_cost": 0.0,
+            "avg_cost": 0.0,
+            "success_rate": 0.0
+        }
+    
+    total_executions = len(df_exec)
+    total_cost = df_cost['total_cost_usd'].sum() if 'total_cost_usd' in df_cost.columns else 0.0
+    avg_cost = total_cost / total_executions if total_executions > 0 else 0.0
+
+    if total_executions == 0:
+        success_rate = 0.0
+    elif 'success' in df_exec.columns:
+        success_rate = (pd.to_numeric(df_exec['success'], errors='coerce').fillna(0).sum() / total_executions) * 100
+    elif 'status' in df_exec.columns:
+        success_rate = ((df_exec['status'].astype(str).str.lower() == 'success').sum() / total_executions) * 100
+    else:
+        success_rate = 0.0
+    
+    return {
+        "total_executions": total_executions,
+        "total_cost": total_cost,
+        "avg_cost": avg_cost,
+        "success_rate": success_rate
+    }
+
+def create_cost_trend_chart(df_cost: pd.DataFrame) -> go.Figure:
+    """Create cost trend chart"""
+    if df_cost.empty:
+        fig = go.Figure()
+        fig.add_annotation(text="No data available", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
+        return fig
+    
+    df_cost['date'] = pd.to_datetime(df_cost['timestamp']).dt.date
+    daily_cost = df_cost.groupby('date')['total_cost_usd'].sum().reset_index()
+    
+    fig = px.line(daily_cost, x='date', y='total_cost_usd', title='Daily Cost Trend')
+    fig.update_layout(xaxis_title='Date', yaxis_title='Cost (USD)')
+    return fig
+
+def create_model_usage_chart(df_cost: pd.DataFrame) -> go.Figure:
+    """Create model usage pie chart"""
+    if df_cost.empty:
+        fig = go.Figure()
+        fig.add_annotation(text="No data available", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
+        return fig
+    
+    model_costs = {
+        'Perplexity': df_cost['perplexity_cost_usd'].sum(),
+        'Gemini': df_cost['gemini_cost_usd'].sum(),
+        'VOICEVOX': df_cost['voicevox_cost_usd'].sum()
+    }
+    
+    fig = px.pie(values=list(model_costs.values()), names=list(model_costs.keys()), title='Cost by Model')
+    return fig
+
+def format_execution_table(df_exec: pd.DataFrame) -> pd.DataFrame:
+    """Format execution table for display"""
+    if df_exec.empty:
+        return pd.DataFrame(columns=['Date', 'Theme', 'Duration', 'Success', 'Cost (USD)'])
+    
+    if 'timestamp' in df_exec.columns:
+        df_cost = load_cost_logs(str(df_exec['timestamp'].iloc[0])[:7])
+    else:
+        df_cost = pd.DataFrame()
+    
+    formatted = df_exec.copy()
+    if 'timestamp' in df_exec.columns:
+        formatted['Date'] = pd.to_datetime(df_exec['timestamp'], errors='coerce').dt.strftime('%Y-%m-%d %H:%M').fillna('-')
+    else:
+        formatted['Date'] = '-'
+
+    if 'execution_time_seconds' in df_exec.columns:
+        duration_series = pd.to_numeric(df_exec['execution_time_seconds'], errors='coerce')
+    elif 'duration_sec' in df_exec.columns:
+        duration_series = pd.to_numeric(df_exec['duration_sec'], errors='coerce')
+    else:
+        duration_series = pd.Series([None] * len(df_exec))
+
+    formatted['Duration'] = duration_series.apply(lambda x: f"{x:.1f}s" if pd.notna(x) else '-')
+
+    if 'Theme' in df_exec.columns:
+        formatted['Theme'] = df_exec['Theme']
+    elif 'theme' in df_exec.columns:
+        formatted['Theme'] = df_exec['theme']
+    else:
+        formatted['Theme'] = '-'
+
+    if 'Success' in df_exec.columns:
+        formatted['Success'] = df_exec['Success']
+    elif 'success' in df_exec.columns:
+        formatted['Success'] = df_exec['success']
+    elif 'status' in df_exec.columns:
+        formatted['Success'] = df_exec['status'].astype(str).str.lower() == 'success'
+    else:
+        formatted['Success'] = False
+    
+    # Merge cost data
+    if not df_cost.empty and 'execution_id' in formatted.columns and 'execution_id' in df_cost.columns and 'total_cost_usd' in df_cost.columns:
+        cost_map = df_cost.set_index('execution_id')['total_cost_usd'].to_dict()
+        formatted['Cost (USD)'] = formatted['execution_id'].map(cost_map).fillna(0.0)
+    else:
+        formatted['Cost (USD)'] = 0.0
+    
+    return formatted[['Date', 'Theme', 'Duration', 'Success', 'Cost (USD)']]
+
+def update_dashboard(month_selector: str):
+    """Update dashboard data"""
+    try:
+        df_exec = load_execution_logs(month_selector)
+        df_cost = load_cost_logs(month_selector)
+        
+        stats = calculate_summary_stats(df_cost, df_exec)
+        cost_chart = create_cost_trend_chart(df_cost)
+        usage_chart = create_model_usage_chart(df_cost)
+        table = format_execution_table(df_exec)
+        
+        status = f"Data loaded for {month_selector}"
+        
+        return (
+            stats["total_executions"],
+            stats["total_cost"],
+            stats["avg_cost"],
+            stats["success_rate"],
+            table,
+            cost_chart,
+            usage_chart,
+            status
+        )
+    except Exception as e:
+        return (
+            0, 0.0, 0.0, 0.0,
+            pd.DataFrame(columns=['Date', 'Theme', 'Duration', 'Success', 'Cost (USD)']),
+            go.Figure(), go.Figure(),
+            f"Error loading data: {str(e)}"
+        )
+
+
+def _update_config_yaml_values(upload_enabled: bool, footer_text: str, mock_mode: bool) -> None:
+    """Update specific config.yaml keys while keeping most existing structure intact."""
+    config_path = PROJECT_ROOT / "config.yaml"
+    if not config_path.exists():
+        return
+
+    lines = config_path.read_text(encoding="utf-8").splitlines()
+    updated_lines: list[str] = []
+    section = ""
+    i = 0
+
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        if stripped and not line.startswith(" ") and stripped.endswith(":"):
+            section = stripped[:-1]
+
+        if section == "dev" and stripped.startswith("mock_mode:"):
+            updated_lines.append(f"  mock_mode: {'true' if mock_mode else 'false'}")
+            i += 1
+            continue
+
+        if section == "publishing" and stripped.startswith("enable_upload:"):
+            updated_lines.append(f"  enable_upload: {'true' if upload_enabled else 'false'}")
+            i += 1
+            continue
+
+        if section == "publishing" and stripped.startswith("footer_text:"):
+            updated_lines.append("  footer_text: |")
+            for footer_line in (footer_text or "").splitlines() or [""]:
+                updated_lines.append(f"    {footer_line}")
+
+            i += 1
+            while i < len(lines):
+                next_line = lines[i]
+                next_stripped = next_line.strip()
+                if not next_stripped:
+                    i += 1
+                    continue
+                if next_line.startswith("    "):
+                    i += 1
+                    continue
+                break
+            continue
+
+        updated_lines.append(line)
+        i += 1
+
+    config_path.write_text("\n".join(updated_lines) + "\n", encoding="utf-8")
+
+
+def get_system_status_markdown(config) -> tuple[str, str, str]:
+    """Build system status texts for Settings tab."""
+    perplexity_key = os.getenv("PERPLEXITY_API_KEY", "")
+    gemini_key = os.getenv("GEMINI_API_KEY", "")
+
+    perplexity_status = "🟢 Perplexity: Configured" if perplexity_key else "🔴 Perplexity: Missing API Key"
+    gemini_status = "🟢 Gemini: Configured" if gemini_key else "🔴 Gemini: Missing API Key"
+
+    voicevox_url = getattr(config.env, "voicevox_base_url", "http://localhost:50021")
+    parsed = urlparse(voicevox_url)
+    host = parsed.hostname or "localhost"
+    port = parsed.port or 50021
+    voicevox_ok = False
+    try:
+        with socket.create_connection((host, port), timeout=0.8):
+            voicevox_ok = True
+    except OSError:
+        voicevox_ok = False
+
+    if voicevox_ok:
+        voicevox_status = f"🟢 VOICEVOX: Connected ({host}:{port})"
+    else:
+        voicevox_status = f"🔴 VOICEVOX: Not reachable ({host}:{port})"
+
+    return perplexity_status, gemini_status, voicevox_status
+
+
+def save_settings_from_ui(
+    research_mode: str,
+    background_image: str,
+    bgm_file: str,
+    bgm_volume: float,
+    fade_time: float,
+    speed_scale: float,
+    enable_spectrum: bool,
+    mock_mode: bool,
+    upload_enabled: bool,
+    footer_text: str,
+):
+    """Persist settings only when user explicitly clicks Save Settings."""
+    _settings_manager.update_from_ui(
+        research_mode=research_mode,
+        background_image=background_image,
+        bgm_file=bgm_file,
+        bgm_volume=bgm_volume,
+        fade_time=fade_time,
+        speed_scale=speed_scale,
+        enable_spectrum=enable_spectrum,
+    )
+
+    _update_config_yaml_values(
+        upload_enabled=upload_enabled,
+        footer_text=footer_text,
+        mock_mode=mock_mode,
+    )
+
+    return f"✅ Settings saved ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})"
+
+
+def create_dashboard_tab() -> dict[str, gr.components.Component]:
+    """Create Dashboard tab UI components and return references for event binding."""
+    gr.Markdown("## 📊 Cost & Execution Analytics")
+
+    logs_dir = PROJECT_ROOT / "logs"
+    available_months: list[str] = []
+    if logs_dir.exists():
+        for file in logs_dir.glob("execution_record_*.jsonl"):
+            month = file.stem.split("_")[-1]
+            if month not in available_months:
+                available_months.append(month)
+    available_months.sort(reverse=True)
+
+    if not available_months:
+        available_months = [datetime.now().strftime("%Y-%m")]
+
+    with gr.Row():
+        with gr.Column():
+            total_executions = gr.Number(label="Total Executions", interactive=False, value=0)
+            total_cost_usd = gr.Number(label="Total Cost (USD)", interactive=False, value=0.0)
+        with gr.Column():
+            avg_cost = gr.Number(label="Avg Cost/Video", interactive=False, value=0.0)
+            success_rate = gr.Number(label="Success Rate (%)", interactive=False, value=0.0)
+
+    with gr.Row():
+        month_selector = gr.Dropdown(
+            label="Select Month",
+            choices=available_months,
+            value=available_months[0],
+        )
+        refresh_btn = gr.Button("🔄 Refresh Data", size="sm")
+
+    with gr.Row():
+        with gr.Column(scale=2):
+            execution_table = gr.Dataframe(
+                label="Execution History",
+                headers=["Date", "Theme", "Duration", "Success", "Cost (USD)"],
+                datatype=["str", "str", "str", "bool", "number"],
+                interactive=False,
+            )
+        with gr.Column(scale=1):
+            cost_chart = gr.Plot(label="Cost Trend")
+            usage_chart = gr.Plot(label="Model Usage")
+
+    dashboard_status = gr.Markdown("*Run your first generation to see data.*")
+
+    return {
+        "month_selector": month_selector,
+        "refresh_btn": refresh_btn,
+        "total_executions": total_executions,
+        "total_cost_usd": total_cost_usd,
+        "avg_cost": avg_cost,
+        "success_rate": success_rate,
+        "execution_table": execution_table,
+        "cost_chart": cost_chart,
+        "usage_chart": usage_chart,
+        "dashboard_status": dashboard_status,
+    }
+
+
+def create_settings_tab(
+    config,
+    default_upload_enabled: bool,
+    default_footer_text: str,
+    default_mock_mode: bool,
+) -> dict[str, gr.components.Component]:
+    """Create Settings tab with explicit save flow and hidden developer options."""
+    gr.Markdown("## ⚙️ Settings")
+
+    with gr.Row():
+        with gr.Column():
+            gr.Markdown("### 📡 System Status")
+            perplexity_status = gr.Markdown("🔴 Perplexity: Checking...")
+            gemini_status = gr.Markdown("🔴 Gemini: Checking...")
+            voicevox_status = gr.Markdown("🔴 VOICEVOX: Checking...")
+            refresh_status_btn = gr.Button("🔄 Refresh Status", size="sm")
+
+        with gr.Column():
+            gr.Markdown("### 🚀 Publishing")
+            upload_to_youtube_checkbox = gr.Checkbox(
+                label="YouTubeに自動アップロードする",
+                value=default_upload_enabled,
+                info="チェック時は動画生成後にYouTubeへ自動アップロードを試行します",
+            )
+            footer_text_input = gr.Textbox(
+                label="概要欄フッター（固定文）",
+                value=default_footer_text,
+                lines=6,
+                info="著作権表示・免責事項などを設定できます（Save Settingsで反映）",
+            )
+
+    with gr.Accordion("Developer Options", open=False):
+        use_mock = gr.Checkbox(
+            label="🔴 Mock Mode (Development)",
+            value=default_mock_mode,
+            info="APIを使わずにtests/mock_dataの固定データを使用します",
+        )
+        gr.Markdown("- Current Config Source: `config.yaml`\n- Runtime UI state: saved only by **Save Settings**")
+
+    save_settings_btn = gr.Button("💾 Save Settings", variant="primary")
+    settings_status = gr.Markdown("*Settings not saved yet.*")
+
+    return {
+        "perplexity_status": perplexity_status,
+        "gemini_status": gemini_status,
+        "voicevox_status": voicevox_status,
+        "refresh_status_btn": refresh_status_btn,
+        "upload_to_youtube_checkbox": upload_to_youtube_checkbox,
+        "footer_text_input": footer_text_input,
+        "use_mock": use_mock,
+        "save_settings_btn": save_settings_btn,
+        "settings_status": settings_status,
+        "config": config,
+    }
+
+
+def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
+    """Create Generator tab UI and return component references."""
+    with gr.Accordion("🚀 全自動モード", open=True):
+        with gr.Row():
+            with gr.Column(scale=1):
+                with gr.Group(elem_classes="group-container"):
+                    gr.Markdown("### 📋 企画設定")
+
+                    with gr.Row():
+                        theme_input = gr.Textbox(
+                            label="テーマ",
+                            placeholder="例: AIの未来について / 最近のゲーム事情 / 宇宙開発の最新動向",
+                            lines=2,
+                            info="動画で話すテーマを入力してください（必須）",
+                            scale=2,
+                        )
+                        research_mode_dropdown = gr.Dropdown(
+                            label="リサーチモード",
+                            choices=list(RESEARCH_MODE_MAP.keys()),
+                            value=saved_settings.research_mode,
+                            info="Perplexityによるリサーチの方向性を選択",
+                            scale=1,
+                        )
+
+                    avoid_topics_input = gr.Textbox(
+                        label="避けてほしい話題 (オプション)",
+                        placeholder="例: 食事療法 運動不足 (スペースやカンマで区切って複数入力可)",
+                        lines=1,
+                        info="台本に含めたくないトピックを指定できます",
+                    )
+
+                with gr.Group(elem_classes="group-container"):
+                    gr.Markdown("### 🎨 クリエイティブ設定")
+                    gr.Markdown("#### 📷 背景画像")
+
+                    with gr.Row(equal_height=True):
+                        with gr.Column(scale=1):
+                            bg_preview = gr.Image(label="プレビュー", height=300, interactive=False)
+                            selected_bg_filename = gr.Textbox(
+                                value=saved_settings.background_image
+                                if saved_settings.background_image
+                                else (assets.get("backgrounds", ["default.png"])[0] if assets.get("backgrounds") else ""),
+                                visible=False,
+                            )
+
+                        with gr.Column(scale=1):
+                            custom_bg_upload = gr.File(
+                                label="カスタム画像をアップロード",
+                                file_types=["image"],
+                                type="filepath",
+                            )
+                            gr.Markdown(
+                                """
+                                **アップロード情報:**
+                                - PNG, JPG, WEBP対応
+                                - 推奨: 1920x1080以上
+                                """
+                            )
+
+                    bg_gallery = gr.Gallery(
+                        label="背景画像ギャラリー",
+                        value=get_background_gallery_images(),
+                        columns=4,
+                        height=200,
+                        object_fit="cover",
+                        elem_classes="gallery-container",
+                    )
+
+                    gr.Markdown("#### 🎵 BGM")
+                    with gr.Row():
+                        bgm_dropdown = gr.Dropdown(
+                            label="BGM選択",
+                            choices=assets.get("bgm", ["default.mp3"]),
+                            value=saved_settings.bgm_file
+                            if saved_settings.bgm_file in assets.get("bgm", [])
+                            else (assets.get("bgm", ["default.mp3"])[0] if assets.get("bgm") else None),
+                            scale=2,
+                        )
+                        bgm_preview = gr.Audio(label="プレビュー", interactive=False, scale=1)
+
+                    refresh_assets_btn = gr.Button("🔄 素材リストを更新", size="sm")
+                    gr.Markdown("#### ⚙️ 動画設定")
+
+                    with gr.Row():
+                        bgm_volume_slider = gr.Slider(
+                            label="BGM音量",
+                            minimum=0.0,
+                            maximum=0.5,
+                            value=saved_settings.bgm_volume,
+                            step=0.01,
+                            info="BGMの音量（0.0〜0.5）",
+                        )
+                        fade_time_slider = gr.Slider(
+                            label="フェード時間",
+                            minimum=1.0,
+                            maximum=10.0,
+                            value=saved_settings.fade_time,
+                            step=0.5,
+                            info="BGMのフェードイン/アウト時間（秒）",
+                        )
+
+                    with gr.Row():
+                        speed_slider = gr.Slider(
+                            label="話速 (Speed)",
+                            minimum=0.8,
+                            maximum=1.5,
+                            value=saved_settings.speed_scale,
+                            step=0.05,
+                            info="音声の再生速度（0.8～1.5）",
+                        )
+                        spectrum_checkbox = gr.Checkbox(
+                            label="音声スペクトラムを表示",
+                            value=saved_settings.enable_spectrum,
+                            info="画面下部に音声の波形を表示",
+                        )
+
+                with gr.Group(elem_classes="group-container"):
+                    gr.Markdown("### 🚀 生成アクション")
+                    with gr.Row():
+                        generate_btn = gr.Button(
+                            "🚀 動画を生成する",
+                            variant="primary",
+                            size="lg",
+                            scale=2,
+                            elem_classes="primary-btn",
+                        )
+                        script_only_btn = gr.Button(
+                            "📝 台本のみ作成",
+                            variant="secondary",
+                            size="lg",
+                            scale=1,
+                        )
+
+                    gr.Markdown(
+                        """
+                        **⚠️ 注意事項:**
+                        - **VOICEVOX** エンジンが起動している必要があります
+                        - **Perplexity API Key** と **Gemini API Key** が `.env` に設定されている必要があります
+                        - 生成には数分かかる場合があります
+                        """
+                    )
+
+            with gr.Column(scale=1):
+                gr.Markdown("## 📺 結果パネル")
+                video_output = gr.Video(label="生成された動画", height=360)
+                youtube_url_output = gr.Markdown(value="")
+                log_output = gr.Textbox(label="処理ログ", lines=12, max_lines=18, interactive=False)
+                gr.Markdown("### 📊 API使用量・コスト")
+                cost_output = gr.Markdown(value="*生成完了後に表示されます*")
+                gr.Markdown("### 📝 YouTubeメタデータ")
+                title_output = gr.Textbox(label="タイトル (コピー用)", placeholder="生成完了後に表示されます", interactive=True)
+                description_output = gr.Textbox(
+                    label="概要欄・チャプター (一括コピー用)",
+                    placeholder="生成完了後に表示されます",
+                    lines=15,
+                    interactive=True,
+                )
+
+    step_components = create_step_mode_ui(assets)
+
+    return {
+        "theme_input": theme_input,
+        "research_mode_dropdown": research_mode_dropdown,
+        "avoid_topics_input": avoid_topics_input,
+        "bg_preview": bg_preview,
+        "selected_bg_filename": selected_bg_filename,
+        "custom_bg_upload": custom_bg_upload,
+        "bg_gallery": bg_gallery,
+        "bgm_dropdown": bgm_dropdown,
+        "bgm_preview": bgm_preview,
+        "refresh_assets_btn": refresh_assets_btn,
+        "bgm_volume_slider": bgm_volume_slider,
+        "fade_time_slider": fade_time_slider,
+        "speed_slider": speed_slider,
+        "spectrum_checkbox": spectrum_checkbox,
+        "generate_btn": generate_btn,
+        "script_only_btn": script_only_btn,
+        "video_output": video_output,
+        "youtube_url_output": youtube_url_output,
+        "log_output": log_output,
+        "cost_output": cost_output,
+        "title_output": title_output,
+        "description_output": description_output,
+        "step_components": step_components,
+    }
+
+
+def create_manual_tab(assets: dict) -> dict[str, object]:
+    """Create Manual tab UI and return component references."""
+    with gr.Accordion("🛠 こだわりステップモード", open=False):
+        gr.Markdown(
+            """
+            **高度な制作モード** - 各ステップを個別に実行・調整できます
+
+            🔹 **Step A**: リサーチ → 台本生成（個別調整可能）
+            🔹 **Step B**: 台本 → 音声合成（個別調整可能）
+            🔹 **Step C**: 音声・字幕 → 動画レンダリング（個別調整可能）
+            """
+        )
+
+        step_mode = gr.Radio(
+            choices=["通常モード（一括）", "こだわりステップモード"],
+            value="通常モード（一括）",
+            label="制作モード",
+            info="こだわりステップモードでは各工程を個別に実行・調整できます",
+        )
+
+    gr.Markdown("### 📝 Step A: リサーチ結果から台本生成")
+    research_input = gr.Textbox(
+        label="Perplexity等のリサーチ結果を貼り付け",
+        placeholder="ここにリサーチ結果のテキストを貼り付けてください...",
+        lines=10,
+        info="Perplexityや他のソースで得たリサーチ結果を貼り付け",
+    )
+    theme_input_manual = gr.Textbox(
+        label="テーマ/タイトル",
+        placeholder="例: AIの倫理的課題について",
+        info="台本のテーマまたはタイトルを入力してください",
+    )
+    generate_script_btn = gr.Button("📝 この内容で台本を作成", variant="primary", size="lg")
+    script_output = gr.Code(label="生成された台本", language="json", lines=20, interactive=True)
+
+    gr.Markdown("---")
+    gr.Markdown("### 🎤 Step B: 音声合成 (Audio Synthesis)")
+    script_editor = gr.Code(
+        label="台本JSON (編集可能) - Step Aで生成された台本を編集できます",
+        language="json",
+        lines=15,
+        interactive=True,
+    )
+    synthesize_btn = gr.Button("🎤 この台本で音声を合成する", variant="primary", size="lg")
+
+    with gr.Row():
+        with gr.Column():
+            audio_output = gr.Audio(label="生成された音声", interactive=False)
+            subtitle_output = gr.File(label="字幕ファイル (.ass)", interactive=False)
+        with gr.Column():
+            synthesis_log = gr.Textbox(label="処理ログ", lines=10, interactive=False)
+
+    gr.Markdown("---")
+    gr.Markdown("### 🎬 Step C: 動画書き出し (Rendering)")
+
+    with gr.Row():
+        with gr.Column():
+            audio_input = gr.Audio(label="音声ファイル", sources=["upload"], type="filepath", interactive=True)
+            subtitle_input = gr.File(
+                label="字幕ファイル (.ass)",
+                file_types=[".ass"],
+                type="filepath",
+                interactive=True,
+            )
+        with gr.Column():
+            background_input = gr.Image(
+                label="背景/サムネイル画像 (1920x1080推奨)",
+                sources=["upload"],
+                type="filepath",
+                interactive=True,
+            )
+            bgm_dropdown_manual = gr.Dropdown(
+                label="BGM",
+                choices=assets.get("bgm", ["default.mp3"]),
+                value=assets.get("bgm", ["default.mp3"])[0] if assets.get("bgm") else None,
+                info="assets/bgm/ 内の音声",
+            )
+
+    render_btn = gr.Button("🎬 動画を生成する (Render Video)", variant="primary", size="lg")
+
+    with gr.Row():
+        with gr.Column():
+            video_output_manual = gr.Video(label="完成動画", interactive=False)
+            video_file_output = gr.File(label="動画ファイルダウンロード", interactive=False)
+        with gr.Column():
+            render_log = gr.Textbox(label="処理ログ", lines=10, interactive=False)
+
+    gr.Markdown(
+        """
+        ### 📖 使い方
+
+        **Step A: 台本生成**
+        1. Perplexity等でリサーチした結果を上のテキストボックスに貼り付け
+        2. テーマ/タイトルを入力
+        3. 「この内容で台本を作成」ボタンをクリック
+
+        **Step B: 音声合成**
+        1. 生成された台本が自動的にエディタに反映されます
+        2. 必要に応じて台本を編集
+        3. 「この台本で音声を合成する」ボタンをクリック
+        4. 生成された音声と字幕がStep Cに自動反映されます
+
+        **Step C: 動画レンダリング**
+        1. Step Bの音声と字幕が自動的にセットされます
+        2. 背景画像をアップロード
+        3. BGMを選択
+        4. 「動画を生成する」ボタンをクリック
+        5. 完成した動画をダウンロード
+        """
+    )
+
+    return {
+        "step_mode": step_mode,
+        "research_input": research_input,
+        "theme_input_manual": theme_input_manual,
+        "generate_script_btn": generate_script_btn,
+        "script_output": script_output,
+        "script_editor": script_editor,
+        "synthesize_btn": synthesize_btn,
+        "audio_output": audio_output,
+        "subtitle_output": subtitle_output,
+        "synthesis_log": synthesis_log,
+        "audio_input": audio_input,
+        "subtitle_input": subtitle_input,
+        "background_input": background_input,
+        "bgm_dropdown_manual": bgm_dropdown_manual,
+        "render_btn": render_btn,
+        "video_output_manual": video_output_manual,
+        "video_file_output": video_file_output,
+        "render_log": render_log,
+    }
+
+
 def create_ui() -> gr.Blocks:
     """Gradio UIを作成"""
     
@@ -1247,458 +1977,57 @@ def create_ui() -> gr.Blocks:
     default_footer_text = (
         getattr(publishing_cfg, "footer_text", "") if publishing_cfg else ""
     )
+    dev_cfg = getattr(config.yaml, "dev", None)
+    default_mock_mode = bool(dev_cfg and getattr(dev_cfg, "mock_mode", False))
     
     # アセット一覧を取得
     assets = get_asset_choices()
     
-    with gr.Blocks(
-        title="自動ラジオ動画生成システム v3.3.0 (JSON Mode)"
-    ) as app:
+    with gr.Blocks(title="自動ラジオ動画生成システム v3.3.0") as app:
         
         # ヘッダー
         gr.Markdown(
             """
-            # 🎙️ 自動ラジオ動画生成システム v3.3.0 (JSON Mode)
+            # 🎙️ 自動ラジオ動画生成システム v3.3.0
             
             **Perplexity** でテーマをリサーチし、**Gemini** が台本を作成。
             **VOICEVOX** で音声合成、**FFmpeg** で動画を生成します。
             """
         )
         
+        generator_components: dict[str, object] = {}
+        manual_components: dict[str, object] = {}
+        dashboard_components: dict[str, gr.components.Component] = {}
+        settings_components: dict[str, gr.components.Component] = {}
+
         # タブ切り替え
-        with gr.Tabs() as tabs:
-            # Tab 1: 自動生成 (Classic)
-            with gr.TabItem("🚀 自動生成 (Classic)", id="classic"):
-                
-                # ========== 全自動モード（モダンUI） ==========
-                with gr.Accordion("🚀 全自動モード (推奨)", open=True):
-                    with gr.Row():
-                        # ========== 左カラム: 設定パネル ==========
-                        with gr.Column(scale=1):
-                            
-                            # ブロック1: 📋 企画設定
-                            with gr.Group(elem_classes="group-container"):
-                                gr.Markdown("### 📋 企画設定")
-                                
-                                with gr.Row():
-                                    theme_input = gr.Textbox(
-                                        label="テーマ",
-                                        placeholder="例: AIの未来について / 最近のゲーム事情 / 宇宙開発の最新動向",
-                                        lines=2,
-                                        info="動画で話すテーマを入力してください（必須）",
-                                        scale=2
-                                    )
-                                    research_mode_dropdown = gr.Dropdown(
-                                        label="リサーチモード",
-                                        choices=list(RESEARCH_MODE_MAP.keys()),
-                                        value=saved_settings.research_mode,
-                                        info="Perplexityによるリサーチの方向性を選択",
-                                        scale=1
-                                    )
-                                
-                                avoid_topics_input = gr.Textbox(
-                                    label="避けてほしい話題 (オプション)",
-                                    placeholder="例: 食事療法 運動不足 (スペースやカンマで区切って複数入力可)",
-                                    lines=1,
-                                    info="台本に含めたくないトピックを指定できます"
-                                )
-                            
-                            # ブロック2: 🎨 クリエイティブ設定
-                            with gr.Group(elem_classes="group-container"):
-                                gr.Markdown("### 🎨 クリエイティブ設定")
-                                
-                                # 背景画像選択エリア
-                                gr.Markdown("#### 📷 背景画像")
-                                
-                                # 上段: プレビュー + カスタムアップロード
-                                with gr.Row(equal_height=True):
-                                    # 左側: 現在選択中の背景画像プレビュー
-                                    with gr.Column(scale=1):
-                                        bg_preview = gr.Image(
-                                            label="プレビュー",
-                                            height=300,
-                                            interactive=False
-                                        )
-                                        # 選択中のファイル名を保持する隠しコンポーネント
-                                        selected_bg_filename = gr.Textbox(
-                                            value=saved_settings.background_image if saved_settings.background_image else (assets.get("backgrounds", ["default.png"])[0] if assets.get("backgrounds") else ""),
-                                            visible=False
-                                        )
-                                    
-                                    # 右側: カスタム画像アップロード
-                                    with gr.Column(scale=1):
-                                        custom_bg_upload = gr.File(
-                                            label="カスタム画像をアップロード",
-                                            file_types=["image"],
-                                            type="filepath"
-                                        )
-                                        gr.Markdown("""
-                                        **アップロード情報:**
-                                        - PNG, JPG, WEBP対応
-                                        - 推奨: 1920x1080以上
-                                        """)
-                                
-                                # 下段: 背景画像ギャラリー
-                                bg_gallery = gr.Gallery(
-                                    label="背景画像ギャラリー",
-                                    value=get_background_gallery_images(),
-                                    columns=4,
-                                    height=200,
-                                    object_fit="cover",
-                                    elem_classes="gallery-container"
-                                )
-                                
-                                # BGM選択エリア
-                                gr.Markdown("#### 🎵 BGM")
-                                with gr.Row():
-                                    bgm_dropdown = gr.Dropdown(
-                                        label="BGM選択",
-                                        choices=assets.get("bgm", ["default.mp3"]),
-                                        value=saved_settings.bgm_file if saved_settings.bgm_file in assets.get("bgm", []) else (assets.get("bgm", ["default.mp3"])[0] if assets.get("bgm") else None),
-                                        scale=2
-                                    )
-                                    bgm_preview = gr.Audio(
-                                        label="プレビュー",
-                                        interactive=False,
-                                        scale=1
-                                    )
-                                
-                                # 素材リスト更新ボタン
-                                refresh_assets_btn = gr.Button("🔄 素材リストを更新", size="sm")
-                                
-                                # 動画設定
-                                gr.Markdown("#### ⚙️ 動画設定")
-                                
-                                with gr.Row():
-                                    bgm_volume_slider = gr.Slider(
-                                        label="BGM音量",
-                                        minimum=0.0,
-                                        maximum=0.5,
-                                        value=saved_settings.bgm_volume,
-                                        step=0.01,
-                                        info="BGMの音量（0.0〜0.5）"
-                                    )
-                                    fade_time_slider = gr.Slider(
-                                        label="フェード時間",
-                                        minimum=1.0,
-                                        maximum=10.0,
-                                        value=saved_settings.fade_time,
-                                        step=0.5,
-                                        info="BGMのフェードイン/アウト時間（秒）"
-                                    )
-                                
-                                with gr.Row():
-                                    speed_slider = gr.Slider(
-                                        label="話速 (Speed)",
-                                        minimum=0.8,
-                                        maximum=1.5,
-                                        value=saved_settings.speed_scale,
-                                        step=0.05,
-                                        info="音声の再生速度（0.8～1.5）"
-                                    )
-                                    spectrum_checkbox = gr.Checkbox(
-                                        label="音声スペクトラムを表示",
-                                        value=saved_settings.enable_spectrum,
-                                        info="画面下部に音声の波形を表示"
-                                    )
-                            
-                            # ブロック3: 🚀 生成アクション
-                            with gr.Group(elem_classes="group-container"):
-                                gr.Markdown("### 🚀 生成アクション")
-                                
-                                # Mockモード用チェックボックス
-                                use_mock = gr.Checkbox(
-                                    label="🔴【開発用】Mockモード (リサーチ・台本・音声を固定データでスキップ)",
-                                    value=False,
-                                    info="APIを使わずにtests/mock_dataの固定データを使用します（開発・テスト用）"
-                                )
+        with gr.Tabs():
+            with gr.TabItem("🎬 Generator", id="generator"):
+                generator_components = create_generator_tab(saved_settings=saved_settings, assets=assets)
 
-                                upload_to_youtube_checkbox = gr.Checkbox(
-                                    label="YouTubeに自動アップロードする",
-                                    value=default_enable_upload,
-                                    info="チェック時は動画生成後にYouTubeへ自動アップロードを試行します"
-                                )
+            # Tab 2: Dashboard
+            with gr.TabItem("📊 Dashboard", id="dashboard"):
+                dashboard_components = create_dashboard_tab()
 
-                                footer_text_input = gr.Textbox(
-                                    label="概要欄フッター（固定文）",
-                                    value=default_footer_text,
-                                    lines=3,
-                                    info="著作権表示・免責事項などを設定できます（UI入力が優先）"
-                                )
-                                
-                                # 実行ボタン
-                                with gr.Row():
-                                    generate_btn = gr.Button(
-                                        "🚀 動画を生成する",
-                                        variant="primary",
-                                        size="lg",
-                                        scale=2,
-                                        elem_classes="primary-btn"
-                                    )
-                                    script_only_btn = gr.Button(
-                                        "📝 台本のみ作成",
-                                        variant="secondary",
-                                        size="lg",
-                                        scale=1
-                                    )
-                                
-                                # 注意事項
-                                gr.Markdown(
-                                    """
-                                    **⚠️ 注意事項:**
-                                    - **VOICEVOX** エンジンが起動している必要があります
-                                    - **Perplexity API Key** と **Gemini API Key** が `.env` に設定されている必要があります
-                                    - 生成には数分かかる場合があります
-                                    """
-                                )
-                    
-                    # ========== 右カラム: 結果パネル ==========
-                    with gr.Column(scale=1):
-                        gr.Markdown("## 📺 結果パネル")
-                        
-                        # 生成動画プレイヤー
-                        video_output = gr.Video(
-                            label="生成された動画",
-                            height=360
-                        )
-
-                        # YouTubeアップロード結果表示
-                        youtube_url_output = gr.Markdown(value="")
-                        
-                        # ログ出力
-                        log_output = gr.Textbox(
-                            label="処理ログ",
-                            lines=12,
-                            max_lines=18,
-                            interactive=False
-                        )
-                        
-                        # コストレポート表示
-                        gr.Markdown("### 📊 API使用量・コスト")
-                        cost_output = gr.Markdown(
-                            value="*生成完了後に表示されます*"
-                        )
-                        
-                        # メタデータ表示エリア
-                        gr.Markdown("### 📝 YouTubeメタデータ")
-                        title_output = gr.Textbox(
-                            label="タイトル (コピー用)",
-                            placeholder="生成完了後に表示されます",
-                            interactive=True
-                        )
-                        description_output = gr.Textbox(
-                            label="概要欄・チャプター (一括コピー用)",
-                            placeholder="生成完了後に表示されます",
-                            lines=15,
-                            interactive=True
-                        )
-                
-                # ========== こだわりステップモード（新規UI） ==========
-                step_components = create_step_mode_ui(assets)
+            # Tab 3: Settings
+            with gr.TabItem("⚙️ Settings", id="settings"):
+                settings_components = create_settings_tab(
+                    config=config,
+                    default_upload_enabled=default_enable_upload,
+                    default_footer_text=default_footer_text,
+                    default_mock_mode=default_mock_mode,
+                )
             
-            # Tab 2: マニュアル制作 (Pro Tools)
-            with gr.TabItem("🛠️ マニュアル制作 (Pro Tools)", id="manual"):
-                
-                # こだわりステップモード
-                with gr.Accordion("🛠 こだわりステップモード", open=False):
-                    gr.Markdown("""
-                    **高度な制作モード** - 各ステップを個別に実行・調整できます
-                    
-                    🔹 **Step A**: リサーチ → 台本生成（個別調整可能）  
-                    🔹 **Step B**: 台本 → 音声合成（個別調整可能）  
-                    🔹 **Step C**: 音声・字幕 → 動画レンダリング（個別調整可能）
-                    """)
-                    
-                    # ステップモード選択
-                    step_mode = gr.Radio(
-                        choices=["通常モード（一括）", "こだわりステップモード"],
-                        value="通常モード（一括）",
-                        label="制作モード",
-                        info="こだわりステップモードでは各工程を個別に実行・調整できます"
-                    )
-                
-                gr.Markdown("### 📝 Step A: リサーチ結果から台本生成")
-                
-                # リサーチ結果入力欄
-                research_input = gr.Textbox(
-                    label="Perplexity等のリサーチ結果を貼り付け",
-                    placeholder="ここにリサーチ結果のテキストを貼り付けてください...",
-                    lines=10,
-                    info="Perplexityや他のソースで得たリサーチ結果を貼り付け"
-                )
-                
-                # テーマ/タイトル入力欄
-                theme_input_manual = gr.Textbox(
-                    label="テーマ/タイトル",
-                    placeholder="例: AIの倫理的課題について",
-                    info="台本のテーマまたはタイトルを入力してください"
-                )
-                
-                # 台本生成ボタン
-                generate_script_btn = gr.Button(
-                    "📝 この内容で台本を作成",
-                    variant="primary",
-                    size="lg"
-                )
-                
-                # 生成結果表示エリア
-                script_output = gr.Code(
-                    label="生成された台本",
-                    language="json",
-                    lines=20,
-                    interactive=True
-                )
-                
-                gr.Markdown("---")  # 区切り線
-                
-                # Step B: 音声合成
-                gr.Markdown("### 🎤 Step B: 音声合成 (Audio Synthesis)")
-                
-                # 台本エディタ
-                script_editor = gr.Code(
-                    label="台本JSON (編集可能) - Step Aで生成された台本を編集できます",
-                    language="json",
-                    lines=15,
-                    interactive=True
-                )
-                
-                # 音声合成ボタン
-                synthesize_btn = gr.Button(
-                    "🎤 この台本で音声を合成する",
-                    variant="primary",
-                    size="lg"
-                )
-                
-                # 出力エリア
-                with gr.Row():
-                    with gr.Column():
-                        # 音声プレイヤー
-                        audio_output = gr.Audio(
-                            label="生成された音声",
-                            interactive=False
-                        )
-                        
-                        # 字幕ファイルダウンロード
-                        subtitle_output = gr.File(
-                            label="字幕ファイル (.ass)",
-                            interactive=False
-                        )
-                    
-                    with gr.Column():
-                        # ログ/ステータス表示
-                        synthesis_log = gr.Textbox(
-                            label="処理ログ",
-                            lines=10,
-                            interactive=False
-                        )
-                
-                gr.Markdown("---")  # 区切り線
-                
-                # Step C: 動画レンダリング
-                gr.Markdown("### 🎬 Step C: 動画書き出し (Rendering)")
-                
-                with gr.Row():
-                    with gr.Column():
-                        # 音声ファイル入力
-                        audio_input = gr.Audio(
-                            label="音声ファイル",
-                            sources=["upload"],
-                            type="filepath",
-                            interactive=True
-                        )
-                        
-                        # 字幕ファイル入力
-                        subtitle_input = gr.File(
-                            label="字幕ファイル (.ass)",
-                            file_types=[".ass"],
-                            type="filepath",
-                            interactive=True
-                        )
-                    
-                    with gr.Column():
-                        # 背景画像入力
-                        background_input = gr.Image(
-                            label="背景/サムネイル画像 (1920x1080推奨)",
-                            sources=["upload"],
-                            type="filepath",
-                            interactive=True
-                        )
-                        
-                        # BGM選択
-                        bgm_dropdown_manual = gr.Dropdown(
-                            label="BGM",
-                            choices=assets.get("bgm", ["default.mp3"]),
-                            value=assets.get("bgm", ["default.mp3"])[0] if assets.get("bgm") else None,
-                            info="assets/bgm/ 内の音声"
-                        )
-                
-                # 動画生成ボタン
-                render_btn = gr.Button(
-                    "🎬 動画を生成する (Render Video)",
-                    variant="primary",
-                    size="lg"
-                )
-                
-                # 出力エリア
-                with gr.Row():
-                    with gr.Column():
-                        # 完成動画プレビュー
-                        video_output_manual = gr.Video(
-                            label="完成動画",
-                            interactive=False
-                        )
-                        
-                        # 動画ファイルダウンロード
-                        video_file_output = gr.File(
-                            label="動画ファイルダウンロード",
-                            interactive=False
-                        )
-                    
-                    with gr.Column():
-                        # ログ/ステータス表示
-                        render_log = gr.Textbox(
-                            label="処理ログ",
-                            lines=10,
-                            interactive=False
-                        )
-                
-                # 使い方
-                gr.Markdown(
-                    """
-                    ### 📖 使い方
-                    
-                    **Step A: 台本生成**
-                    1. Perplexity等でリサーチした結果を上のテキストボックスに貼り付け
-                    2. テーマ/タイトルを入力
-                    3. 「この内容で台本を作成」ボタンをクリック
-                    
-                    **Step B: 音声合成**
-                    1. 生成された台本が自動的にエディタに反映されます
-                    2. 必要に応じて台本を編集
-                    3. 「この台本で音声を合成する」ボタンをクリック
-                    4. 生成された音声と字幕がStep Cに自動反映されます
-                    
-                    **Step C: 動画レンダリング**
-                    1. Step Bの音声と字幕が自動的にセットされます
-                    2. 背景画像をアップロード
-                    3. BGMを選択
-                    4. 「動画を生成する」ボタンをクリック
-                    5. 完成した動画をダウンロード
-                    
-                    ### 💡 ヒント
-                    - リサーチ結果は詳細であるほど、質の高い台本が生成されます
-                    - 生成された台本はJSON形式なので、他のツールでも利用可能です
-                    - 台本の構成は「本題70%・リスナーメール20%・エンディング10%」の3部構成です
-                    - VOICEVOXエンジンが起動している必要があります
-                    - 背景画像は1920x1080ピクセルを推奨します
-                    """
-                )
+            with gr.TabItem("🛠️ Manual", id="manual"):
+                manual_components = create_manual_tab(assets=assets)
+
+        step_components = generator_components["step_components"]
         
         # フッター
         gr.Markdown(
             """
             ---
-            *自動ラジオ動画生成システム v3.3.0 (JSON Mode) | Powered by Perplexity, Gemini, VOICEVOX, FFmpeg*
+            *自動ラジオ動画生成システム v3.3.0 | Powered by Perplexity, Gemini, VOICEVOX, FFmpeg*
             """
         )
         
@@ -1714,24 +2043,24 @@ def create_ui() -> gr.Blocks:
                 gr.update(choices=bgm_choices, value=bgm_choices[0] if bgm_choices else None)
             )
         
-        refresh_assets_btn.click(
+        generator_components["refresh_assets_btn"].click(
             fn=lambda: (get_background_gallery_images(), gr.update(choices=get_asset_choices().get("bgm", []))),
             inputs=[],
-            outputs=[bg_gallery, bgm_dropdown]
+            outputs=[generator_components["bg_gallery"], generator_components["bgm_dropdown"]]
         )
         
         # 背景画像ギャラリーから選択
-        bg_gallery.select(
+        generator_components["bg_gallery"].select(
             fn=handle_gallery_select,
             inputs=[],
-            outputs=[bg_preview, selected_bg_filename]
+            outputs=[generator_components["bg_preview"], generator_components["selected_bg_filename"]]
         )
         
         # カスタム背景画像をアップロード
-        custom_bg_upload.change(
+        generator_components["custom_bg_upload"].change(
             fn=handle_custom_upload,
-            inputs=[custom_bg_upload],
-            outputs=[bg_preview, selected_bg_filename]
+            inputs=[generator_components["custom_bg_upload"]],
+            outputs=[generator_components["bg_preview"], generator_components["selected_bg_filename"]]
         )
         
         # BGMプレビューの更新
@@ -1741,10 +2070,10 @@ def create_ui() -> gr.Blocks:
                 return str(bgm_path) if bgm_path.exists() else None
             return None
         
-        bgm_dropdown.change(
+        generator_components["bgm_dropdown"].change(
             fn=update_bgm_preview,
-            inputs=[bgm_dropdown],
-            outputs=[bgm_preview]
+            inputs=[generator_components["bgm_dropdown"]],
+            outputs=[generator_components["bgm_preview"]]
         )
         
         # 初期表示: 保存された設定から背景画像とBGMをプレビューに表示
@@ -1764,67 +2093,148 @@ def create_ui() -> gr.Blocks:
         
         app.load(
             fn=load_initial_previews,
-            inputs=[selected_bg_filename, bgm_dropdown],
-            outputs=[bg_preview, bgm_preview]
+            inputs=[generator_components["selected_bg_filename"], generator_components["bgm_dropdown"]],
+            outputs=[generator_components["bg_preview"], generator_components["bgm_preview"]]
+        )
+
+        dashboard_outputs = [
+            dashboard_components["total_executions"],
+            dashboard_components["total_cost_usd"],
+            dashboard_components["avg_cost"],
+            dashboard_components["success_rate"],
+            dashboard_components["execution_table"],
+            dashboard_components["cost_chart"],
+            dashboard_components["usage_chart"],
+            dashboard_components["dashboard_status"],
+        ]
+
+        dashboard_components["month_selector"].change(
+            fn=update_dashboard,
+            inputs=[dashboard_components["month_selector"]],
+            outputs=dashboard_outputs,
+        )
+
+        dashboard_components["refresh_btn"].click(
+            fn=update_dashboard,
+            inputs=[dashboard_components["month_selector"]],
+            outputs=dashboard_outputs,
+        )
+
+        app.load(
+            fn=update_dashboard,
+            inputs=[dashboard_components["month_selector"]],
+            outputs=dashboard_outputs,
+        )
+
+        settings_components["refresh_status_btn"].click(
+            fn=lambda: get_system_status_markdown(config),
+            inputs=[],
+            outputs=[
+                settings_components["perplexity_status"],
+                settings_components["gemini_status"],
+                settings_components["voicevox_status"],
+            ],
+        )
+
+        app.load(
+            fn=lambda: get_system_status_markdown(config),
+            inputs=[],
+            outputs=[
+                settings_components["perplexity_status"],
+                settings_components["gemini_status"],
+                settings_components["voicevox_status"],
+            ],
+        )
+
+        settings_components["save_settings_btn"].click(
+            fn=save_settings_from_ui,
+            inputs=[
+                generator_components["research_mode_dropdown"],
+                generator_components["selected_bg_filename"],
+                generator_components["bgm_dropdown"],
+                generator_components["bgm_volume_slider"],
+                generator_components["fade_time_slider"],
+                generator_components["speed_slider"],
+                generator_components["spectrum_checkbox"],
+                settings_components["use_mock"],
+                settings_components["upload_to_youtube_checkbox"],
+                settings_components["footer_text_input"],
+            ],
+            outputs=[settings_components["settings_status"]],
         )
         
         # 動画生成
-        generate_btn.click(
+        generator_components["generate_btn"].click(
             fn=generate_video,
             inputs=[
-                theme_input,
-                research_mode_dropdown,
-                selected_bg_filename,  # 選択中の背景画像ファイル名を使用
-                bgm_dropdown,
-                bgm_volume_slider,
-                fade_time_slider,
-                speed_slider,
-                spectrum_checkbox,
-                use_mock,  # Mockモードチェックボックス
-                avoid_topics_input,  # 避けてほしい話題
-                upload_to_youtube_checkbox,
-                footer_text_input,
+                generator_components["theme_input"],
+                generator_components["research_mode_dropdown"],
+                generator_components["selected_bg_filename"],
+                generator_components["bgm_dropdown"],
+                generator_components["bgm_volume_slider"],
+                generator_components["fade_time_slider"],
+                generator_components["speed_slider"],
+                generator_components["spectrum_checkbox"],
+                settings_components["use_mock"],
+                generator_components["avoid_topics_input"],
+                settings_components["upload_to_youtube_checkbox"],
+                settings_components["footer_text_input"],
             ],
             outputs=[
-                video_output,
-                log_output,
-                cost_output,
-                title_output,
-                description_output,
-                youtube_url_output,
+                generator_components["video_output"],
+                generator_components["log_output"],
+                generator_components["cost_output"],
+                generator_components["title_output"],
+                generator_components["description_output"],
+                generator_components["youtube_url_output"],
             ],
             show_progress="full"
         )
         
         # 台本のみ作成（AIプロデューサーモード）
-        script_only_btn.click(
+        generator_components["script_only_btn"].click(
             fn=generate_script_only,
-            inputs=[theme_input, research_mode_dropdown],
-            outputs=[script_editor, log_output],
+            inputs=[generator_components["theme_input"], generator_components["research_mode_dropdown"]],
+            outputs=[manual_components["script_editor"], generator_components["log_output"]],
             show_progress="full"
         )
         
         # 台本生成 (Step Aの出力をStep Bのエディタにも反映)
-        generate_script_btn.click(
+        manual_components["generate_script_btn"].click(
             fn=generate_script_from_research,
-            inputs=[research_input, theme_input_manual],
-            outputs=[script_output, script_editor],  # 両方に出力
+            inputs=[manual_components["research_input"], manual_components["theme_input_manual"]],
+            outputs=[manual_components["script_output"], manual_components["script_editor"]],
             show_progress="full"
         )
         
         # 音声合成 (Step B) - Step Cの入力にも反映
-        synthesize_btn.click(
+        manual_components["synthesize_btn"].click(
             fn=synthesize_audio_from_script,
-            inputs=[script_editor],
-            outputs=[audio_output, subtitle_output, synthesis_log, audio_input, subtitle_input],
+            inputs=[manual_components["script_editor"]],
+            outputs=[
+                manual_components["audio_output"],
+                manual_components["subtitle_output"],
+                manual_components["synthesis_log"],
+                manual_components["audio_input"],
+                manual_components["subtitle_input"],
+            ],
             show_progress="full"
         )
         
         # 動画レンダリング (Step C)
-        render_btn.click(
+        manual_components["render_btn"].click(
             fn=render_video_from_assets,
-            inputs=[audio_input, subtitle_input, background_input, bgm_dropdown_manual],
-            outputs=[video_output_manual, video_file_output, render_log],
+            inputs=[
+                manual_components["audio_input"],
+                manual_components["subtitle_input"],
+                manual_components["background_input"],
+                manual_components["bgm_dropdown_manual"],
+            ],
+            outputs=[
+                manual_components["video_output_manual"],
+                manual_components["video_file_output"],
+                manual_components["render_log"],
+            ],
             show_progress="full"
         )
         

@@ -40,15 +40,24 @@ Perplexity + Gemini + VOICEVOX + FFmpeg を連携し、
   - NVIDIA GPUによるハードウェアエンコード対応（h264_nvenc）
   - API課金なしでワークフロー全体をテスト可能なMockモード
 
+### v3.3.0 メンテナンス更新（UI Modularization / Logging）
+- 🧩 **UI Modularization**: `app.py` の巨大UIをタブ単位関数へ分割
+  - `create_generator_tab()` / `create_dashboard_tab()` / `create_settings_tab()` / `create_manual_tab()`
+  - イベント配線を `create_ui()` 下部へ集約し、UI定義と動作ロジックを分離
+- 📈 **Dashboard**: 実行履歴とコスト履歴の可視化タブを追加
+  - 月次切り替え、実行テーブル、コスト推移、モデル別利用率を表示
+- 🗂 **Append-Only Logging基盤**: JSONLログを標準化
+  - `logs/execution_record_YYYY-MM.jsonl`
+  - `logs/cost_history_YYYY-MM.jsonl`
+- 🔐 **Mock Safety Guard**: Mockモード時はYouTubeアップロードを強制無効化
+
 ### v3.1.2 以前の機能（GPU / Mock / UI強化）
 - 🛡️ **後方互換性強化**: 旧JSON形式（`speaker_id`/`dialogue`）の自動変換バリデータ追加
 
-### v3.1.1 新機能（JSON Mode Patch）
-- 🔧 **Native JSON Mode**: Gemini APIのJSONモードを有効化し、解析の完全安定化を実現
-  - `response_mime_type="application/json"`でAPIレベルのJSON保証
-  - マークダウンブロック抽出や正規表現による回避ロジックを削除
-  - 約30行のエラーハンドリングコードを簡素化
-  - APIの機能を活かしたスマートな実装に移行
+### v3.1.1 新機能（Structured Script Output）
+- 🔧 **Structured Output Stability**: Gemini出力の構造化安定性を強化
+  - 構造化スキーマ準拠の出力で後段処理の堅牢性を向上
+  - 解析失敗時の保険ロジックを簡素化し保守性を改善
 
 ### v3.1 新機能（Phase 2）
 - 🏷 **Automated Metadata**: タイトル・概要・サムネイル文字の完全自動生成（チャプター付き）
@@ -307,6 +316,9 @@ auto_radio_generator/
 ├── config.yaml              # 設定ファイル
 ├── requirements.txt         # Python依存パッケージ
 ├── user_settings.json       # ユーザー設定（自動生成）
+├── logs/                    # 実行・コスト履歴（JSONL, append-only）
+│   ├── execution_record_YYYY-MM.jsonl
+│   └── cost_history_YYYY-MM.jsonl
 ├── core/                    # ドメイン層
 │   ├── interfaces/          # 抽象インターフェース (ABC)
 │   │   ├── researcher.py    # リサーチャーIF
@@ -316,7 +328,9 @@ auto_radio_generator/
 │   ├── models/              # Pydanticモデル
 │   │   ├── config.py        # 設定モデル
 │   │   ├── script.py        # 台本モデル
-│   │   └── usage.py         # 使用量モデル
+│   │   ├── usage.py         # 使用量モデル
+│   │   ├── execution_log.py # 実行ログモデル
+│   │   └── cost_log.py      # コストログモデル
 │   └── settings_manager.py  # 設定永続化
 ├── services/                # アプリケーション層
 │   ├── research/            # リサーチ (Perplexity)
@@ -343,6 +357,13 @@ auto_radio_generator/
 - **OpenAI対応**: `IScriptGenerator` を継承して実装
 - **ElevenLabs対応**: `IAudioSynthesizer` を継承して実装
 - **別レンダラー対応**: `IVideoRenderer` を継承して実装
+
+## 🧭 開発ポリシー
+
+- **Communication**: ユーザー向け説明は日本語
+- **Code**: 関数名・変数名・コードコメント・コミットメッセージは英語
+- **Config Driven**: 設定値は `config.yaml` を優先し、ハードコードを避ける
+- **Input Minimal, Data Maximal**: 実行中間データは JSONL に追記保存して再利用可能にする
 
 ## 📝 ライセンス
 

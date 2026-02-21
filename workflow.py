@@ -1365,6 +1365,11 @@ def run_workflow_sync(
                 else bool(publishing_config and getattr(publishing_config, "enable_upload", False))
             )
 
+            # Safety guard: never upload during mock executions.
+            if use_mock and should_upload:
+                should_upload = False
+                callbacks.log("[INFO] MockモードのためYouTubeアップロードを強制的に無効化しました")
+
             if should_upload:
                 callbacks.log("[INFO] YouTubeアップロードを開始します...")
                 try:
