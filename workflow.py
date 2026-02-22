@@ -611,7 +611,8 @@ async def execute_production_phase(
         background_image=background_image,
         bgm_file=bgm_file,
         output_path=video_output_path,
-        subtitle_path=synthesis_result.subtitle_path
+        subtitle_path=synthesis_result.subtitle_path,
+        chapters=synthesis_result.chapters,
     )
     
     render_duration = time.time() - render_start
@@ -1234,13 +1235,17 @@ def run_workflow_sync(
                 callbacks.log("[INFO] 企画フェーズスキップ（リサーチ無効）")
             
             # ========== Phase 2: 台本作成（リサーチ → 台本生成） ==========
+            should_enable_research = bool(overrides_obj.enable_research) and not bool(config.yaml.dev.mock_mode)
+            if config.yaml.dev.mock_mode and overrides_obj.enable_research:
+                callbacks.log("[INFO] Mockモードのためリサーチ工程をスキップします")
+
             scripting_result = await execute_scripting_phase(
                 theme=theme,
                 mode=overrides_obj.research_mode or "trivia",
                 queries=queries,
                 config=config,
                 output_dir=output_base,
-                enable_research=overrides_obj.enable_research,
+                enable_research=should_enable_research,
                 avoid_topics=avoid_topics,
                 callbacks=callbacks
             )
@@ -1270,28 +1275,42 @@ def run_workflow_sync(
             
             # ========== Phase 4: 後処理（メタデータ生成） ==========
             callbacks.progress(0.97, "📦 後処理中...")
+            skip_metadata_in_mock = bool(
+                config.yaml.dev.mock_mode and getattr(config.yaml.dev, "mock_skip_metadata", False)
+            )
+            skip_thumbnail_in_mock = bool(
+                config.yaml.dev.mock_mode and getattr(config.yaml.dev, "mock_skip_thumbnail", False)
+            )
             
             # YouTube用メタデータを生成
             metadata_path = output_base / "metadata.txt"
-            generated_metadata = _generate_youtube_metadata(
-                script=scripting_result.script,
-                chapters=production_result.chapters,
-                output_path=metadata_path,
-                theme=theme
-            )
-            callbacks.log(f"✓ YouTubeメタデータ生成: {metadata_path.name}")
+            generated_metadata: dict[str, str] = {}
+            if skip_metadata_in_mock:
+                metadata_path.write_text("", encoding="utf-8")
+                callbacks.log("[INFO] Mockモード設定によりメタデータ生成をスキップしました")
+            else:
+                generated_metadata = _generate_youtube_metadata(
+                    script=scripting_result.script,
+                    chapters=production_result.chapters,
+                    output_path=metadata_path,
+                    theme=theme
+                )
+                callbacks.log(f"✓ YouTubeメタデータ生成: {metadata_path.name}")
             
             # サムネイル画像を生成（AI生成のthumbnail_titleを使用）
             background_image = PROJECT_ROOT / config.yaml.paths.background_image
-            thumbnail_generator = ThumbnailGenerator()
             thumbnail_path = output_base / "thumbnail.png"
-            thumbnail_generator.generate(
-                title=generated_metadata.get("title", scripting_result.script.title),
-                thumbnail_title=generated_metadata.get("thumbnail_title", ""),
-                background_path=background_image,
-                output_path=thumbnail_path
-            )
-            callbacks.log(f"✓ サムネイル画像生成: {thumbnail_path.name}")
+            if skip_thumbnail_in_mock:
+                callbacks.log("[INFO] Mockモード設定によりサムネイル生成をスキップしました")
+            else:
+                thumbnail_generator = ThumbnailGenerator()
+                thumbnail_generator.generate(
+                    title=generated_metadata.get("title", scripting_result.script.title),
+                    thumbnail_title=generated_metadata.get("thumbnail_title", ""),
+                    background_path=background_image,
+                    output_path=thumbnail_path
+                )
+                callbacks.log(f"✓ サムネイル画像生成: {thumbnail_path.name}")
             
             # ログファイルを完了
             if log_writer:

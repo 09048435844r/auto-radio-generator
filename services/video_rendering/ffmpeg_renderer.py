@@ -8,7 +8,7 @@ from pathlib import Path
 
 from rich.console import Console
 
-from core.interfaces import IVideoRenderer, RenderResult, SynthesisResult
+from core.interfaces import ChapterMarker, IVideoRenderer, RenderResult, SynthesisResult
 from core.models import AppConfig
 
 console = Console()
@@ -57,6 +57,75 @@ class FfmpegRenderer(IVideoRenderer):
             str: FFmpeg subtitlesフィルタ用にエスケープされたパス
         """
         return path.replace("\\", "/").replace(":", "\\:")
+
+    def _escape_drawtext_text(self, text: str) -> str:
+        """FFmpeg drawtext用にテキストをエスケープ"""
+        escaped = text.replace("\\", "\\\\")
+        escaped = escaped.replace(":", "\\:")
+        escaped = escaped.replace("'", "\\'")
+        escaped = escaped.replace(",", "\\,")
+        return escaped
+
+    def _truncate_topic_title(self, title: str, max_length: int = 20) -> str:
+        """オーバーレイ用にタイトルを最大文字数へ丸める"""
+        normalized = title.strip()
+        if len(normalized) <= max_length:
+            return normalized
+        return f"{normalized[:max_length]}..."
+
+    def _get_drawtext_fontfile(self) -> str:
+        """Windowsで利用可能な日本語フォントのfontfile値を返す"""
+        candidates = [
+            "C:/Windows/Fonts/msgothic.ttc",
+            "C:/Windows/Fonts/meiryo.ttc",
+            "C:/Windows/Fonts/yuGothM.ttc",
+            "C:/Windows/Fonts/arial.ttf",
+        ]
+        for candidate in candidates:
+            if Path(candidate).exists():
+                return self._escape_windows_path(candidate)
+        return self._escape_windows_path(candidates[0])
+
+    def _build_topic_overlay_filter(
+        self,
+        chapters: list[ChapterMarker] | None,
+        total_duration_sec: float,
+    ) -> str | None:
+        """チャプター単位のトピックオーバーレイ drawtext を構築"""
+        if not chapters:
+            return None
+
+        ordered_chapters = sorted(chapters, key=lambda chapter: chapter.start_time_sec)
+        drawtext_fontfile = self._get_drawtext_fontfile()
+        drawtext_filters: list[str] = []
+
+        for index, chapter in enumerate(ordered_chapters):
+            start_sec = max(0.0, float(chapter.start_time_sec))
+            if index + 1 < len(ordered_chapters):
+                end_sec = float(ordered_chapters[index + 1].start_time_sec)
+            else:
+                end_sec = float(total_duration_sec)
+
+            if end_sec <= start_sec:
+                continue
+
+            short_title = self._truncate_topic_title(chapter.title, max_length=20)
+            overlay_text = self._escape_drawtext_text(f"話題：{short_title}")
+            drawtext_filters.append(
+                (
+                    f"drawtext=text='{overlay_text}':"
+                    f"fontfile='{drawtext_fontfile}':"
+                    f"fontsize=64:fontcolor=white:"
+                    f"x=(w-text_w)/2:y=50:"
+                    f"box=1:boxcolor=black@0.5:boxborderw=10:"
+                    f"enable='between(t,{start_sec:.3f},{end_sec:.3f})'"
+                )
+            )
+
+        if not drawtext_filters:
+            return None
+
+        return ",".join(drawtext_filters)
     
     def check_ffmpeg_available(self) -> bool:
         """FFmpegが利用可能か確認"""
@@ -82,7 +151,8 @@ class FfmpegRenderer(IVideoRenderer):
         background_image: Path,
         bgm_file: Path,
         output_path: Path,
-        subtitle_path: Path | None = None
+        subtitle_path: Path | None = None,
+        chapters: list[ChapterMarker] | None = None,
     ) -> RenderResult:
         """動画を生成
         
@@ -92,6 +162,7 @@ class FfmpegRenderer(IVideoRenderer):
             bgm_file: BGMファイルパス
             output_path: 出力動画パス
             subtitle_path: 字幕ファイルパス（オプショナル、明示的に指定されない場合はsynthesis_resultから取得）
+            chapters: チャプターマーカー（未指定時はsynthesis_result.chaptersを使用）
         """
         console.print("[cyan]動画を生成中...[/cyan]")
         
@@ -100,6 +171,7 @@ class FfmpegRenderer(IVideoRenderer):
         
         # 字幕パスの決定：明示的に指定された場合はそれを優先、そうでなければsynthesis_resultから取得
         final_subtitle_path = subtitle_path if subtitle_path is not None else synthesis_result.subtitle_path
+        final_chapters = chapters if chapters is not None else synthesis_result.chapters
         
         # 設定値
         resolution = self.video_config.output_resolution
@@ -121,7 +193,8 @@ class FfmpegRenderer(IVideoRenderer):
             bgm_volume=bgm_volume,
             fade_in_sec=fade_in,
             fade_out_sec=fade_out,
-            total_duration_sec=total_duration
+            total_duration_sec=total_duration,
+            chapters=final_chapters,
         )
         
         # デバッグ: FFmpegフルコマンドをログ出力
@@ -175,10 +248,14 @@ class FfmpegRenderer(IVideoRenderer):
         bgm_volume: float,
         fade_in_sec: float,
         fade_out_sec: float,
-        total_duration_sec: float
+        total_duration_sec: float,
+        chapters: list[ChapterMarker] | None = None,
     ) -> list[str]:
         """FFmpegコマンドを構築"""
         width, height = resolution.split('x')
+
+        if chapters:
+            console.print(f"[dim]DEBUG: chapter markers received: {len(chapters)}[/dim]")
         
         # BGMフェードアウト開始時間
         fade_out_start = max(0, total_duration_sec - fade_out_sec)
@@ -225,14 +302,34 @@ class FfmpegRenderer(IVideoRenderer):
         # 日付表示フィルター（右上に透かし文字で表示）
         creation_date = datetime.now().strftime("%Y/%m/%d")
         # drawtextフィルター: Windowsの場合はフォントファイルを直接指定
-        # C:/Windows/Fonts/arial.ttf を使用してFontconfigエラーを回避
+        # 日本語フォントを優先して豆腐（文字化け）を回避
+        drawtext_fontfile = self._get_drawtext_fontfile()
         date_filter = (
             f"drawtext=text='{creation_date}':"
-            f"fontfile='C\\:/Windows/Fonts/arial.ttf':"
+            f"fontfile='{drawtext_fontfile}':"
             f"fontsize=28:fontcolor=white@0.7:"
             f"x=w-tw-20:y=20:"
             f"shadowcolor=black@0.5:shadowx=2:shadowy=2"
         )
+
+        show_topic_overlay = getattr(
+            getattr(self.config.yaml, "video", None),
+            "show_topic_overlay",
+            True,
+        )
+        topic_overlay_filter = None
+        if show_topic_overlay:
+            topic_overlay_filter = self._build_topic_overlay_filter(
+                chapters=chapters,
+                total_duration_sec=total_duration_sec,
+            )
+
+        composed_video_filters = [date_filter]
+        if topic_overlay_filter:
+            composed_video_filters.append(topic_overlay_filter)
+        if subtitle_filter:
+            composed_video_filters.append(subtitle_filter)
+        composed_video_filter_chain = ",".join(composed_video_filters)
         
         # ビデオフィルター構築
         if enable_spectrum:
@@ -254,17 +351,17 @@ class FfmpegRenderer(IVideoRenderer):
             # 波形を背景にオーバーレイ
             overlay_filter = f"[bg][waves]overlay=0:{spectrum_y}:format=auto[composed]"
             
-            # 日付と字幕を合成
-            if subtitle_filter:
-                video_filter = f"{waves_filter};{bg_scale_filter};{overlay_filter};[composed]{date_filter},{subtitle_filter}[vout]"
-            else:
-                video_filter = f"{waves_filter};{bg_scale_filter};{overlay_filter};[composed]{date_filter}[vout]"
+            # 日付 → トピックオーバーレイ → 字幕を合成
+            video_filter = (
+                f"{waves_filter};{bg_scale_filter};{overlay_filter};"
+                f"[composed]{composed_video_filter_chain}[vout]"
+            )
         else:
-            # スペクトラムなし（日付と字幕のみ）
-            if subtitle_filter:
-                video_filter = f"[0:v]scale={width}:{height},{date_filter},{subtitle_filter}[vout]"
-            else:
-                video_filter = f"[0:v]scale={width}:{height},{date_filter}[vout]"
+            # スペクトラムなし（日付 → トピックオーバーレイ → 字幕）
+            video_filter = (
+                f"[0:v]scale={width}:{height},"
+                f"{composed_video_filter_chain}[vout]"
+            )
         
         # フィルター全体
         filter_complex = f"{bgm_filter};{audio_mix_filter};{video_filter}"

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from core.models import AppConfig
-from core.interfaces.audio_synthesizer import SynthesisResult
+from core.interfaces.audio_synthesizer import ChapterMarker, SynthesisResult
 
 
 @dataclass
@@ -36,7 +36,8 @@ class IVideoRenderer(ABC):
         background_image: Path,
         bgm_file: Path,
         output_path: Path,
-        subtitle_path: Path | None = None
+        subtitle_path: Path | None = None,
+        chapters: list[ChapterMarker] | None = None,
     ) -> RenderResult:
         """動画を生成する
         
@@ -46,6 +47,7 @@ class IVideoRenderer(ABC):
             bgm_file: BGMファイルパス
             output_path: 出力動画パス
             subtitle_path: 字幕ファイルパス（オプショナル）
+            chapters: チャプターマーカー（オプショナル）
         
         Returns:
             RenderResult: 生成結果

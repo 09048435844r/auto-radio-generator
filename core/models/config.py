@@ -100,6 +100,11 @@ class VideoRendererConfig(BaseModel):
     spectrum_mode: str = "cline"
 
 
+class VideoConfig(BaseModel):
+    """動画表示設定（オーバーレイ等）"""
+    show_topic_overlay: bool = True
+
+
 class PathsConfig(BaseModel):
     """パス設定"""
     assets_dir: str = "assets"
@@ -134,6 +139,8 @@ class DevConfig(BaseModel):
     """開発用設定（Mockモード等）"""
     mock_mode: bool = Field(default=False)
     mock_data_path: str = Field(default="tests/mock_data")
+    mock_skip_metadata: bool = Field(default=False)
+    mock_skip_thumbnail: bool = Field(default=False)
 
 
 class PublishingConfig(BaseModel):
@@ -168,6 +175,7 @@ class YamlConfig(BaseModel):
     video_renderer: VideoRendererConfig = Field(
         default_factory=VideoRendererConfig
     )
+    video: VideoConfig = Field(default_factory=VideoConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
     personalities: PersonalitiesConfig = Field(default_factory=PersonalitiesConfig)
     dev: DevConfig = Field(default_factory=DevConfig)  # 開発用設定

@@ -59,6 +59,7 @@ class VoicevoxClient(IAudioSynthesizer):
         if mock_mode:
             mock_data_path = self.config.yaml.dev.mock_data_path if hasattr(self.config.yaml.dev, 'mock_data_path') else "tests/mock_data"
             mock_audio_file = Path(mock_data_path) / "audio" / "combined_audio.wav"
+            mock_subtitle_file = Path(mock_data_path) / "audio" / "subtitles.ass"
             output_audio_path = output_dir / "combined_audio.wav"
             
             if mock_audio_file.exists():
@@ -69,17 +70,26 @@ class VoicevoxClient(IAudioSynthesizer):
                 # Mockファイルの情報を取得
                 audio_segment = AudioSegment.from_wav(str(mock_audio_file))
                 duration_sec = len(audio_segment) / 1000.0
+                mock_chapters = self._build_mock_chapters(script, duration_sec)
+                subtitle_path = output_dir / "subtitles.ass"
+
+                if mock_subtitle_file.exists():
+                    shutil.copy(mock_subtitle_file, subtitle_path)
+                    console.print(f"[yellow]  ▶ Mock字幕をコピー: {mock_subtitle_file}[/yellow]")
+                else:
+                    mock_phrase_data = self._build_mock_phrase_data(script, duration_sec)
+                    self._generate_ass(mock_phrase_data, subtitle_path)
+                    console.print("[yellow]  ▶ Mock字幕を推定生成しました[/yellow]")
                 
                 console.print(f"[green]✓ Mock音声を使用しました[/green] ({duration_sec:.1f}秒)")
+                console.print(f"[yellow]  ▶ Mockチャプター生成: {len(mock_chapters)}件[/yellow]")
                 
-                # SynthesisResultを返す（チャプターは空）
-                # Mockモードでは字幕ファイルは生成しないが、Pathオブジェクトとして空のパスを設定
-                subtitle_path = output_dir / "subtitles.srt"
+                # SynthesisResultを返す（Mockでもチャプターを付与）
                 return SynthesisResult(
                     audio_path=output_audio_path,
                     subtitle_path=subtitle_path,
                     total_duration_sec=duration_sec,  # 正しいフィールド名
-                    chapters=[]  # Mockではチャプターなし
+                    chapters=mock_chapters
                 )
             else:
                 console.print(f"[red]✗ Mock audio not found at {mock_audio_file}[/red]")
@@ -316,6 +326,85 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         seconds = total_seconds % 60
         centiseconds = (ms % 1000) // 10
         return f"{hours:01d}:{minutes:02d}:{seconds:02d}.{centiseconds:02d}"
+
+    def _build_mock_chapters(self, script: Script, total_duration_sec: float) -> list[ChapterMarker]:
+        """Mockモード用に台本のsection情報からチャプター時刻を推定する"""
+        dialogue = script.dialogue
+        if not dialogue:
+            return []
+
+        pre_roll_offset_sec = 2.0
+        total_lines = len(dialogue)
+        timeline_span_sec = max(1.0, float(total_duration_sec) - pre_roll_offset_sec)
+        mock_chapters: list[ChapterMarker] = []
+
+        for index, line in enumerate(dialogue):
+            if not line.section:
+                continue
+
+            chapter_title = self._get_chapter_title(line.section, line.text, line.chapter_title)
+            position_ratio = index / max(1, total_lines - 1)
+            estimated_start = pre_roll_offset_sec + (timeline_span_sec * position_ratio)
+            estimated_start = min(max(0.0, estimated_start), max(0.0, total_duration_sec - 0.1))
+
+            mock_chapters.append(
+                ChapterMarker(
+                    start_time_sec=estimated_start,
+                    title=chapter_title,
+                    section_id=line.section,
+                )
+            )
+
+        return mock_chapters
+
+    def _build_mock_phrase_data(self, script: Script, total_duration_sec: float) -> list[tuple]:
+        """Mockモード用にASS字幕生成のための擬似タイミングを作成する"""
+        dialogue = script.dialogue
+        if not dialogue:
+            return []
+
+        pre_roll_ms = 2000
+        post_roll_ms = 5000
+        total_ms = max(1000, int(total_duration_sec * 1000))
+        timeline_ms = max(1000, total_ms - pre_roll_ms - post_roll_ms)
+        total_weight = sum(max(1, len((line.text or "").strip())) for line in dialogue)
+
+        phrase_data: list[tuple] = []
+        current_ms = 0
+        pause_ms = 250
+
+        for idx, line in enumerate(dialogue):
+            remaining_weight = sum(
+                max(1, len((item.text or "").strip())) for item in dialogue[idx:]
+            )
+            if idx == len(dialogue) - 1:
+                duration_ms = max(600, timeline_ms - current_ms)
+            else:
+                weight = max(1, len((line.text or "").strip()))
+                duration_ms = max(600, int((timeline_ms * weight) / max(1, total_weight)))
+                max_allowed = max(600, timeline_ms - current_ms - (len(dialogue) - idx - 1) * 600)
+                duration_ms = min(duration_ms, max_allowed)
+
+            start_ms = max(0, current_ms)
+            end_ms = min(timeline_ms, start_ms + duration_ms)
+            if end_ms <= start_ms:
+                end_ms = min(timeline_ms, start_ms + 600)
+
+            phrase_data.append(
+                (
+                    AudioSegment.silent(duration=max(1, end_ms - start_ms)),
+                    start_ms,
+                    end_ms,
+                    line.text,
+                    line.speaker,
+                )
+            )
+
+            current_ms = end_ms + pause_ms
+            if current_ms >= timeline_ms:
+                break
+
+        return phrase_data
     
     def _get_chapter_title(self, section_id: str, text: str, chapter_title: Optional[str] = None) -> str:
         """セクションIDからチャプタータイトルを生成
