@@ -42,6 +42,14 @@ Perplexity + Gemini + VOICEVOX + FFmpeg を連携し、
   - Settingsタブの **Developer Options >「🧪 モックで動画を作成」** から実行可能
   - Mock実行時はテーマ未入力でも動作（内部でダミーテーマを補完）
 
+### v3.3.x 運用強化（Topic Overlay / Mock Operation）
+- 🏷️ **Topic Overlay**: チャプター開始行（`section` + `chapter_title`）をもとに、動画上部へ話題ラベルをオーバーレイ表示
+  - 設定キー: `config.yaml > video.show_topic_overlay`
+  - 目的: 視聴者が現在の話題を見失わないようにする
+- 🧪 **Mock運用の明確化**: 開発検証は Settings タブの **「🧪 モックで動画を作成」** を使用
+  - Mock実行時は API 呼び出しを行わず `tests/mock_data/` を利用
+  - Mock実行時は YouTube アップロードを実行時に自動無効化
+
 ### v3.3.0 メンテナンス更新（UI Modularization / Logging）
 - 🧩 **UI Modularization**: `app.py` の巨大UIをタブ単位関数へ分割
   - `create_generator_tab()` / `create_dashboard_tab()` / `create_settings_tab()` / `create_manual_tab()`
@@ -124,6 +132,10 @@ Pythonパッケージは `requirements.txt` で管理しています（主な依
 cd auto_radio_generator
 pip install -r requirements.txt
 ```
+
+補足:
+- `workflow.py` は企画・リサーチ・台本・音声・動画・公開の各フェーズを統合するオーケストレーターです。
+- `app.py` は UI 定義とイベント配線を担当し、直接 `launch()` されるのは `if __name__ == "__main__":` 実行時のみです。
 
 ### 2. 環境変数の設定
 
@@ -347,6 +359,8 @@ auto_radio_generator/
 │   │   └── thumbnail_generator.py  # サムネイル生成
 │   ├── cost_calculator.py   # APIコスト計算
 │   └── ...                  # 補助ユーティリティ
+├── config/
+│   └── prompts.yaml         # リサーチ/台本生成プロンプト定義
 ├── assets/                  # 静的リソース
 │   ├── backgrounds/         # 背景画像 (10枚以上)
 │   └── bgm/                 # BGM音楽 (8曲以上)

@@ -1,7 +1,7 @@
 """テスト共通フィクスチャ"""
 import pytest
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import patch
 
 from core.models.config import (
     AppConfig,
@@ -9,6 +9,13 @@ from core.models.config import (
     YamlConfig,
     VideoRendererConfig,
 )
+
+
+@pytest.fixture(autouse=True)
+def mock_gradio_launch():
+    """Prevent Gradio server startup during test imports/execution."""
+    with patch("gradio.blocks.Blocks.launch", autospec=True, return_value=(None, None, None)):
+        yield
 
 
 @pytest.fixture

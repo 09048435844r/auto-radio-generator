@@ -2,7 +2,7 @@
 
 > **Created:** 2026-02-07  
 > **Base Version:** v3.3.0 (GPU / Mock / UI)  
-> **Last Updated:** 2026-02-20  
+> **Last Updated:** 2026-02-28  
 > **Author:** AI Tech Lead (Cascade)
 
 ---
@@ -63,6 +63,9 @@
 - [x] **CI/CD Foundation (pre-commit)** — `git commit` 時に `pytest` を自動実行し、失敗時はコミットをブロックするフックを導入
 - [x] **Regression Prevention (FFmpeg Path Handling)** — Windows向けパスエスケープ処理をヘルパーメソッド化し、変換ロジックの回帰テストを追加
 - [x] **Docs & Config Maintenance** — README/requirements/configコメントを現行実装に合わせて更新
+- [x] **Topic Overlay Delivery** — チャプター開始行に連動した話題オーバーレイ表示を導入し、視認性を改善
+- [x] **Mock Operation Hardening** — Mock実行時のアップロード自動無効化と、UIの専用実行ボタン運用を標準化
+- [x] **Test Freeze Countermeasure** — テスト時の Gradio `launch()` 誤起動を抑止し、pre-commit での無限待機リスクを低減
 
 ### Next Priority（最優先）
 - [ ] ⭐ **Scheduler（定期自動生成）の運用実装**（テーマ入力の手動作業をゼロ化）
