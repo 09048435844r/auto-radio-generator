@@ -15,3 +15,17 @@
 ## 3. Tech Stack & Environment
 - Python 3.10+
 - 常に `config.yaml` を駆動元（Config Driven）とし、ソースコードへのハードコードを避けること。
+
+# ==========================================
+# Subprocess & Background Task Policy
+# （外部コマンド・バックグラウンド処理に関するルール）
+#
+# 【このルールの目的】
+# AIが subprocess.run などを使う際、良かれと思って stdout=PIPE などを指定し
+# ターミナルの出力を隠してしまう（ブラックボックス化する）手癖を防ぐため。
+# ログが隠されると、テストなど数分かかる処理の最中にシステムがフリーズしたと
+# 誤認してしまうため、必ずリアルタイムで画面に経過を出すよう強制します。
+# ==========================================
+When writing Python scripts, Git hooks, or shell commands that execute external processes (e.g., using `subprocess.run`), NEVER hide, capture, or pipe the standard output/error unless explicitly instructed to do so.
+- AVOID using `stdout=subprocess.PIPE`, `stderr=subprocess.PIPE`, or `capture_output=True`.
+- ALWAYS allow outputs to stream directly to the terminal in real-time. This ensures the user can monitor progress and prevents long-running tasks from appearing as system freezes.

@@ -39,6 +39,8 @@ Perplexity + Gemini + VOICEVOX + FFmpeg を連携し、
 - 🚀 **High Performance**: Mockモード開発とNVENC (GPU) レンダリング
   - NVIDIA GPUによるハードウェアエンコード対応（h264_nvenc）
   - API課金なしでワークフロー全体をテスト可能なMockモード
+  - Settingsタブの **Developer Options >「🧪 モックで動画を作成」** から実行可能
+  - Mock実行時はテーマ未入力でも動作（内部でダミーテーマを補完）
 
 ### v3.3.0 メンテナンス更新（UI Modularization / Logging）
 - 🧩 **UI Modularization**: `app.py` の巨大UIをタブ単位関数へ分割
@@ -158,6 +160,9 @@ VOICEVOX_BASE_URL=http://localhost:50021
 python app.py
 ```
 ブラウザで http://127.0.0.1:7861 を開きます。
+
+Mock実行は、Settingsタブの **Developer Options** にある
+**「🧪 モックで動画を作成」** ボタンを利用してください。
 
 **CLI版**
 ```bash

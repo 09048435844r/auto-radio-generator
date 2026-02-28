@@ -621,10 +621,10 @@ def generate_video(
     fade_time: float,
     speed_scale: float,
     enable_spectrum: bool,
-    use_mock: bool = False,
     avoid_topics: str = "",
     upload_to_youtube: bool = False,
     footer_text: str = "",
+    use_mock: bool = False,
     progress=gr.Progress()
 ) -> tuple[str | None, str, str, str, str, str]:
     """動画生成を実行
@@ -638,18 +638,20 @@ def generate_video(
         fade_time: フェードイン/アウト時間 (秒)
         speed_scale: 音声スピード (0.8-1.5)
         enable_spectrum: スペクトラム表示
-        use_mock: Mockモードを使用するか
         avoid_topics: 避けてほしい話題（Negative Prompt）
         upload_to_youtube: YouTubeへ自動アップロードするか（UI優先）
         footer_text: 概要欄フッター文（UI入力優先）
+        use_mock: Mockモードを使用するか
         progress: Gradio進捗バー
     
     Returns:
         (動画パス, ログ出力, コストレポート, タイトル, 概要欄, YouTube状態)
     """
     # 入力検証
-    if not theme or not theme.strip():
+    if (not theme or not theme.strip()) and not use_mock:
         return None, "エラー: テーマを入力してください。", "", "", "", "YouTube: 未実行"
+
+    effective_theme = theme.strip() if theme and theme.strip() else "Mock run"
     
     # ログをクリア
     clear_logs()
@@ -685,7 +687,7 @@ def generate_video(
     
     # ワークフロー実行
     result: WorkflowResult = run_workflow_sync(
-        theme=theme.strip(),
+        theme=effective_theme,
         overrides=overrides,
         log_callback=log_callback,
         progress_callback=progress_callback,
@@ -739,6 +741,37 @@ def generate_video(
         append_log("")
         append_log(f"❌ 生成失敗: {error_msg}")
         return None, get_logs(), "", "", "", "YouTube: 未実行"
+
+def generate_video_mock(
+    theme: str,
+    research_mode: str,
+    background_image: str,
+    bgm_file: str,
+    bgm_volume: float,
+    fade_time: float,
+    speed_scale: float,
+    enable_spectrum: bool,
+    avoid_topics: str = "",
+    upload_to_youtube: bool = False,
+    footer_text: str = "",
+    progress=gr.Progress(),
+) -> tuple[str | None, str, str, str, str, str]:
+    """Run full generation in mock mode (theme can be empty)."""
+    return generate_video(
+        theme=theme,
+        research_mode=research_mode,
+        background_image=background_image,
+        bgm_file=bgm_file,
+        bgm_volume=bgm_volume,
+        fade_time=fade_time,
+        speed_scale=speed_scale,
+        enable_spectrum=enable_spectrum,
+        use_mock=True,
+        avoid_topics=avoid_topics,
+        upload_to_youtube=upload_to_youtube,
+        footer_text=footer_text,
+        progress=progress,
+    )
 
 
 def generate_script_only(
@@ -1417,7 +1450,7 @@ def update_dashboard(month_selector: str):
         )
 
 
-def _update_config_yaml_values(upload_enabled: bool, footer_text: str, mock_mode: bool) -> None:
+def _update_config_yaml_values(upload_enabled: bool, footer_text: str) -> None:
     """Update specific config.yaml keys while keeping most existing structure intact."""
     config_path = PROJECT_ROOT / "config.yaml"
     if not config_path.exists():
@@ -1434,11 +1467,6 @@ def _update_config_yaml_values(upload_enabled: bool, footer_text: str, mock_mode
 
         if stripped and not line.startswith(" ") and stripped.endswith(":"):
             section = stripped[:-1]
-
-        if section == "dev" and stripped.startswith("mock_mode:"):
-            updated_lines.append(f"  mock_mode: {'true' if mock_mode else 'false'}")
-            i += 1
-            continue
 
         if section == "publishing" and stripped.startswith("enable_upload:"):
             updated_lines.append(f"  enable_upload: {'true' if upload_enabled else 'false'}")
@@ -1504,7 +1532,6 @@ def save_settings_from_ui(
     fade_time: float,
     speed_scale: float,
     enable_spectrum: bool,
-    mock_mode: bool,
     upload_enabled: bool,
     footer_text: str,
 ):
@@ -1522,7 +1549,6 @@ def save_settings_from_ui(
     _update_config_yaml_values(
         upload_enabled=upload_enabled,
         footer_text=footer_text,
-        mock_mode=mock_mode,
     )
 
     return f"✅ Settings saved ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})"
@@ -1592,7 +1618,6 @@ def create_settings_tab(
     config,
     default_upload_enabled: bool,
     default_footer_text: str,
-    default_mock_mode: bool,
 ) -> dict[str, gr.components.Component]:
     """Create Settings tab with explicit save flow and hidden developer options."""
     gr.Markdown("## ⚙️ Settings")
@@ -1620,11 +1645,12 @@ def create_settings_tab(
             )
 
     with gr.Accordion("Developer Options", open=False):
-        use_mock = gr.Checkbox(
-            label="🔴 Mock Mode (Development)",
-            value=default_mock_mode,
-            info="APIを使わずにtests/mock_dataの固定データを使用します",
+        mock_generate_btn = gr.Button(
+            "🧪 モックで動画を作成",
+            variant="secondary",
+            size="lg",
         )
+        gr.Markdown("- このボタンは常にMockモードで実行されます（テーマ未入力でも実行可）")
         gr.Markdown("- Current Config Source: `config.yaml`\n- Runtime UI state: saved only by **Save Settings**")
 
     save_settings_btn = gr.Button("💾 Save Settings", variant="primary")
@@ -1637,7 +1663,7 @@ def create_settings_tab(
         "refresh_status_btn": refresh_status_btn,
         "upload_to_youtube_checkbox": upload_to_youtube_checkbox,
         "footer_text_input": footer_text_input,
-        "use_mock": use_mock,
+        "mock_generate_btn": mock_generate_btn,
         "save_settings_btn": save_settings_btn,
         "settings_status": settings_status,
         "config": config,
@@ -1977,9 +2003,6 @@ def create_ui() -> gr.Blocks:
     default_footer_text = (
         getattr(publishing_cfg, "footer_text", "") if publishing_cfg else ""
     )
-    dev_cfg = getattr(config.yaml, "dev", None)
-    default_mock_mode = bool(dev_cfg and getattr(dev_cfg, "mock_mode", False))
-    
     # アセット一覧を取得
     assets = get_asset_choices()
     
@@ -2015,7 +2038,6 @@ def create_ui() -> gr.Blocks:
                     config=config,
                     default_upload_enabled=default_enable_upload,
                     default_footer_text=default_footer_text,
-                    default_mock_mode=default_mock_mode,
                 )
             
             with gr.TabItem("🛠️ Manual", id="manual"):
@@ -2156,7 +2178,6 @@ def create_ui() -> gr.Blocks:
                 generator_components["fade_time_slider"],
                 generator_components["speed_slider"],
                 generator_components["spectrum_checkbox"],
-                settings_components["use_mock"],
                 settings_components["upload_to_youtube_checkbox"],
                 settings_components["footer_text_input"],
             ],
@@ -2175,7 +2196,6 @@ def create_ui() -> gr.Blocks:
                 generator_components["fade_time_slider"],
                 generator_components["speed_slider"],
                 generator_components["spectrum_checkbox"],
-                settings_components["use_mock"],
                 generator_components["avoid_topics_input"],
                 settings_components["upload_to_youtube_checkbox"],
                 settings_components["footer_text_input"],
@@ -2189,6 +2209,32 @@ def create_ui() -> gr.Blocks:
                 generator_components["youtube_url_output"],
             ],
             show_progress="full"
+        )
+
+        settings_components["mock_generate_btn"].click(
+            fn=generate_video_mock,
+            inputs=[
+                generator_components["theme_input"],
+                generator_components["research_mode_dropdown"],
+                generator_components["selected_bg_filename"],
+                generator_components["bgm_dropdown"],
+                generator_components["bgm_volume_slider"],
+                generator_components["fade_time_slider"],
+                generator_components["speed_slider"],
+                generator_components["spectrum_checkbox"],
+                generator_components["avoid_topics_input"],
+                settings_components["upload_to_youtube_checkbox"],
+                settings_components["footer_text_input"],
+            ],
+            outputs=[
+                generator_components["video_output"],
+                generator_components["log_output"],
+                generator_components["cost_output"],
+                generator_components["title_output"],
+                generator_components["description_output"],
+                generator_components["youtube_url_output"],
+            ],
+            show_progress="full",
         )
         
         # 台本のみ作成（AIプロデューサーモード）

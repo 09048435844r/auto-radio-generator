@@ -1158,20 +1158,21 @@ def run_workflow_sync(
             callbacks.log("設定を読み込み中...")
             
             config = load_config(PROJECT_ROOT)
-            
-            # Mockモードのオーバーライド
+
+            # MockモードはUIの実行ボタン種別を優先する
+            # - 通常の「動画を生成する」: use_mock=False
+            # - 「モックで動画を作成」: use_mock=True
+            if not hasattr(config.yaml, 'dev'):
+                from types import SimpleNamespace
+                config.yaml.dev = SimpleNamespace(mock_mode=False, mock_data_path="tests/mock_data")
+
+            original_mock_mode = bool(getattr(config.yaml.dev, "mock_mode", False))
+            config.yaml.dev.mock_mode = bool(use_mock)
+
             if use_mock:
                 callbacks.log("🔴 Mockモードが有効化されました")
-                # 元の設定を保存
-                if hasattr(config.yaml, 'dev'):
-                    original_mock_mode = config.yaml.dev.mock_mode
-                else:
-                    # devセクションが存在しない場合は作成
-                    from types import SimpleNamespace
-                    config.yaml.dev = SimpleNamespace(mock_mode=False, mock_data_path="tests/mock_data")
-                    original_mock_mode = False
-                # mock_modeをTrueにオーバーライド
-                config.yaml.dev.mock_mode = True
+            elif original_mock_mode:
+                callbacks.log("[dim]INFO: UI通常実行のためMockモードを無効化して実行します[/dim]")
             
             config = apply_overrides(config, overrides_obj)
             
@@ -1574,9 +1575,10 @@ def run_workflow_sync(
         
         finally:
             # Mockモード設定を元に戻す
-            if use_mock and original_mock_mode is not None:
+            if original_mock_mode is not None:
                 config.yaml.dev.mock_mode = original_mock_mode
-                callbacks.log("🔴 Mockモード設定を元に戻しました")
+                if use_mock:
+                    callbacks.log("🔴 Mockモード設定を元に戻しました")
     
     return asyncio.run(_run_phases())
 

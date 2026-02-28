@@ -1,28 +1,25 @@
 #!/usr/bin/env python
 """Git pre-commit hook: run pytest before allowing commit."""
 
+from datetime import datetime
 import subprocess
 import sys
+import time
 
 
 def main() -> int:
-    result = subprocess.run(
-        ["pytest"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    start = time.perf_counter()
+    started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[pre-commit] {started_at} - Running pytest...", flush=True)
 
-    if result.stdout:
-        print(result.stdout, end="")
-    if result.stderr:
-        print(result.stderr, end="", file=sys.stderr)
+    result = subprocess.run(["pytest"])
 
+    elapsed = time.perf_counter() - start
     if result.returncode != 0:
-        print("Tests Failed! Commit rejected.")
+        print(f"[pre-commit] Tests Failed in {elapsed:.1f}s. Commit rejected.", flush=True)
         return 1
 
-    print("Tests Passed!")
+    print(f"[pre-commit] Tests Passed in {elapsed:.1f}s.", flush=True)
     return 0
 
 
