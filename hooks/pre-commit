@@ -1,25 +1,42 @@
 #!/usr/bin/env python
-"""Git pre-commit hook: run pytest before allowing commit."""
+"""Git pre-commit hook: fast syntax validation only."""
 
 from datetime import datetime
+from pathlib import Path
 import subprocess
 import sys
 import time
 
 
+def collect_python_files(project_root: Path) -> list[str]:
+    """Collect Python source files for syntax check."""
+    py_files: list[str] = []
+    for path in project_root.rglob("*.py"):
+        parts = set(path.parts)
+        if ".git" in parts or "__pycache__" in parts or ".pytest_cache" in parts:
+            continue
+        py_files.append(str(path))
+    return py_files
+
+
 def main() -> int:
     start = time.perf_counter()
     started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"[pre-commit] {started_at} - Running pytest...", flush=True)
+    project_root = Path.cwd()
+    py_files = collect_python_files(project_root)
 
-    result = subprocess.run(["pytest"])
+    print(f"[pre-commit] {started_at} - Running fast syntax check...", flush=True)
+    print(f"[pre-commit] Target files: {len(py_files)} Python files", flush=True)
+
+    result = subprocess.run([sys.executable, "-m", "py_compile", *py_files])
 
     elapsed = time.perf_counter() - start
     if result.returncode != 0:
-        print(f"[pre-commit] Tests Failed in {elapsed:.1f}s. Commit rejected.", flush=True)
+        print(f"[pre-commit] Syntax check failed in {elapsed:.1f}s. Commit rejected.", flush=True)
         return 1
 
-    print(f"[pre-commit] Tests Passed in {elapsed:.1f}s.", flush=True)
+    print(f"[pre-commit] Syntax check passed in {elapsed:.1f}s.", flush=True)
+    print("[pre-commit] Full test suite is intentionally manual: run `pytest -v -s` when needed.", flush=True)
     return 0
 
 

@@ -261,6 +261,7 @@
 3. **Append-Only Logging** — データは削除せず追記のみ。JSONL 形式で蓄積する
 4. **Graceful Degradation** — 外部サービス障害時は自動フォールバック（GPU → CPU、API → Mock）
 5. **Zero Manual Steps** — 最終目標は「テーマ入力すら不要」な完全自律運用
+6. **Lean Commit Rhythm** — コミット時は軽量チェック（構文チェック）を基本とし、全体テストは手動で計画実行する
 
 ---
 

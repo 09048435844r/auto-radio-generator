@@ -215,10 +215,14 @@ pytest
 
 ### 自動チェック（pre-commit hook）
 
-`git commit` 実行時に `.git/hooks/pre-commit` が自動で `pytest` を実行します。
+`git commit` 実行時に `.git/hooks/pre-commit` が自動で **軽量な構文チェック** を実行します。
 
-- テスト失敗時: `🚫 Tests Failed! Commit rejected.` を表示し、コミットを中止
-- テスト成功時: `✅ Tests Passed!` を表示し、コミットを許可
+- 実行コマンド: `python -m py_compile`（リポジトリ内の `.py` を対象）
+- 目的: コミット速度を維持しつつ、構文エラーの混入を防ぐ
+- 方針: **重い全体テストは手動実行**（必要時に `pytest -v -s`）
+
+- 構文エラー時: `Syntax check failed ... Commit rejected.` を表示し、コミットを中止
+- 正常時: `Syntax check passed ...` を表示し、コミットを許可
 
 ### フック再生成手順（clone直後）
 
