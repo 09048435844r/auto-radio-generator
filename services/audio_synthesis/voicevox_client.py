@@ -107,17 +107,17 @@ class VoicevoxClient(IAudioSynthesizer):
         current_time_ms = 0
         pause_ms = self.audio_config.pause_between_phrases_ms
         
-        console.print(f"[cyan]音声合成中...[/cyan] {len(script.dialogue)} フレーズ")
+        console.print(f"[cyan]音声合成中...[/cyan] {len(script.get_dialogue_only())} フレーズ")
         
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             console=console
         ) as progress:
-            task = progress.add_task("合成中...", total=len(script.dialogue))
+            task = progress.add_task("合成中...", total=len(script.get_dialogue_only()))
             
             async with httpx.AsyncClient(timeout=60.0) as client:
-                for i, line in enumerate(script.dialogue):
+                for i, line in enumerate(script.get_dialogue_only()):
                     # セクション開始を検出してチャプターを記録
                     # Note: 冒頭に2秒の無音が追加されるため、チャプタータイムスタンプを2秒オフセット
                     if line.section:
@@ -153,7 +153,7 @@ class VoicevoxClient(IAudioSynthesizer):
                     phrase_data.append((audio_segment, start_time, end_time, line.text, line.speaker))
                     
                     current_time_ms = end_time + pause_ms
-                    progress.update(task, advance=1, description=f"合成中... {i+1}/{len(script.dialogue)}")
+                    progress.update(task, advance=1, description=f"合成中... {i+1}/{len(script.get_dialogue_only())}")
         
         # 音声を結合
         console.print("[cyan]音声ファイルを結合中...[/cyan]")
@@ -329,7 +329,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     def _build_mock_chapters(self, script: Script, total_duration_sec: float) -> list[ChapterMarker]:
         """Mockモード用に台本のsection情報からチャプター時刻を推定する"""
-        dialogue = script.dialogue
+        dialogue = script.get_dialogue_only()
         if not dialogue:
             return []
 
@@ -359,7 +359,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     def _build_mock_phrase_data(self, script: Script, total_duration_sec: float) -> list[tuple]:
         """Mockモード用にASS字幕生成のための擬似タイミングを作成する"""
-        dialogue = script.dialogue
+        dialogue = script.get_dialogue_only()
         if not dialogue:
             return []
 

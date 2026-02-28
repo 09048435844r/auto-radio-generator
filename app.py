@@ -16,6 +16,7 @@ v3.3.0 機能:
 """
 import sys
 from pathlib import Path
+from typing import Optional
 
 # プロジェクトルートをパスに追加
 PROJECT_ROOT = Path(__file__).parent
@@ -35,6 +36,36 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
 from urllib.parse import urlparse
+
+
+# デフォルトジングル設定
+DEFAULT_JINGLES = {
+    "デフォルト": "assets/jingles/default.mp3",
+    "明るい": "assets/jingles/bright.mp3",
+    "シリアス": "assets/jingles/serious.mp3",
+    "クール": "assets/jingles/cool.mp3",
+}
+
+
+def resolve_jingle_path(jingle_choice: str, custom_path: str = "") -> Optional[str]:
+    """ジングル選択に基づいてファイルパスを解決"""
+    if jingle_choice == "なし" or jingle_choice == "":
+        return None
+    elif jingle_choice == "カスタムファイル":
+        if custom_path and Path(custom_path).exists():
+            return custom_path
+        else:
+            return None
+    elif jingle_choice in DEFAULT_JINGLES:
+        default_path = PROJECT_ROOT / DEFAULT_JINGLES[jingle_choice]
+        return str(default_path) if default_path.exists() else None
+    else:
+        return None
+
+
+def toggle_jingle_path_visibility(jingle_choice: str) -> str:
+    """ジングルパス入力の表示/非表示を切り替え"""
+    return gr.update(visible=(jingle_choice == "カスタムファイル"))
 
 
 # ログメッセージを蓄積するためのグローバル変数
@@ -625,6 +656,9 @@ def generate_video(
     upload_to_youtube: bool = False,
     footer_text: str = "",
     use_mock: bool = False,
+    second_mode: str = "なし",
+    jingle_choice: str = "なし",
+    jingle_custom_path: str = "",
     progress=gr.Progress()
 ) -> tuple[str | None, str, str, str, str, str]:
     """動画生成を実行
@@ -642,6 +676,9 @@ def generate_video(
         upload_to_youtube: YouTubeへ自動アップロードするか（UI優先）
         footer_text: 概要欄フッター文（UI入力優先）
         use_mock: Mockモードを使用するか
+        second_mode: 第2部のリサーチモード
+        jingle_choice: 場面転換ジングルの選択
+        jingle_custom_path: カスタムジングルファイルのパス
         progress: Gradio進捗バー
     
     Returns:
@@ -653,13 +690,24 @@ def generate_video(
 
     effective_theme = theme.strip() if theme and theme.strip() else "Mock run"
     
+    # ジングルパスを解決
+    jingle_path = resolve_jingle_path(jingle_choice, jingle_custom_path)
+    if jingle_choice != "なし" and not jingle_path:
+        append_log(f"[WARNING] ジングルファイルが見つかりません: {jingle_choice}")
+    
     # ログをクリア
     clear_logs()
     append_log("自動ラジオ動画生成システム v3.3.0")
     append_log("=" * 40)
     
+    if second_mode != "なし":
+        append_log(f"[INFO] 第2部モード有効: {research_mode} → {second_mode}")
+    if jingle_path:
+        append_log(f"[INFO] ジングル有効: {jingle_choice} ({jingle_path})")
+    
     # リサーチモードを変換
     mode = RESEARCH_MODE_MAP.get(research_mode)
+    second_mode_enum = RESEARCH_MODE_MAP.get(second_mode) if second_mode != "なし" else None
     enable_research = mode is not None
     
     # オーバーライド設定を作成
@@ -695,6 +743,8 @@ def generate_video(
         avoid_topics=avoid_topics if avoid_topics and avoid_topics.strip() else None,
         upload_override=upload_to_youtube,
         footer_text_override=footer_text,
+        second_mode=second_mode_enum,
+        jingle_path=jingle_path,
     )
     
     # 成功時に設定を保存
@@ -754,9 +804,11 @@ def generate_video_mock(
     avoid_topics: str = "",
     upload_to_youtube: bool = False,
     footer_text: str = "",
+    second_mode: str = "なし",
+    jingle_choice: str = "なし",
+    jingle_custom_path: str = "",
     progress=gr.Progress(),
 ) -> tuple[str | None, str, str, str, str, str]:
-    """Run full generation in mock mode (theme can be empty)."""
     return generate_video(
         theme=theme,
         research_mode=research_mode,
@@ -770,6 +822,9 @@ def generate_video_mock(
         avoid_topics=avoid_topics,
         upload_to_youtube=upload_to_youtube,
         footer_text=footer_text,
+        second_mode=second_mode,
+        jingle_choice=jingle_choice,
+        jingle_custom_path=jingle_custom_path,
         progress=progress,
     )
 
@@ -1701,6 +1756,31 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
                         info="台本に含めたくないトピックを指定できます",
                     )
 
+                    # 第2部モード設定
+                    gr.Markdown("### 📖 第2部モード (2-Story Mode)")
+                    with gr.Row():
+                        second_mode_dropdown = gr.Dropdown(
+                            label="第2部のモード (オプション)",
+                            choices=["なし"] + list(RESEARCH_MODE_MAP.keys()),
+                            value="なし",
+                            info="第2部で異なるリサーチモードを使用します",
+                            scale=1,
+                        )
+                        jingle_dropdown = gr.Dropdown(
+                            label="場面転換ジングル",
+                            choices=["なし", "デフォルト", "カスタムファイル"],
+                            value="なし",
+                            info="第1部と第2部の間に挿入するジングル",
+                            scale=1,
+                        )
+                    
+                    jingle_path_input = gr.Textbox(
+                        label="ジングルファイルパス",
+                        placeholder="assets/jingles/custom.mp3",
+                        visible=False,
+                        info="カスタムジングルファイルのパスを指定",
+                    )
+
                 with gr.Group(elem_classes="group-container"):
                     gr.Markdown("### 🎨 クリエイティブ設定")
                     gr.Markdown("#### 📷 背景画像")
@@ -1833,6 +1913,9 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
     return {
         "theme_input": theme_input,
         "research_mode_dropdown": research_mode_dropdown,
+        "second_mode_dropdown": second_mode_dropdown,
+        "jingle_dropdown": jingle_dropdown,
+        "jingle_path_input": jingle_path_input,
         "avoid_topics_input": avoid_topics_input,
         "bg_preview": bg_preview,
         "selected_bg_filename": selected_bg_filename,
@@ -2184,6 +2267,13 @@ def create_ui() -> gr.Blocks:
             outputs=[settings_components["settings_status"]],
         )
         
+        # ジングル選択時のイベントハンドラ
+        generator_components["jingle_dropdown"].change(
+            fn=toggle_jingle_path_visibility,
+            inputs=[generator_components["jingle_dropdown"]],
+            outputs=[generator_components["jingle_path_input"]],
+        )
+        
         # 動画生成
         generator_components["generate_btn"].click(
             fn=generate_video,
@@ -2199,6 +2289,10 @@ def create_ui() -> gr.Blocks:
                 generator_components["avoid_topics_input"],
                 settings_components["upload_to_youtube_checkbox"],
                 settings_components["footer_text_input"],
+                gr.Checkbox(value=False, visible=False),  # use_mock placeholder
+                generator_components["second_mode_dropdown"],
+                generator_components["jingle_dropdown"],
+                generator_components["jingle_path_input"],
             ],
             outputs=[
                 generator_components["video_output"],
@@ -2225,6 +2319,10 @@ def create_ui() -> gr.Blocks:
                 generator_components["avoid_topics_input"],
                 settings_components["upload_to_youtube_checkbox"],
                 settings_components["footer_text_input"],
+                gr.Checkbox(value=False, visible=False),  # use_mock placeholder
+                generator_components["second_mode_dropdown"],
+                generator_components["jingle_dropdown"],
+                generator_components["jingle_path_input"],
             ],
             outputs=[
                 generator_components["video_output"],

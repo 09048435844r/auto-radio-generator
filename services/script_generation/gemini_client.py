@@ -134,13 +134,14 @@ class GeminiClient(IScriptGenerator):
             
             raise
     
-    def generate(self, theme: str, research_data: Optional[ResearchResult] = None, avoid_topics: Optional[str] = None) -> Script:
+    def generate(self, theme: str, research_data: Optional[ResearchResult] = None, avoid_topics: Optional[str] = None, excluded_topics: Optional[str] = None) -> Script:
         """テーマとリサーチデータに基づいて台本を生成する
         
         Args:
             theme: 台本のテーマ
             research_data: リサーチ結果（オプション）
             avoid_topics: 避けてほしい話題（オプション）
+            excluded_topics: 除外する話題（第2部モード用、オプション）
         
         Note:
             API使用量は self.last_usage で取得可能
@@ -209,7 +210,7 @@ class GeminiClient(IScriptGenerator):
                 listener_mail_ratio=self.structure.listener_mail_ratio,
                 ending_ratio=self.structure.ending_ratio
             )
-        user_prompt = self._build_user_prompt(theme, research_data, avoid_topics)
+        user_prompt = self._build_user_prompt(theme, research_data, avoid_topics, excluded_topics)
         self.last_usage = None  # リセット
         
         try:
@@ -306,7 +307,7 @@ class GeminiClient(IScriptGenerator):
         
         return response.text, usage
     
-    def _build_user_prompt(self, theme: str, research_data: Optional[ResearchResult], avoid_topics: Optional[str] = None) -> str:
+    def _build_user_prompt(self, theme: str, research_data: Optional[ResearchResult], avoid_topics: Optional[str] = None, excluded_topics: Optional[str] = None) -> str:
         """ユーザープロンプトを構築"""
         prompt = f"## テーマ\n{theme}\n\n"
         
@@ -326,6 +327,14 @@ class GeminiClient(IScriptGenerator):
                         prompt += f"{i}. {title}: {url}\n"
                 
                 prompt += "\n"
+        
+        if excluded_topics and excluded_topics.strip():
+            prompt += (
+                "[EXCLUDED TOPICS - 第2部モード]\n"
+                "以下のトピックは第1部ですでに扱われています。重複を避けるため、これらのトピックには触れないでください：\n"
+                f"\"{excluded_topics.strip()}\"\n\n"
+                "第2部では新しい視点や未展開の情報に焦点を当ててください。\n\n"
+            )
         
         if avoid_topics and avoid_topics.strip():
             prompt += (

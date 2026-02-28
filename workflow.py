@@ -10,7 +10,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, List
 from urllib.parse import parse_qs, urlparse
 
 # プロジェクトルートをパスに追加
@@ -23,6 +23,7 @@ from core.models import (
     TotalUsage, PerplexityUsage, GeminiUsage, VoicevoxUsage, CostBreakdown,
     ExecutionLogEntry, PromptRecord, ConfigSnapshot, CostLogEntry
 )
+from core.models.script import DialogueTurn  # 追加インポート
 from core.interfaces import ResearchMode, ChapterMarker
 from services.script_generation import GeminiClient
 from services.research import PerplexityResearcher
@@ -167,6 +168,114 @@ def _resolve_dynamic_tags(script: Script, fallback_description: str) -> list[str
     return _normalize_non_empty_strings(extracted)
 
 
+def _merge_scripts(
+    scripts: List[Script],
+    jingle_path: Optional[str] = None,
+    add_chapter_markers: bool = True
+) -> Script:
+    """複数の台本を1つに結合する（拡張性重視）
+    
+    Args:
+        scripts: 結合する台本リスト
+        jingle_path: 挿入するジングルファイルのパス
+        add_chapter_markers: チャプターマーカーを追加するか
+    
+    Returns:
+        結合された台本
+    """
+    if not scripts:
+        raise ValueError("scriptsリストが空です")
+    
+    if len(scripts) == 1:
+        return scripts[0]
+    
+    from core.models.script import create_jingle_turn, create_chapter_marker
+    
+    # 結合されたセクションを格納するリスト
+    merged_sections: List[DialogueTurn] = []
+    
+    # メタデータを結合
+    merged_title = f"{scripts[0].title} & {scripts[1].title}"
+    merged_theme = f"{scripts[0].theme} + {scripts[1].theme}" if scripts[0].theme and scripts[1].theme else scripts[0].theme
+    merged_hashtags = list(set(scripts[0].hashtags + scripts[1].hashtags))
+    merged_references = list(set(scripts[0].references + scripts[1].references))
+    
+    for i, script in enumerate(scripts):
+        # チャプターマーカーを追加（2部目以降）
+        if add_chapter_markers and i > 0:
+            chapter_marker = create_chapter_marker(
+                chapter_title=f"第{i+1}部: {script.title}",
+                section=f"part_{i+1}"
+            )
+            merged_sections.append(chapter_marker)
+        
+        # 対話セクションを追加
+        merged_sections.extend(script.sections)
+        
+        # ジングルを追加（最後の台本以外）
+        if jingle_path and i < len(scripts) - 1:
+            jingle_turn = create_jingle_turn(
+                jingle_path=jingle_path,
+                section=f"jingle_{i+1}"
+            )
+            merged_sections.append(jingle_turn)
+    
+    # 結合された台本を作成
+    return Script(
+        title=merged_title,
+        theme=merged_theme,
+        sections=merged_sections,
+        thumbnail_title=scripts[0].thumbnail_title,
+        description=scripts[0].description,
+        hashtags=merged_hashtags,
+        references=merged_references
+    )
+
+
+def _create_script_summary(script: Script, max_turns: int = 5) -> str:
+    """台本の要約を作成する（コンテキスト引き継ぎ用）
+    
+    Args:
+        script: 要約する台本
+        max_turns: 要約に含める最大ターン数
+    
+    Returns:
+        台本の要約文字列
+    """
+    # 対話のみを抽出
+    dialogues = script.get_dialogue_only()
+    
+    # 主要なセクションを抽出
+    sections = list(set(turn.section for turn in dialogues if turn.section))
+    
+    # キーワードを抽出（簡易実装）
+    keywords = []
+    for turn in dialogues[:max_turns]:
+        # 簡単なキーワード抽出（名詞などを想定）
+        words = turn.text.split()[:10]  # 最初の10語を候補とする
+        keywords.extend(words)
+    
+    # 要約を構築
+    summary_parts = []
+    
+    if sections:
+        summary_parts.append(f"セクション: {', '.join(sections)}")
+    
+    if keywords:
+        unique_keywords = list(set(keywords))[:20]  # 重複を除き最大20個
+        summary_parts.append(f"キーワード: {', '.join(unique_keywords)}")
+    
+    # 最初の数ターンを追加
+    initial_turns = []
+    for turn in dialogues[:max_turns]:
+        initial_turns.append(f"[{turn.speaker}] {turn.text[:50]}...")
+    
+    if initial_turns:
+        summary_parts.append(f"初期発話: {' | '.join(initial_turns)}")
+    
+    return " | ".join(summary_parts)
+
+
 def _resolve_references(
     script: Script,
     theme: str,
@@ -274,17 +383,17 @@ def _capture_config_snapshot(config: AppConfig, overrides: UIOverrides) -> Confi
 
 def _build_speaker_diagnostics(script: Script) -> tuple[list[str], bool]:
     """話者分布と口調ヒントの診断ログを作成する。"""
-    lines = list(script.dialogue)
-    count_a = sum(1 for line in lines if line.speaker == "A")
-    count_b = sum(1 for line in lines if line.speaker == "B")
+    dialogues = script.get_dialogue_only()
+    count_a = sum(1 for line in dialogues if line.speaker == "A")
+    count_b = sum(1 for line in dialogues if line.speaker == "B")
 
-    a_nanoda = sum(1 for line in lines if line.speaker == "A" and "なのだ" in line.text)
-    b_nanoda = sum(1 for line in lines if line.speaker == "B" and "なのだ" in line.text)
+    a_nanoda = sum(1 for line in dialogues if line.speaker == "A" and "なのだ" in line.text)
+    b_nanoda = sum(1 for line in dialogues if line.speaker == "B" and "なのだ" in line.text)
     a_wayo = sum(
-        1 for line in lines if line.speaker == "A" and ("わよ" in line.text or "かしら" in line.text)
+        1 for line in dialogues if line.speaker == "A" and ("わよ" in line.text or "かしら" in line.text)
     )
     b_wayo = sum(
-        1 for line in lines if line.speaker == "B" and ("わよ" in line.text or "かしら" in line.text)
+        1 for line in dialogues if line.speaker == "B" and ("わよ" in line.text or "かしら" in line.text)
     )
 
     diagnostics = [
@@ -511,7 +620,7 @@ async def execute_scripting_phase(
     
     script_start = time.time()
     script_generator = create_script_generator(config)
-    script = script_generator.generate(theme, research_data, avoid_topics=avoid_topics)
+    script = script_generator.generate(theme, research_data, avoid_topics=avoid_topics, excluded_topics=excluded_topics)
 
     diagnostics, suspected_swap = _build_speaker_diagnostics(script)
     for msg in diagnostics:
@@ -522,7 +631,7 @@ async def execute_scripting_phase(
     gemini_usage = script_generator.last_usage
     script_duration = time.time() - script_start
     
-    cb.log(f"✓ 台本生成完了: {len(script.dialogue)}フレーズ ({script_duration:.1f}秒)")
+    cb.log(f"✓ 台本生成完了: {len(script.sections)}フレーズ ({script_duration:.1f}秒)")
     cb.log(f"タイトル: {script.title}")
     cb.progress(0.65, "✅ 台本生成完了")
     
@@ -568,7 +677,7 @@ async def execute_production_phase(
     
     # ========== Step 1: 音声合成 ==========
     cb.log(f"\n== Phase 3-1: 音声合成 ==")
-    cb.log(f"フレーズ数: {len(script.dialogue)}")
+    cb.log(f"フレーズ数: {len(script.get_dialogue_only())}")
     cb.progress(0.70, "🗣️ 音声を合成中 (VOICEVOX)...")
     
     audio_start = time.time()
@@ -582,7 +691,7 @@ async def execute_production_phase(
     )
     
     voicevox_usage = VoicevoxUsage(
-        phrase_count=len(script.dialogue),
+        phrase_count=len(script.get_dialogue_only()),
         total_duration_sec=synthesis_result.total_duration_sec
     )
     audio_duration = time.time() - audio_start
@@ -942,7 +1051,7 @@ async def generate_video_workflow(
             total_usage.gemini = script_generator.last_usage
         
         total_usage.script_duration_sec = time.time() - script_start
-        log(f"✓ 台本生成完了: {len(script.dialogue)}フレーズ ({total_usage.script_duration_sec:.1f}秒)")
+        log(f"✓ 台本生成完了: {len(script.sections)}フレーズ ({total_usage.script_duration_sec:.1f}秒)")
         log(f"タイトル: {script.title}")
         progress(0.35, "台本生成完了")
         
@@ -953,13 +1062,13 @@ async def generate_video_workflow(
         # ========== Phase 3: 音声合成 (35-75%) ==========
         progress(0.35, "音声合成中...")
         log(f"\n== 音声合成 ==")
-        log(f"フレーズ数: {len(script.dialogue)}")
+        log(f"フレーズ数: {len(script.get_dialogue_only())}")
         
         audio_start = time.time()
         voicevox = VoicevoxClient(config)
         
         # 音声合成（進捗を更新）
-        total_phrases = len(script.dialogue)
+        total_phrases = len(script.get_dialogue_only())
         synthesis_result = await voicevox.synthesize(
             script, 
             audio_output_dir,
@@ -1126,6 +1235,8 @@ def run_workflow_sync(
     avoid_topics: Optional[str] = None,
     upload_override: Optional[bool] = None,
     footer_text_override: Optional[str] = None,
+    second_mode: Optional[ResearchMode] = None,
+    jingle_path: Optional[str] = None,
 ) -> WorkflowResult:
     """同期版ワークフロー実行（Gradioから呼び出し用）
     
@@ -1141,6 +1252,8 @@ def run_workflow_sync(
         avoid_topics: 避けてほしい話題（Negative Prompt、オプション）
         upload_override: YouTubeアップロード実行のUI優先フラグ
         footer_text_override: 概要欄フッター文（UI入力優先）
+        second_mode: 第2部のリサーチモード（2-Story Mode用）
+        jingle_path: 場面転換ジングルのファイルパス
     
     Returns:
         WorkflowResult: 実行結果（Usage/Cost情報含む）
@@ -1240,16 +1353,73 @@ def run_workflow_sync(
             if config.yaml.dev.mock_mode and overrides_obj.enable_research:
                 callbacks.log("[INFO] Mockモードのためリサーチ工程をスキップします")
 
-            scripting_result = await execute_scripting_phase(
-                theme=theme,
-                mode=overrides_obj.research_mode or "trivia",
-                queries=queries,
-                config=config,
-                output_dir=output_base,
-                enable_research=should_enable_research,
-                avoid_topics=avoid_topics,
-                callbacks=callbacks
-            )
+            # 第2部モードの場合は2つの台本を生成して結合
+            if second_mode:
+                primary_mode_label = getattr(overrides_obj.research_mode, "value", overrides_obj.research_mode)
+                secondary_mode_label = getattr(second_mode, "value", second_mode)
+                callbacks.log(f"[INFO] 第2部モードで台本を生成します: {primary_mode_label} → {secondary_mode_label}")
+                
+                # 第1部の台本を生成
+                callbacks.progress(0.15, "第1部の台本を生成中...")
+                part1_result = await execute_scripting_phase(
+                    theme=theme,
+                    mode=overrides_obj.research_mode or "trivia",
+                    queries=queries,
+                    config=config,
+                    output_dir=output_base,
+                    enable_research=should_enable_research,
+                    avoid_topics=avoid_topics,
+                    callbacks=callbacks
+                )
+                
+                # 第1部の要約を作成（第2部のコンテキストとして使用）
+                part1_summary = _create_script_summary(part1_result.script, max_turns=5)
+                
+                # 第2部のクエリを生成（第1部の内容を除外）
+                excluded_topics = f"前回の内容: {part1_summary}"
+                if avoid_topics:
+                    excluded_topics += f" | 追加除外: {avoid_topics}"
+                
+                callbacks.progress(0.25, "第2部の台本を生成中...")
+                part2_result = await execute_scripting_phase(
+                    theme=theme,
+                    mode=second_mode,
+                    queries=queries,
+                    config=config,
+                    output_dir=output_base,
+                    enable_research=should_enable_research,
+                    excluded_topics=excluded_topics,
+                    avoid_topics=avoid_topics,
+                    callbacks=callbacks
+                )
+                
+                # 2つの台本を結合
+                scripting_result = ScriptingPhaseResult(
+                    script=_merge_scripts([part1_result.script, part2_result.script], jingle_path, add_chapter_markers=True),
+                    research_content=part1_result.research_content,  # 第1部のリサーチ内容を保持
+                    research_sources=part1_result.research_sources,
+                    gemini_usage=(
+                        (part1_result.gemini_usage or GeminiUsage()) + 
+                        (part2_result.gemini_usage or GeminiUsage())
+                    ),
+                    perplexity_usage=part1_result.perplexity_usage,
+                    research_duration_sec=part1_result.research_duration_sec + part2_result.research_duration_sec,
+                    script_duration_sec=part1_result.script_duration_sec + part2_result.script_duration_sec,
+                )
+                
+                callbacks.log(f"[INFO] 台本結合完了: 第1部({len(part1_result.script.sections)}行) + 第2部({len(part2_result.script.sections)}行) = {len(scripting_result.script.sections)}行")
+            else:
+                # 通常の単一部台本生成
+                scripting_result = await execute_scripting_phase(
+                    theme=theme,
+                    mode=overrides_obj.research_mode or "trivia",
+                    queries=queries,
+                    config=config,
+                    output_dir=output_base,
+                    enable_research=should_enable_research,
+                    avoid_topics=avoid_topics,
+                    callbacks=callbacks
+                )
             
             # Usage記録
             if scripting_result.perplexity_usage:
@@ -1647,9 +1817,10 @@ def _generate_youtube_metadata(
     
     # 台本の要約を生成
     script_summary = ""
-    if script.dialogue:
+    if script.sections:
         # ダイアログから主要な内容を要約
-        dialogue_texts = [d.text for d in script.dialogue[:10]]  # 最初の10セリフで要約
+        dialogues = script.get_dialogue_only()
+        dialogue_texts = [d.text for d in dialogues[:10]]  # 最初の10セリフで要約
         script_summary = " ".join(dialogue_texts)[:200] + "..." if len(" ".join(dialogue_texts)) > 200 else " ".join(dialogue_texts)
     
     # packagingプロンプトでメタデータを生成
