@@ -52,3 +52,4 @@ class ExecutionLogEntry(BaseModel):
     success: bool = Field(..., description="Whether workflow completed successfully")
     error_message: Optional[str] = Field(None)
     total_duration_sec: float = Field(0.0)
+    perplexity_requests: int = Field(0, description="Number of Perplexity API requests made in this execution (including failures)")

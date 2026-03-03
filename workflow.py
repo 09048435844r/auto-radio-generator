@@ -24,7 +24,7 @@ from core.models import (
     ExecutionLogEntry, PromptRecord, ConfigSnapshot, CostLogEntry
 )
 from core.models.script import DialogueTurn  # 追加インポート
-from core.interfaces import ResearchMode, ChapterMarker
+from core.interfaces import ResearchMode, ChapterMarker, ResearchResult
 from services.script_generation import GeminiClient
 from services.research import PerplexityResearcher
 from services.audio_synthesis import VoicevoxClient
@@ -230,6 +230,22 @@ def _merge_scripts(
         hashtags=merged_hashtags,
         references=merged_references
     )
+
+
+def _create_script_full_transcript(script: Script) -> str:
+    """台本の全量をプレーンテキストに変換（第2部へのコンテキスト渡し用）
+    
+    Args:
+        script: テキスト化する台本
+    
+    Returns:
+        台本の全発話テキスト（「ずんだもん: [セリフ]」形式）
+    """
+    lines = []
+    for turn in script.get_dialogue_only():
+        speaker_name = "ずんだもん" if turn.speaker == "A" else "四国めたん"
+        lines.append(f"{speaker_name}: {turn.text}")
+    return "\n".join(lines)
 
 
 def _create_script_summary(script: Script, max_turns: int = 5) -> str:
@@ -523,6 +539,11 @@ async def execute_planning_phase(
         script_generator = create_script_generator(config)
         plan = await script_generator.create_research_plan(theme, mode, instruction)
         
+        max_queries = max(1, int(getattr(config.yaml.researcher, "max_queries_per_plan", 3)))
+        if len(plan.queries) > max_queries:
+            cb.log(f"[WARN] 検索クエリ数を上限 {max_queries} 件に制限しました（生成: {len(plan.queries)}件）")
+            plan.queries = plan.queries[:max_queries]
+
         cb.log(f"✓ 検索計画作成完了")
         cb.log(f"切り口: {plan.angle}")
         cb.log(f"\n検索クエリ:")
@@ -554,6 +575,7 @@ async def execute_scripting_phase(
     config: AppConfig,
     output_dir: Path,
     enable_research: bool = True,
+    preloaded_research_data: Optional[ResearchResult] = None,
     excluded_topics: Optional[str] = None,
     avoid_topics: Optional[str] = None,
     callbacks: Optional[ProgressCallback] = None
@@ -576,13 +598,17 @@ async def execute_scripting_phase(
     """
     cb = callbacks or ProgressCallback()
     research_start = time.time()
-    research_data = None
+    research_data = preloaded_research_data
     research_content = None
     perplexity_usage = None
     research_duration = 0.0
     
     # Step 1: リサーチ
-    if enable_research and queries:
+    if research_data is not None:
+        cb.log("[INFO] 既存リサーチ結果を再利用します（API呼び出しなし）")
+        research_content = research_data.content
+        perplexity_usage = research_data.usage
+    elif enable_research and queries:
         cb.log(f"\n== Phase 2-1: リサーチ ==")
         cb.log(f"モード: {mode}")
         if excluded_topics:
@@ -591,7 +617,6 @@ async def execute_scripting_phase(
         
         try:
             researcher = create_researcher(config)
-            # 除外トピックをリサーチャーに渡す（今後の拡張用）
             research_data = await researcher.research_multi(queries, mode)
             
             cb.log(f"✓ リサーチ完了")
@@ -605,9 +630,10 @@ async def execute_scripting_phase(
             _save_research_results(research_data, output_dir, cb)
             
         except Exception as e:
-            cb.log(f"⚠ リサーチエラー（スキップ）: {e}")
+            cb.log(f"❌ リサーチエラー（処理中断）: {e}")
             import traceback
             cb.log(f"[DEBUG] {traceback.format_exc()}")
+            raise
     else:
         cb.log(f"[INFO] リサーチスキップ")
     
@@ -1353,6 +1379,14 @@ def run_workflow_sync(
             if config.yaml.dev.mock_mode and overrides_obj.enable_research:
                 callbacks.log("[INFO] Mockモードのためリサーチ工程をスキップします")
 
+            max_requests_per_workflow = max(1, int(getattr(config.yaml.researcher, "max_requests_per_workflow", 6)))
+            planned_requests = len(queries) if should_enable_research else 0
+            if planned_requests > max_requests_per_workflow:
+                raise RuntimeError(
+                    f"Perplexity呼び出し予定数が上限を超えています: {planned_requests} > {max_requests_per_workflow}. "
+                    "検索クエリ数を減らすか、設定の max_requests_per_workflow を見直してください。"
+                )
+
             # 第2部モードの場合は2つの台本を生成して結合
             if second_mode:
                 primary_mode_label = getattr(overrides_obj.research_mode, "value", overrides_obj.research_mode)
@@ -1372,13 +1406,15 @@ def run_workflow_sync(
                     callbacks=callbacks
                 )
                 
-                # 第1部の要約を作成（第2部のコンテキストとして使用）
-                part1_summary = _create_script_summary(part1_result.script, max_turns=5)
+                # 第1部の全量トランスクリプトを作成（第2部への完全コンテキスト渡し）
+                part1_full_transcript = _create_script_full_transcript(part1_result.script)
                 
-                # 第2部のクエリを生成（第1部の内容を除外）
-                excluded_topics = f"前回の内容: {part1_summary}"
+                # 第2部のクエリを生成（第1部の全内容を既出事実として渡す）
+                excluded_topics = f"--- 第1部 放送済み ---\n{part1_full_transcript}\n--- 第1部 終了 ---"
                 if avoid_topics:
-                    excluded_topics += f" | 追加除外: {avoid_topics}"
+                    excluded_topics += f"\n追加除外: {avoid_topics}"
+                
+                callbacks.log(f"[INFO] 第1部の全量コンテキストを第2部へ渡しました ({len(part1_full_transcript)}文字)")
                 
                 callbacks.progress(0.25, "第2部の台本を生成中...")
                 part2_result = await execute_scripting_phase(
@@ -1387,7 +1423,14 @@ def run_workflow_sync(
                     queries=queries,
                     config=config,
                     output_dir=output_base,
-                    enable_research=should_enable_research,
+                    enable_research=False,
+                    preloaded_research_data=ResearchResult(
+                        topic=part1_result.script.title,
+                        mode=overrides_obj.research_mode or "trivia",
+                        content=part1_result.research_content or "",
+                        sources=part1_result.research_sources,
+                        usage=None,
+                    ) if part1_result.research_content else None,
                     excluded_topics=excluded_topics,
                     avoid_topics=avoid_topics,
                     callbacks=callbacks
@@ -1642,7 +1685,8 @@ def run_workflow_sync(
                     generated_files=generated_files,
                     success=True,
                     error_message=None,
-                    total_duration_sec=total_usage.total_duration_sec
+                    total_duration_sec=total_usage.total_duration_sec,
+                    perplexity_requests=total_usage.perplexity.request_count
                 )
                 
                 # CostLogEntryを作成
@@ -1730,7 +1774,8 @@ def run_workflow_sync(
                     generated_files={},
                     success=False,
                     error_message=error_msg,
-                    total_duration_sec=time.time() - workflow_start
+                    total_duration_sec=time.time() - workflow_start,
+                    perplexity_requests=total_usage.perplexity.request_count if 'total_usage' in locals() else 0
                 )
                 
                 logger = ExecutionLogger(PROJECT_ROOT / "logs")

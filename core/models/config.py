@@ -43,6 +43,9 @@ class ResearcherConfig(BaseModel):
     """リサーチャー（Perplexity）設定"""
     model: str = "sonar-pro"
     max_tokens: int = 2048
+    max_queries_per_plan: int = 3
+    max_requests_per_workflow: int = 6
+    enable_session_cache: bool = True
     modes: Dict[str, ResearchModeConfig] = Field(default_factory=dict)
 
 

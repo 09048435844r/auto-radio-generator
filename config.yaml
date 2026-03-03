@@ -25,6 +25,9 @@
 researcher:
   model: "sonar-reasoning-pro"           # Perplexityモデル（sonar-reasoning-pro推奨）
   max_tokens: 8192             # 最大トークン数（リサーチ結果の長さ）
+  max_queries_per_plan: 3      # 1回の企画で採用する検索クエリ上限
+  max_requests_per_workflow: 6 # 1ワークフロー内で許可するPerplexity呼び出し上限（ハードリミット）
+  enable_session_cache: true   # 同一セッション内で同一クエリのリサーチ結果を再利用
   
   # リサーチモード定義（5種類）
   # 各モードで異なる視点からテーマを調査します。

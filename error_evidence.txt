@@ -1,0 +1,33 @@
+[Issue]
+Perplexity API returns HTTP 401 with Cloudflare challenge HTML (openresty),
+instead of normal JSON response.
+
+[Environment]
+OS: Windows
+Python: 3.10.6
+SDK: openai python SDK
+Base URL: https://api.perplexity.ai
+Model: sonar
+
+[Reproduction window (UTC)]
+2026-03-02 12:54:00Z - 2026-03-02 13:26:00Z
+
+[Ray-like values from __CF$cv$params r]
+9d608cdf4ffff5af
+9d608ce0892df5af
+9d608ce1da2af5af
+9d6091ce6dc2aef2
+9d6096617d80af82
+9d609816fbf9db50
+
+[Observed app logs]
+[1/3] ... -> error (network_challenge)
+[2/3] ... -> error (network_challenge)
+[3/3] ... -> error (network_challenge)
+All failed with Cloudflare/WAF challenge detection.
+
+[Troubleshooting already done]
+- Purchased credits
+- Regenerated API key
+- Verified key loading from app config
+- Reproduced using minimal standalone script

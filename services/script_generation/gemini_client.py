@@ -173,10 +173,15 @@ class GeminiClient(IScriptGenerator):
         console.print(f"[cyan]Gemini で台本を生成中...[/cyan]")
         console.print(f"  テーマ: {theme}")
         console.print(f"  リサーチデータ: {'あり' if research_data else 'なし'}")
+        if excluded_topics:
+            console.print(f"[INFO] 第2部モード: 第1部コンテキストを適用 ({len(excluded_topics)}文字)")
         
         # モード別に専用プロンプトを使用（PromptManagerから取得）
-        # プロンプトテンプレートでは {main} と {sub} が使われているため、マッピングを追加
-        if research_data and research_data.mode == "weekly_digest":
+        # 第2部モード時は強化システムプロンプトを適用
+        if excluded_topics and excluded_topics.strip():
+            # 第2部モード専用の強化システムプロンプト
+            system_prompt = self._build_part2_system_prompt()
+        elif research_data and research_data.mode == "weekly_digest":
             # 時間表現を取得
             time_expr = get_time_expression("weekly_digest")
             system_prompt = self.prompt_manager.get_script_prompt(
@@ -307,6 +312,36 @@ class GeminiClient(IScriptGenerator):
         
         return response.text, usage
     
+    def _build_part2_system_prompt(self) -> str:
+        """第2部モード専用の強化システムプロンプトを構築"""
+        return """あなたはプロのラジオ台本作家です。現在、番組の第2部を制作しています。
+
+【重要】第1部で放送済みの全内容がユーザープロンプトで提供されます。これを以下のルールで徹底的に活用してください：
+
+1. 【前提知識の活用】
+   - 第1部で説明済みの内容は、既に視聴者が知っている前提知識として扱ってください
+   - 同じ説明や定義を繰り返さず、その知識を土台としてさらに深掘りしてください
+
+2. 【重複の物理的回避】
+   - 第1部で使われた具体的な例え、データ、フレーズは絶対に再利用しないでください
+   - 同じトピックを扱う場合でも、全く異なる角度、別の視点、新しい情報を提供してください
+
+3. 【一貫性の維持】
+   - 第1部で確立した定義や世界観と矛盾しない、一貫性のある言い回しを徹底してください
+   - キャラクターの口調や人格設定は第1部から継続してください
+
+4. 【連続性の演出】
+   - 可能であれば第1部の内容に軽く触れる（コールバックする）ことで、
+     一つの番組としての自然な繋がりを演出してください
+   - 「先ほどお話しした〇〇ですが、さらに深掘りすると…」のような自然な接続を心がけてください
+
+5. 【価値の追加】
+   - 第1部では触れられなかった側面、背景、応用例、将来展望などを提供してください
+   - 視聴者が「第1部で知っていたことの全く新しい側面が見えた」と感じるような内容を目指してください
+
+これらの制約を守りながら、第1部と合わせてあたかも一人の放送作家が一気に書き上げたような、
+淀みのないスムーズな番組を制作してください。"""
+
     def _build_user_prompt(self, theme: str, research_data: Optional[ResearchResult], avoid_topics: Optional[str] = None, excluded_topics: Optional[str] = None) -> str:
         """ユーザープロンプトを構築"""
         prompt = f"## テーマ\n{theme}\n\n"
@@ -330,10 +365,15 @@ class GeminiClient(IScriptGenerator):
         
         if excluded_topics and excluded_topics.strip():
             prompt += (
-                "[EXCLUDED TOPICS - 第2部モード]\n"
-                "以下のトピックは第1部ですでに扱われています。重複を避けるため、これらのトピックには触れないでください：\n"
-                f"\"{excluded_topics.strip()}\"\n\n"
-                "第2部では新しい視点や未展開の情報に焦点を当ててください。\n\n"
+                "[PART 1 CONTEXT - 第2部モード]\n"
+                "以下は第1部で放送済みの全内容です。第2部ではこれを前提知識として扱い、\n"
+                "重複説明を避け、新しい視点からの深掘りや別の側面に焦点を当ててください。\n\n"
+                f"{excluded_topics.strip()}\n\n"
+                "【重要制約】\n"
+                "- 第1部で説明済みの内容は、前提知識として簡潔に扱うか、全く異なる角度から深掘りしてください\n"
+                "- 第1部で使われた特定のフレーズや定義と矛盾しない、一貫性のある言い回しを徹底してください\n"
+                "- 可能であれば第1部の内容に軽く触れる（コールバックする）ことで、番組としての連続性を演出してください\n"
+                "- 物理的な重複（同じ説明、同じ例え、同じデータ）は絶対に避けてください\n\n"
             )
         
         if avoid_topics and avoid_topics.strip():

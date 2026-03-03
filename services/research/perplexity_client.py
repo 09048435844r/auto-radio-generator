@@ -40,6 +40,11 @@ class PerplexityResearcher(IResearcher):
         self.model = config.yaml.researcher.model
         self.max_tokens = config.yaml.researcher.max_tokens
         self.modes = config.yaml.researcher.modes
+        self.max_queries_per_plan = max(1, int(getattr(config.yaml.researcher, "max_queries_per_plan", 3)))
+        self.max_requests_per_workflow = max(1, int(getattr(config.yaml.researcher, "max_requests_per_workflow", 6)))
+        self.enable_session_cache = bool(getattr(config.yaml.researcher, "enable_session_cache", True))
+        self._session_request_count = 0
+        self._session_cache: dict[tuple[str, tuple[str, ...]], ResearchResult] = {}
         self.prompt_manager = PromptManager()
         
         # 実行ログ用: プロンプト記録リスト
@@ -67,6 +72,12 @@ class PerplexityResearcher(IResearcher):
         console.print(f"[cyan]Perplexity でリサーチ中...[/cyan]")
         console.print(f"  テーマ: {topic}")
         console.print(f"  モード: {mode}")
+
+        if self._session_request_count + 1 > self.max_requests_per_workflow:
+            raise RuntimeError(
+                f"Perplexity呼び出し上限に達しました ({self._session_request_count}/{self.max_requests_per_workflow})。"
+                " これ以上のリサーチは停止します。"
+            )
         
         # モード設定からシステムプロンプトを取得
         mode_config = self.modes.get(mode)
@@ -77,6 +88,7 @@ class PerplexityResearcher(IResearcher):
             system_prompt = self.prompt_manager.get_research_prompt(mode)
         
         try:
+            self._session_request_count += 1
             user_prompt = f"テーマ: {topic}"
             
             response = self.client.chat.completions.create(
@@ -123,8 +135,9 @@ class PerplexityResearcher(IResearcher):
             )
             
         except Exception as e:
-            console.print(f"[red]✗ Perplexity API エラー: {e}[/red]")
-            raise
+            error_type, error_message = self._classify_api_error(e)
+            console.print(f"[red]✗ Perplexity API エラー ({error_type}): {error_message}[/red]")
+            raise RuntimeError(error_message) from e
     
     async def check_api_status(self) -> bool:
         """APIの接続状態を確認する"""
@@ -139,6 +152,38 @@ class PerplexityResearcher(IResearcher):
         except Exception as e:
             console.print(f"[red]Perplexity API 接続エラー: {e}[/red]")
             return False
+
+    def _classify_api_error(self, error: Exception) -> tuple[str, str]:
+        """Perplexity APIエラーを分類し、ユーザー向け文言を返す。"""
+        error_text = str(error)
+        error_text_lower = error_text.lower()
+        status_code = getattr(error, "status_code", None)
+
+        quota_markers = ["insufficient", "quota", "credit", "billing", "payment"]
+        challenge_markers = ["cdn-cgi/challenge-platform", "openresty", "__cf$cv$params"]
+        auth_markers = ["authenticationerror", "unauthorized", "invalid api key"]
+
+        if status_code in (402, 429) or any(marker in error_text_lower for marker in quota_markers):
+            return (
+                "quota_exceeded",
+                "Perplexityのクレジット不足または利用上限超過の可能性があります。"
+                " 残高・課金設定・利用制限を確認してください。",
+            )
+
+        if any(marker in error_text_lower for marker in challenge_markers):
+            return (
+                "network_challenge",
+                "Perplexity APIへの通信でCloudflare/WAFチャレンジを検知しました。"
+                " VPN/Proxy/Firewall設定、ネットワーク経路を確認してください。",
+            )
+
+        if status_code == 401 or any(marker in error_text_lower for marker in auth_markers):
+            return (
+                "auth_failed",
+                "Perplexity API認証に失敗しました。APIキーの有効性や権限を確認してください。",
+            )
+
+        return ("unknown", f"Perplexity APIエラー: {error_text}")
     
     async def research_multi(self, queries: list[str], mode: ResearchMode) -> ResearchResult:
         """複数のクエリを並列に実行して情報を収集
@@ -150,8 +195,38 @@ class PerplexityResearcher(IResearcher):
         Returns:
             ResearchResult: 結合されたリサーチ結果
         """
+        normalized_queries = [q.strip() for q in queries if isinstance(q, str) and q.strip()]
+        if not normalized_queries:
+            raise RuntimeError("有効な検索クエリが存在しないため、リサーチを実行できません。")
+
+        if len(normalized_queries) > self.max_queries_per_plan:
+            console.print(
+                f"[yellow]⚠ 検索クエリを上限 {self.max_queries_per_plan} 件に制限します"
+                f" (入力: {len(normalized_queries)}件)[/yellow]"
+            )
+            normalized_queries = normalized_queries[:self.max_queries_per_plan]
+
+        cache_key = (str(mode), tuple(normalized_queries))
+        if self.enable_session_cache and cache_key in self._session_cache:
+            cached = self._session_cache[cache_key]
+            console.print("[cyan]Perplexityセッションキャッシュを再利用します（API呼び出しなし）[/cyan]")
+            return ResearchResult(
+                topic=cached.topic,
+                mode=cached.mode,
+                content=cached.content,
+                sources=cached.sources,
+                usage=PerplexityUsage(request_count=0),
+            )
+
+        planned_requests = len(normalized_queries)
+        if self._session_request_count + planned_requests > self.max_requests_per_workflow:
+            raise RuntimeError(
+                "Perplexity呼び出し上限を超えるためリサーチを停止しました: "
+                f"{self._session_request_count} + {planned_requests} > {self.max_requests_per_workflow}"
+            )
+
         console.print(f"[cyan]Perplexity で並列リサーチ中...[/cyan]")
-        console.print(f"  クエリ数: {len(queries)}")
+        console.print(f"  クエリ数: {len(normalized_queries)}")
         console.print(f"  モード: {mode}")
         
         # モード設定からシステムプロンプトを取得
@@ -163,8 +238,8 @@ class PerplexityResearcher(IResearcher):
             system_prompt = self.prompt_manager.get_research_prompt(mode)
         
         # 各クエリを並列に実行
-        async def fetch_single(query: str, index: int) -> tuple[int, str, list[ResearchSource]]:
-            console.print(f"  [{index+1}/{len(queries)}] {query}")
+        async def fetch_single(query: str, index: int) -> tuple[int, str, list[ResearchSource], str | None, str | None]:
+            console.print(f"  [{index+1}/{len(normalized_queries)}] {query}")
             try:
                 # クエリに詳細要求を追加
                 detailed_query = f"{query}\n\n上記について、背景・数字・事例・影響を含めて可能な限り詳細に、長文で解説してください。最低でも500文字以上の詳しい説明をお願いします。"
@@ -190,38 +265,75 @@ class PerplexityResearcher(IResearcher):
                     console.print(f"  [yellow]⚠ 引用情報なし（Perplexity APIが返さなかった可能性）[/yellow]")
                 
                 console.print(f"  ✓ [{index+1}] 完了 ({len(content)}文字)")
-                return (index, content, sources)
+                return (index, content, sources, None, None)
             except Exception as e:
-                console.print(f"  [red]✗ [{index+1}] エラー: {e}[/red]")
-                return (index, f"[エラー: {query}]", [])
+                error_type, error_message = self._classify_api_error(e)
+                console.print(f"  [red]✗ [{index+1}] エラー ({error_type}): {error_message}[/red]")
+                return (index, f"[エラー: {query}]", [], error_message, error_type)
         
         # asyncio.gatherで並列実行
-        tasks = [fetch_single(q, i) for i, q in enumerate(queries)]
+        self._session_request_count += planned_requests
+        tasks = [fetch_single(q, i) for i, q in enumerate(normalized_queries)]
         results = await asyncio.gather(*tasks)
         
         # 結果をインデックス順にソートして結合
         results.sort(key=lambda x: x[0])
         combined_content = ""
         all_sources: list[ResearchSource] = []
-        for i, (idx, content, sources) in enumerate(results):
-            combined_content += f"\n\n## 検索結果 {i+1}: {queries[idx]}\n\n{content}"
+        failures: list[tuple[int, str, str]] = []
+        for i, (idx, content, sources, error_message, error_type) in enumerate(results):
+            combined_content += f"\n\n## 検索結果 {i+1}: {normalized_queries[idx]}\n\n{content}"
             all_sources.extend(sources)
+            if error_message:
+                failures.append((idx, error_message, error_type or "unknown"))
+
+        if failures:
+            console.print(f"[yellow]⚠ 並列リサーチ失敗: {len(failures)}/{len(results)}件[/yellow]")
+
+        if len(failures) == len(results):
+            if any(error_type == "quota_exceeded" for _, _, error_type in failures):
+                raise RuntimeError(
+                    "Perplexityリサーチが全件失敗しました。クレジット不足または利用上限超過の可能性があります。"
+                    " 残高・課金設定・利用制限を確認してください。"
+                )
+            if any(error_type == "network_challenge" for _, _, error_type in failures):
+                raise RuntimeError(
+                    "Perplexityリサーチが全件失敗しました。Cloudflare/WAFチャレンジを検知しました。"
+                    " VPN/Proxy/Firewall設定、ネットワーク経路を確認してください。"
+                )
+            if any(error_type == "auth_failed" for _, _, error_type in failures):
+                raise RuntimeError(
+                    "Perplexityリサーチが全件失敗しました。APIキー認証に失敗しています。"
+                    " APIキーの有効性・権限を確認してください。"
+                )
+            raise RuntimeError("Perplexity並列リサーチが全クエリで失敗しました。ログを確認してください。")
         
         console.print(f"[green]✓ 並列リサーチ完了[/green] (合計{len(combined_content)}文字)")
         
         # 使用量を記録
-        usage = PerplexityUsage(request_count=len(queries))
+        usage = PerplexityUsage(request_count=len(normalized_queries))
         
         # タイトルが未設定のソースについて、実際のページタイトルを取得
         enhanced_sources = await self._enhance_sources_with_titles(all_sources)
         
-        return ResearchResult(
-            topic=", ".join(queries),
+        result = ResearchResult(
+            topic=", ".join(normalized_queries),
             mode=mode,
             content=combined_content,
             sources=self._dedupe_sources(enhanced_sources) or None,
             usage=usage
         )
+
+        if self.enable_session_cache:
+            self._session_cache[cache_key] = ResearchResult(
+                topic=result.topic,
+                mode=result.mode,
+                content=result.content,
+                sources=result.sources,
+                usage=None,
+            )
+
+        return result
     
     async def _enhance_sources_with_titles(self, sources: list[ResearchSource]) -> list[ResearchSource]:
         """URLから実際のページタイトルを取得してResearchSourceを更新する（並列処理）。"""
