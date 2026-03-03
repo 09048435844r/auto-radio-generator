@@ -1,4 +1,4 @@
-# 🎙️ 自動ラジオ動画生成システム v3.3.0
+# 🎙️ 自動ラジオ動画生成システム v3.3.1
 
 Perplexity + Gemini + VOICEVOX + FFmpeg を連携し、
 リサーチから台本生成、音声合成、動画レンダリング、YouTube投稿用メタデータ作成までを一気通貫で自動化するプロジェクトです。
@@ -41,6 +41,20 @@ Perplexity + Gemini + VOICEVOX + FFmpeg を連携し、
   - API課金なしでワークフロー全体をテスト可能なMockモード
   - Settingsタブの **Developer Options >「🧪 モックで動画を作成」** から実行可能
   - Mock実行時はテーマ未入力でも動作（内部でダミーテーマを補完）
+
+### v3.3.1 安全強化（Perplexity 呼び出し制御）
+- 🛡️ **Perplexity 呼び出しハードリミット**: 1ワークフローあたりのAPI呼び出し数を制限
+  - `max_requests_per_workflow` で上限設定（デフォルト: 6件）
+  - 上限超過時は即時停止し、コスト暴走を防止
+- 🔄 **同一セッションキャッシュ**: 同一クエリのリサーチ結果をメモリ内で再利用
+  - `enable_session_cache` で有効化（デフォルト: true）
+  - API呼び出し回数を削減し、応答速度を向上
+- 📏 **クエリ数上限**: 企画フェーズで生成される検索クエリ数を制限
+  - `max_queries_per_plan` で上限設定（デフォルト: 3件）
+  - 超過クエリは自動的にトリムされ、予期せぬ呼び出しを防止
+- 📊 **実行ログ拡張**: `execution_record_*.jsonl` に Perplexity 実リクエスト数を記録
+  - 失敗時含む全実行で正確な呼び出し回数を記録
+  - コスト管理と監査の精度を向上
 
 ### v3.3.x 運用強化（Topic Overlay / Mock Operation）
 - 🏷️ **Topic Overlay**: チャプター開始行（`section` + `chapter_title`）をもとに、動画上部へ話題ラベルをオーバーレイ表示
@@ -265,8 +279,11 @@ chmod +x .git/hooks/pre-commit
 | 設定項目 | 説明 |
 |---------|------|
 | `researcher.model` | リサーチ用モデル (デフォルト: sonar-reasoning-pro) |
+| `researcher.max_queries_per_plan` | 1回の企画で採用する検索クエリ上限 (デフォルト: 3) |
+| `researcher.max_requests_per_workflow` | 1ワークフロー内で許可するPerplexity呼び出し上限 (デフォルト: 6) |
+| `researcher.enable_session_cache` | 同一セッション内で同一クエリのリサーチ結果を再利用 (デフォルト: true) |
 | `researcher.modes` | リサーチモード定義 (debate/voices/trivia/weekly_digest/lecture) |
-| `script_generator.gemini.model` | 台本生成用モデル |
+| `script_generator.gemini.model` | 台本生成用モデル (デフォルト: gemini-3.1-pro-preview) |
 | `script_generator.structure` | 台本構成比率 (本題/メール/エンディング) |
 | `audio_synthesizer.speakers.main` | メインパーソナリティのVOICEVOX話者ID |
 | `audio_synthesizer.speakers.sub` | サブパーソナリティのVOICEVOX話者ID |
