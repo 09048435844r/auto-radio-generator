@@ -28,6 +28,9 @@ from workflow import UIOverrides, run_workflow_sync, WorkflowResult, scan_assets
 from core.models import Script
 from core.interfaces import ResearchResult
 from core.settings_manager import SettingsManager
+from services.research import PerplexityResearcher
+from services.script_generation import GeminiClient
+from google.genai import types
 import json
 import os
 import socket
@@ -36,6 +39,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
 from urllib.parse import urlparse
+import asyncio
 
 
 # デフォルトジングル設定
@@ -66,6 +70,74 @@ def resolve_jingle_path(jingle_choice: str, custom_path: str = "") -> Optional[s
 def toggle_jingle_path_visibility(jingle_choice: str) -> str:
     """ジングルパス入力の表示/非表示を切り替え"""
     return gr.update(visible=(jingle_choice == "カスタムファイル"))
+
+
+async def check_api_health() -> tuple[str, str]:
+    """Check API health for Gemini and Perplexity with actual models from config"""
+    config = load_config()
+    
+    gemini_status = "🟡チェック中..."
+    perplexity_status = "🟡チェック中..."
+    
+    try:
+        # Gemini health check
+        gemini_client = GeminiClient(config)
+        try:
+            # Use minimal request with timeout
+            response = gemini_client.client.models.generate_content(
+                model=gemini_client.model_name,
+                contents="ping",
+                config=types.GenerateContentConfig(
+                    max_output_tokens=1,
+                    temperature=0.1
+                )
+            )
+            gemini_status = f"🟢OK ({gemini_client.model_name})"
+        except Exception as e:
+            error_str = str(e)
+            if "401" in error_str:
+                gemini_status = f"🔴Error (401認証)"
+            elif "429" in error_str:
+                gemini_status = f"🔴Error (429制限)"
+            else:
+                gemini_status = f"🔴Error ({gemini_client.model_name})"
+    except Exception as e:
+        gemini_status = "🔴Error (初期化失敗)"
+    
+    try:
+        # Perplexity health check
+        perplexity_client = PerplexityResearcher(config)
+        try:
+            # Use minimal request with timeout
+            response = perplexity_client.client.chat.completions.create(
+                model=perplexity_client.model,
+                messages=[{"role": "user", "content": "ping"}],
+                max_tokens=1,
+                timeout=5
+            )
+            perplexity_status = f"🟢OK ({perplexity_client.model})"
+        except Exception as e:
+            error_str = str(e)
+            if "401" in error_str:
+                perplexity_status = f"🔴Error (401認証)"
+            elif "429" in error_str:
+                perplexity_status = f"🔴Error (429制限)"
+            else:
+                perplexity_status = f"🔴Error ({perplexity_client.model})"
+    except Exception as e:
+        perplexity_status = "🔴Error (初期化失敗)"
+    
+    return gemini_status, perplexity_status
+
+
+def run_api_health_check():
+    """Wrapper for async health check to run in event loop"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(check_api_health())
+    finally:
+        loop.close()
 
 
 # ログメッセージを蓄積するためのグローバル変数
@@ -1867,7 +1939,25 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
                         )
 
                 with gr.Group(elem_classes="group-container"):
-                    gr.Markdown("### 🚀 生成アクション")
+                    gr.Markdown("### � APIヘルスチェック")
+                    
+                    with gr.Row():
+                        gemini_status = gr.Markdown("Gemini: 🟡待機中")
+                        perplexity_status = gr.Markdown("Perplexity: 🟡待機中")
+                    
+                    check_api_btn = gr.Button("🔍 Check API Status", size="sm", variant="secondary")
+                    
+                    gr.Markdown(
+                        """
+                        **使い方:**
+                        - 生成前にAPI接続状態を確認できます
+                        - 🟢OK: 正常接続 / 🔴Error: 接続不可
+                        - エラー時はAPIキーやネットワークを確認してください
+                        """
+                    )
+
+                with gr.Group(elem_classes="group-container"):
+                    gr.Markdown("### � 生成アクション")
                     with gr.Row():
                         generate_btn = gr.Button(
                             "🚀 動画を生成する",
@@ -1928,6 +2018,9 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
         "fade_time_slider": fade_time_slider,
         "speed_slider": speed_slider,
         "spectrum_checkbox": spectrum_checkbox,
+        "gemini_status": gemini_status,
+        "perplexity_status": perplexity_status,
+        "check_api_btn": check_api_btn,
         "generate_btn": generate_btn,
         "script_only_btn": script_only_btn,
         "video_output": video_output,
@@ -2333,6 +2426,59 @@ def create_ui() -> gr.Blocks:
                 generator_components["youtube_url_output"],
             ],
             show_progress="full",
+        )
+        
+        # APIヘルスチェック
+        def update_api_status():
+            """Update API status display"""
+            try:
+                gemini_status, perplexity_status = run_api_health_check()
+                return (
+                    f"Gemini: {gemini_status}",
+                    f"Perplexity: {perplexity_status}"
+                )
+            except Exception as e:
+                return (
+                    f"Gemini: 🔴Error (チェック失敗)",
+                    f"Perplexity: 🔴Error (チェック失敗)"
+                )
+        
+        def check_generate_button_state(gemini_status_text, perplexity_status_text):
+            """Check if both APIs are OK and enable/disable generate button accordingly"""
+            gemini_ok = "🟢OK" in gemini_status_text
+            perplexity_ok = "🟢OK" in perplexity_status_text
+            
+            if gemini_ok and perplexity_ok:
+                return gr.update(interactive=True, variant="primary")
+            else:
+                return gr.update(interactive=False, variant="secondary")
+        
+        generator_components["check_api_btn"].click(
+            fn=update_api_status,
+            inputs=[],
+            outputs=[
+                generator_components["gemini_status"],
+                generator_components["perplexity_status"]
+            ]
+        )
+        
+        # Auto-update generate button state when status changes
+        generator_components["gemini_status"].change(
+            fn=check_generate_button_state,
+            inputs=[
+                generator_components["gemini_status"],
+                generator_components["perplexity_status"]
+            ],
+            outputs=[generator_components["generate_btn"]]
+        )
+        
+        generator_components["perplexity_status"].change(
+            fn=check_generate_button_state,
+            inputs=[
+                generator_components["gemini_status"],
+                generator_components["perplexity_status"]
+            ],
+            outputs=[generator_components["generate_btn"]]
         )
         
         # 台本のみ作成（AIプロデューサーモード）

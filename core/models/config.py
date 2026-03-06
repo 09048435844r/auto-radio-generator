@@ -73,7 +73,7 @@ class ScriptGeneratorConfig(BaseModel):
 class SpeakersConfig(BaseModel):
     """話者ID設定"""
     main: int = 3  # ずんだもん
-    sub: int = 1   # 四国めたん
+    sub: int = 2   # 四国めたん
 
 
 class AudioSynthesizerConfig(BaseModel):
@@ -227,10 +227,17 @@ def load_config(
     # YAML設定を読み込み
     yaml_path = project_root / config_file
     if yaml_path.exists():
-        with open(yaml_path, "r", encoding="utf-8") as f:
-            yaml_data = yaml.safe_load(f)
-        yaml_config = YamlConfig.model_validate(yaml_data)
+        try:
+            with open(yaml_path, "r", encoding="utf-8") as f:
+                yaml_data = yaml.safe_load(f)
+            yaml_config = YamlConfig.model_validate(yaml_data)
+        except Exception as e:
+            print(f"WARNING: YAML設定読み込み失敗: {e}")
+            print(f"デフォルト設定を使用します")
+            yaml_config = YamlConfig()
     else:
+        print(f"WARNING: YAML設定ファイルが見つかりません: {yaml_path}")
+        print(f"デフォルト設定を使用します")
         yaml_config = YamlConfig()
     
     return AppConfig(
