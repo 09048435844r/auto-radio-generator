@@ -262,9 +262,14 @@ class GeminiClient(IScriptGenerator):
         Returns:
             tuple[str, GeminiUsage]: (レスポンステキスト, 使用量)
         """
+        import time
+        import re
+        
+        # 第2部モード（excluded_topicsがある場合）はtemperatureを下げる
+        is_part2 = bool(re.search(r'第1部.*放送済み', user_prompt))
         config_params = {
             "max_output_tokens": self.max_tokens,
-            "temperature": 0.85,
+            "temperature": 0.7 if is_part2 else 0.85,
             "response_mime_type": "application/json",  # JSONモード有効化
         }
         
@@ -272,16 +277,30 @@ class GeminiClient(IScriptGenerator):
         if use_schema:
             config_params["response_schema"] = Script
         
-        response = self.client.models.generate_content(
-            model=self.model_name,
-            contents=[
-                types.Content(
-                    role="user",
-                    parts=[types.Part(text=f"{system_prompt}\n\n{user_prompt}")]
+        # リトライ処理
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                response = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=[
+                        types.Content(
+                            role="user",
+                            parts=[types.Part(text=f"{system_prompt}\n\n{user_prompt}")]
+                        )
+                    ],
+                    config=types.GenerateContentConfig(**config_params)
                 )
-            ],
-            config=types.GenerateContentConfig(**config_params)
-        )
+                break  # 成功したらループを抜ける
+            except Exception as e:
+                error_msg = str(e).lower()
+                if ("disconnected" in error_msg or "timeout" in error_msg or "connection" in error_msg) and attempt < max_retries - 1:
+                    wait_time = 2 ** attempt  # 指数バックオフ: 1秒, 2秒
+                    console.print(f"[yellow]接続エラー ({attempt + 1}/{max_retries})。{wait_time}秒後にリトライします...[/yellow]")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    raise  # リトライ上限または回復不可能なエラー
         
         # 使用量を取得
         usage = GeminiUsage(

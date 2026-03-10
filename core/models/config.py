@@ -52,8 +52,8 @@ class ResearcherConfig(BaseModel):
 # 台本生成設定
 class GeminiConfig(BaseModel):
     """Gemini API設定"""
-    model: str = "gemini-2.0-flash"
-    fallback_model: str = "gemini-1.5-flash"
+    model: str = "gemini-3.1-pro-preview"
+    fallback_model: str = "gemini-2.5-pro"
     max_tokens: int = 8192
 
 

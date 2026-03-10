@@ -1,4 +1,4 @@
-# 🎙️ 自動ラジオ動画生成システム v3.3.1
+# 🎙️ 自動ラジオ動画生成システム v3.3.2
 
 Perplexity + Gemini + VOICEVOX + FFmpeg を連携し、
 リサーチから台本生成、音声合成、動画レンダリング、YouTube投稿用メタデータ作成までを一気通貫で自動化するプロジェクトです。
@@ -41,6 +41,23 @@ Perplexity + Gemini + VOICEVOX + FFmpeg を連携し、
   - API課金なしでワークフロー全体をテスト可能なMockモード
   - Settingsタブの **Developer Options >「🧪 モックで動画を作成」** から実行可能
   - Mock実行時はテーマ未入力でも動作（内部でダミーテーマを補完）
+
+### v3.3.2 安定化向上（第2部モード・API接続）
+- 🎭 **第2部モード**: 1つのテーマで2部構成のラジオ番組を生成可能
+  - 第1部の内容を踏まえた第2部の深掘り（重複回避）
+  - ジングル音声による場面転換
+- 🔧 **APIヘルスチェック**: 生成前にGemini/Perplexity接続状態を確認
+  - UI上で手動実行可能な接続テスト機能
+  - エラー時に詳細な原因表示（認証・制限・接続）
+- 🔄 **話者逆転自動補正**: 第2部での声割当ミスを自動検出・修正
+  - 口調パターン（「なのだ」「わよ/かしら」）で逆転を検出
+  - 自動でA/B話者を入れ替え、音声合成前に修正
+- 🌐 **リトライ処理**: API接続エラー時に自動再試行（最大2回）
+  - 接続断・タイムアウト・サーバーエラーを対象
+  - 指数バックオフで1秒→2秒と待機時間を延長
+- 🌡️ **温度制御**: 第2部モードでtemperatureを0.7に下げ、JSON安定性向上
+  - 第2部の巨大入力によるJSONパースエラーを防止
+  - 通常時は0.85を維持し創造性を確保
 
 ### v3.3.1 安全強化（Perplexity 呼び出し制御）
 - 🛡️ **Perplexity 呼び出しハードリミット**: 1ワークフローあたりのAPI呼び出し数を制限
@@ -284,6 +301,7 @@ chmod +x .git/hooks/pre-commit
 | `researcher.enable_session_cache` | 同一セッション内で同一クエリのリサーチ結果を再利用 (デフォルト: true) |
 | `researcher.modes` | リサーチモード定義 (debate/voices/trivia/weekly_digest/lecture) |
 | `script_generator.gemini.model` | 台本生成用モデル (デフォルト: gemini-3.1-pro-preview) |
+| `script_generator.gemini.fallback_model` | フォールバックモデル (デフォルト: gemini-2.5-pro) |
 | `script_generator.structure` | 台本構成比率 (本題/メール/エンディング) |
 | `audio_synthesizer.speakers.main` | メインパーソナリティのVOICEVOX話者ID |
 | `audio_synthesizer.speakers.sub` | サブパーソナリティのVOICEVOX話者ID |
@@ -343,6 +361,22 @@ output/
         ├── subtitles.ass        # Step B: 字幕ファイル
         └── video.mp4            # Step C: 完成動画
 ```
+
+## 🚀 新機能・改善
+
+### v3.3.2 以降の主要更新
+- **第2部モード対応**: 1つのテーマで2部構成のラジオ番組を生成可能
+  - 第1部の内容を踏まえた第2部の深掘り（重複回避）
+  - ジングル音声による場面転換
+- **APIヘルスチェック**: 生成前にGemini/Perplexity接続状態を確認
+- **話者逆転自動補正**: 第2部での声割当ミスを自動検出・修正
+- **リトライ処理**: API接続エラー時に自動再試行（最大2回）
+- **温度制御**: 第2部モードでtemperatureを0.7に下げ、JSON安定性向上
+
+### 第2部モードの使い方
+1. Generatorタブで「第2部のリサーチモード」を選択
+2. 「場面転換ジングル」を選択またはカスタム音声を指定
+3. 通常通りテーマを入力して生成
 
 ## 🏗️ アーキテクチャ
 

@@ -31,7 +31,7 @@ class ExecutionLogEntry(BaseModel):
     """1回の動画生成プロセス全体の実行記録"""
     # Identity
     execution_id: str = Field(default_factory=lambda: str(uuid4()))
-    app_version: str = Field(..., description="システムバージョン (e.g., v3.3.0)")
+    app_version: str = Field(..., description="システムバージョン (e.g., v3.3.2)")
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
     output_directory: str = Field(..., description="e.g., output/20260220_190000")
     

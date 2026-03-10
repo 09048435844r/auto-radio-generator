@@ -2,10 +2,12 @@
 
 ブラウザ上でパラメータ調整と動画生成実行ができるWeb UIアプリケーション
 
-v3.3.0 機能:
+v3.3.2 機能:
 - タブ式UI: 自動生成とマニュアル制作を分離
 - マニュアル制作ワークフロー: Step A(台本) → Step B(音声) → Step C(動画)
 - 設定の永続化: ユーザー設定を自動保存・復元
+- APIヘルスチェック: 生成前に接続状態を確認
+- 第2部モード: 1つのテーマで2部構成のラジオ番組を生成
 - 処理ログ出力: 各実行の詳細ログをファイルに保存
 
 コア機能:
@@ -769,7 +771,7 @@ def generate_video(
     
     # ログをクリア
     clear_logs()
-    append_log("自動ラジオ動画生成システム v3.3.0")
+    append_log("自動ラジオ動画生成システム v3.3.2")
     append_log("=" * 40)
     
     if second_mode != "なし":
@@ -1346,7 +1348,7 @@ def generate_script_from_research(
     try:
         # ログをクリア
         clear_logs()
-        append_log("台本生成ツール v3.3.0")
+        append_log("台本生成ツール v3.3.2")
         append_log("=" * 40)
         append_log("リサーチ結果から台本を生成します...")
         
@@ -2182,12 +2184,12 @@ def create_ui() -> gr.Blocks:
     # アセット一覧を取得
     assets = get_asset_choices()
     
-    with gr.Blocks(title="自動ラジオ動画生成システム v3.3.0") as app:
+    with gr.Blocks(title="自動ラジオ動画生成システム v3.3.2") as app:
         
         # ヘッダー
         gr.Markdown(
             """
-            # 🎙️ 自動ラジオ動画生成システム v3.3.0
+            # 🎙️ 自動ラジオ動画生成システム v3.3.2
             
             **Perplexity** でテーマをリサーチし、**Gemini** が台本を作成。
             **VOICEVOX** で音声合成、**FFmpeg** で動画を生成します。
@@ -2225,7 +2227,7 @@ def create_ui() -> gr.Blocks:
         gr.Markdown(
             """
             ---
-            *自動ラジオ動画生成システム v3.3.0 | Powered by Perplexity, Gemini, VOICEVOX, FFmpeg*
+            *自動ラジオ動画生成システム v3.3.2 | Powered by Perplexity, Gemini, VOICEVOX, FFmpeg*
             """
         )
         

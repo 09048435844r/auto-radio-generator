@@ -37,7 +37,7 @@ from core.models.research import ResearchSource
 from services.execution_logger import ExecutionLogger
 
 # アプリケーションバージョン
-APP_VERSION = "v3.3.0"
+APP_VERSION = "v3.3.2"
 
 
 ReferenceEntry = str | ResearchSource
@@ -397,7 +397,7 @@ def _capture_config_snapshot(config: AppConfig, overrides: UIOverrides) -> Confi
     )
 
 
-def _build_speaker_diagnostics(script: Script) -> tuple[list[str], bool]:
+def _build_speaker_diagnostics(script: Script, label: str = "") -> tuple[list[str], bool]:
     """話者分布と口調ヒントの診断ログを作成する。"""
     dialogues = script.get_dialogue_only()
     count_a = sum(1 for line in dialogues if line.speaker == "A")
@@ -412,8 +412,9 @@ def _build_speaker_diagnostics(script: Script) -> tuple[list[str], bool]:
         1 for line in dialogues if line.speaker == "B" and ("わよ" in line.text or "かしら" in line.text)
     )
 
+    prefix = f"[{label}] " if label else ""
     diagnostics = [
-        "[DEBUG] 話者分布診断:",
+        f"[DEBUG] {prefix}話者分布診断:",
         f"  - A行数: {count_a}, B行数: {count_b}",
         f"  - 「なのだ」検出: A={a_nanoda}, B={b_nanoda}",
         f"  - 「わよ/かしら」検出: A={a_wayo}, B={b_wayo}",
@@ -421,6 +422,28 @@ def _build_speaker_diagnostics(script: Script) -> tuple[list[str], bool]:
 
     suspected_swap = (b_nanoda > a_nanoda) and (a_wayo > b_wayo)
     return diagnostics, suspected_swap
+
+
+def _swap_script_speakers(script: Script) -> Script:
+    """A/B話者を全行で入れ替えた新しいScriptを返す。"""
+    swapped_sections = []
+    for turn in script.sections:
+        turn_data = turn.model_dump()
+        if turn_data.get("speaker") == "A":
+            turn_data["speaker"] = "B"
+        elif turn_data.get("speaker") == "B":
+            turn_data["speaker"] = "A"
+        swapped_sections.append(DialogueTurn.model_validate(turn_data))
+
+    return Script.model_validate({
+        "title": script.title,
+        "theme": script.theme,
+        "sections": swapped_sections,
+        "thumbnail_title": script.thumbnail_title,
+        "description": script.description,
+        "hashtags": script.hashtags,
+        "references": script.references,
+    })
 
 
 @dataclass
@@ -648,11 +671,16 @@ async def execute_scripting_phase(
     script_generator = create_script_generator(config)
     script = script_generator.generate(theme, research_data, avoid_topics=avoid_topics, excluded_topics=excluded_topics)
 
-    diagnostics, suspected_swap = _build_speaker_diagnostics(script)
+    phase_label = "Part 2" if excluded_topics and excluded_topics.strip() else "Part 1/Single"
+    diagnostics, suspected_swap = _build_speaker_diagnostics(script, label=phase_label)
     for msg in diagnostics:
         cb.log(msg)
     if suspected_swap:
-        cb.log("[yellow][WARN] 口調ヒント上、A/B話者の役割逆転の疑いがあります[/yellow]")
+        cb.log("[yellow][WARN] 口調ヒント上、A/B話者の役割逆転を検出。自動補正を適用します[/yellow]")
+        script = _swap_script_speakers(script)
+        fixed_diagnostics, _ = _build_speaker_diagnostics(script, label=f"{phase_label} (fixed)")
+        for msg in fixed_diagnostics:
+            cb.log(msg)
     
     gemini_usage = script_generator.last_usage
     script_duration = time.time() - script_start
