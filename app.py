@@ -26,12 +26,13 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import gradio as gr
-from workflow import UIOverrides, run_workflow_sync, WorkflowResult, scan_assets, create_script_generator, load_config
+from workflow import UIOverrides, run_workflow_sync, WorkflowResult, scan_assets, create_script_generator, load_config, ThumbnailRegenerationState
 from core.models import Script
 from core.interfaces import ResearchResult
 from core.settings_manager import SettingsManager
 from services.research import PerplexityResearcher
 from services.script_generation import GeminiClient
+from services.media_processing import ThumbnailGenerator
 from google.genai import types
 import json
 import os
@@ -734,8 +735,8 @@ def generate_video(
     jingle_choice: str = "なし",
     jingle_custom_path: str = "",
     progress=gr.Progress()
-) -> tuple[str | None, str, str, str, str, str]:
-    """動画生成を実行
+) -> tuple[str | None, str, str, str, str, str, Optional[ThumbnailRegenerationState]]:
+    """動画生成を実行し、サムネイル再作成用Stateも返す
     
     Args:
         theme: 動画のテーマ
@@ -756,7 +757,7 @@ def generate_video(
         progress: Gradio進捗バー
     
     Returns:
-        (動画パス, ログ出力, コストレポート, タイトル, 概要欄, YouTube状態)
+        (動画パス, ログ出力, コストレポート, タイトル, 概要欄, YouTube状態, ThumbnailRegenerationState)
     """
     # 入力検証
     if (not theme or not theme.strip()) and not use_mock:
@@ -821,7 +822,7 @@ def generate_video(
         jingle_path=jingle_path,
     )
     
-    # 成功時に設定を保存
+    # 成功時に設定を保存とState作成
     if result.success:
         _settings_manager.update_from_ui(
             research_mode=research_mode,
@@ -832,6 +833,34 @@ def generate_video(
             speed_scale=speed_scale,
             enable_spectrum=enable_spectrum
         )
+        
+        # サムネイル再作成用Stateを作成
+        if result.output_dir and result.script:
+            # 台本要約を生成
+            script_summary = ""
+            if result.script.dialogue:
+                dialogues = result.script.get_dialogue_only()
+                dialogue_texts = [d.text for d in dialogues[:10]]
+                script_summary = " ".join(dialogue_texts)[:200] + "..." if len(" ".join(dialogue_texts)) > 200 else " ".join(dialogue_texts)
+            
+            # 背景画像パスを解決
+            config = load_config()
+            bg_path = config.yaml.paths.background_image
+            if background_image and background_image != "default.png":
+                bg_path = f"assets/backgrounds/{background_image}"
+            
+            thumbnail_state = ThumbnailRegenerationState(
+                theme=theme,
+                script_summary=script_summary,
+                output_dir=str(result.output_dir),
+                background_path=bg_path,
+                base_title=result.formatted_title or theme,
+                generation_count=0
+            )
+        else:
+            thumbnail_state = None
+    else:
+        thumbnail_state = None
     
     # 結果を返す
     if result.success and result.video_path:
@@ -859,12 +888,13 @@ def generate_video(
             formatted_title,
             formatted_description,
             youtube_status,
+            thumbnail_state,
         )
     else:
-        error_msg = result.error_message or "不明なエラーが発生しました"
-        append_log("")
-        append_log(f"❌ 生成失敗: {error_msg}")
-        return None, get_logs(), "", "", "", "YouTube: 未実行"
+        error_msg = result.error_message if result.error_message else "動画生成に失敗しました"
+        append_log(f"\n❌ {error_msg}")
+        return None, get_logs(), "", "", "", "YouTube: 未実行", None
+
 
 def generate_video_mock(
     theme: str,
@@ -881,12 +911,12 @@ def generate_video_mock(
     second_mode: str = "なし",
     jingle_choice: str = "なし",
     jingle_custom_path: str = "",
-    progress=gr.Progress(),
+    progress=gr.Progress()
 ) -> tuple[str | None, str, str, str, str, str]:
     return generate_video(
         theme=theme,
         research_mode=research_mode,
-        background_image=background_image,
+        selected_bg_filename=background_image,
         bgm_file=bgm_file,
         bgm_volume=bgm_volume,
         fade_time=fade_time,
@@ -1799,6 +1829,105 @@ def create_settings_tab(
     }
 
 
+def regenerate_thumbnail_from_state(
+    state: Optional[ThumbnailRegenerationState]
+) -> tuple[Optional[str], Optional[str], Optional[str], Optional[ThumbnailRegenerationState], str]:
+    """Stateからサムネイルを再作成
+    
+    Args:
+        state: サムネイル再作成状態
+        
+    Returns:
+        tuple: (thumbnail_path, video_title, thumbnail_title, updated_state, log_message)
+    """
+    # 1. Stateのバリデーション
+    if state is None:
+        error_log = "⚠️ 動画生成が完了していません。先にメインの動画生成を実行してください。"
+        return None, None, None, None, error_log
+    
+    # 必須プロパティのチェック
+    required_fields = ['theme', 'output_dir', 'background_path', 'base_title']
+    missing_fields = [field for field in required_fields if not getattr(state, field, None)]
+    if missing_fields:
+        error_log = f"⚠️ 必要な情報が不足しています: {', '.join(missing_fields)}。動画生成からやり直してください。"
+        return None, None, None, None, error_log
+    
+    try:
+        # ログ開始
+        log_messages = ["🔄 サムネイル再作成を開始します..."]
+        log_messages.append(f"テーマ: {state.theme}")
+        log_messages.append(f"出力先: {state.output_dir}")
+        log_messages.append(f"背景画像: {state.background_path}")
+        
+        # 台本要約を生成（既存の台本から）
+        script_summary = ""
+        if state.script_summary:
+            script_summary = state.script_summary[:200] + "..." if len(state.script_summary) > 200 else state.script_summary
+        log_messages.append(f"台本要約: {script_summary[:50]}...")
+        
+        # 背景画像パスを解決
+        from core.models.config import load_config
+        config = load_config()
+        if state.background_path.startswith("assets/"):
+            background_path = PROJECT_ROOT / state.background_path
+        else:
+            background_path = Path(state.background_path)
+        
+        # 背景画像の存在確認
+        if not background_path.exists():
+            error_log = f"❌ 背景画像が見つかりません: {background_path}"
+            log_messages.append(error_log)
+            return None, None, None, None, "\n".join(log_messages)
+        
+        log_messages.append(f"✓ 背景画像確認: {background_path}")
+        
+        # 出力ディレクトリの存在確認
+        output_dir = Path(state.output_dir)
+        if not output_dir.exists():
+            error_log = f"❌ 出力ディレクトリが見つかりません: {output_dir}"
+            log_messages.append(error_log)
+            return None, None, None, None, "\n".join(log_messages)
+        
+        log_messages.append(f"✓ 出力ディレクトリ確認: {output_dir}")
+        
+        # ThumbnailGeneratorで再作成
+        log_messages.append("🖼️ サムネイル画像を生成中...")
+        thumbnail_generator = ThumbnailGenerator()
+        thumbnail_path, video_title, thumbnail_title = thumbnail_generator.regenerate_with_new_title(
+            theme=state.theme,
+            script_summary=script_summary,
+            output_dir=state.output_dir,
+            background_path=str(background_path),
+            base_title=state.base_title,
+            generation_count=state.generation_count
+        )
+        
+        # Stateを更新
+        updated_state = ThumbnailRegenerationState(
+            theme=state.theme,
+            script_summary=state.script_summary,
+            output_dir=state.output_dir,
+            background_path=state.background_path,
+            base_title=state.base_title,
+            generation_count=state.generation_count + 1
+        )
+        
+        # 成功ログ
+        log_messages.append("✅ サムネイル再作成が完了しました！")
+        log_messages.append(f"生成画像: {thumbnail_path}")
+        log_messages.append(f"動画タイトル: {video_title}")
+        log_messages.append(f"サムネイル文字: {thumbnail_title}")
+        
+        return thumbnail_path, video_title, thumbnail_title, updated_state, "\n".join(log_messages)
+        
+    except Exception as e:
+        # エラーハンドリングと詳細ログ
+        import traceback
+        error_detail = traceback.format_exc()
+        error_log = f"❌ サムネイル再作成中にエラーが発生しました:\n{str(e)}\n\n詳細:\n{error_detail}"
+        return None, None, None, state, error_log
+
+
 def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
     """Create Generator tab UI and return component references."""
     with gr.Accordion("🚀 全自動モード", open=True):
@@ -1999,6 +2128,31 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
                     lines=15,
                     interactive=True,
                 )
+                
+                # サムネイル再作成機能
+                gr.Markdown("---")
+                gr.Markdown("### 🔄 サムネイルのみ再作成")
+                
+                with gr.Accordion("🔄 サムネイル＆タイトル再作成", open=False):
+                    gr.Markdown(
+                        """
+                        **動画生成後にサムネイルのみを再作成** - A/Bテスト対応
+                        
+                        🔹 **押すたびに新しいタイトル**: Geminiが創造的な切り口を提案
+                        🔹 **高速生成**: 軽量プロンプトで素早く処理
+                        🔹 **バージョン管理**: タイムスタンプ付きで複数保存
+                        """
+                    )
+                    
+                    regenerate_thumbnail_btn = gr.Button("🔄 サムネイルを再作成", variant="secondary", size="lg")
+                    
+                    with gr.Row():
+                        with gr.Column():
+                            thumbnail_preview = gr.Image(label="新しいサムネイル", interactive=False)
+                        with gr.Column():
+                            regenerated_title = gr.Textbox(label="生成されたタイトル", interactive=False, lines=2)
+                            regenerated_thumbnail_title = gr.Textbox(label="サムネイル文字", interactive=False)
+                            regenerate_status = gr.Textbox(label="処理ログ", lines=5, interactive=False)
 
     step_components = create_step_mode_ui(assets)
 
@@ -2031,6 +2185,11 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
         "cost_output": cost_output,
         "title_output": title_output,
         "description_output": description_output,
+        "regenerate_thumbnail_btn": regenerate_thumbnail_btn,
+        "thumbnail_preview": thumbnail_preview,
+        "regenerated_title": regenerated_title,
+        "regenerated_thumbnail_title": regenerated_thumbnail_title,
+        "regenerate_status": regenerate_status,
         "step_components": step_components,
     }
 
@@ -2203,6 +2362,9 @@ def create_ui() -> gr.Blocks:
 
         # タブ切り替え
         with gr.Tabs():
+            # サムネイル再作成用State
+            thumbnail_state = gr.State(value=None)
+            
             with gr.TabItem("🎬 Generator", id="generator"):
                 generator_components = create_generator_tab(saved_settings=saved_settings, assets=assets)
 
@@ -2396,8 +2558,22 @@ def create_ui() -> gr.Blocks:
                 generator_components["title_output"],
                 generator_components["description_output"],
                 generator_components["youtube_url_output"],
+                thumbnail_state,  # Stateを更新
             ],
             show_progress="full"
+        )
+        
+        # サムネイル再作成
+        generator_components["regenerate_thumbnail_btn"].click(
+            fn=regenerate_thumbnail_from_state,
+            inputs=[thumbnail_state],
+            outputs=[
+                generator_components["thumbnail_preview"],
+                generator_components["regenerated_title"],
+                generator_components["regenerated_thumbnail_title"],
+                thumbnail_state,  # Stateを更新
+                generator_components["regenerate_status"],  # ログ出力を追加
+            ]
         )
 
         settings_components["mock_generate_btn"].click(

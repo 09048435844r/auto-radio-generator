@@ -250,23 +250,35 @@ class GeminiClient(IScriptGenerator):
                     self.model_name = original_model
             raise
     
-    def _call_api(self, system_prompt: str, user_prompt: str, use_schema: bool = False, phase: str = "scripting") -> tuple[str, GeminiUsage]:
-        """Gemini APIを呼び出す
+    def _call_api(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        use_schema: bool = False,
+        phase: str = "scripting",
+        model_override: Optional[str] = None
+    ) -> tuple[str, Optional[GeminiUsage]]:
+        """Gemini APIを呼び出し
         
         Args:
             system_prompt: システムプロンプト
             user_prompt: ユーザープロンプト
-            use_schema: Scriptスキーマを使用するかどうか
-            phase: 実行フェーズ名（ログ記録用）
-        
+            use_schema: スキーマを使用するか
+            phase: 実行フェーズ（ログ用）
+            model_override: モデル名のオーバーライド（軽量モデル用）
+            
         Returns:
-            tuple[str, GeminiUsage]: (レスポンステキスト, 使用量)
+            (レスポンステキスト, 使用量情報)
         """
         import time
         import re
         
         # 第2部モード（excluded_topicsがある場合）はtemperatureを下げる
         is_part2 = bool(re.search(r'第1部.*放送済み', user_prompt))
+        
+        # モデルの選択（オーバーライド優先）
+        model_to_use = model_override if model_override else self.model_name
+        
         config_params = {
             "max_output_tokens": self.max_tokens,
             "temperature": 0.7 if is_part2 else 0.85,
@@ -282,7 +294,7 @@ class GeminiClient(IScriptGenerator):
         for attempt in range(max_retries):
             try:
                 response = self.client.models.generate_content(
-                    model=self.model_name,
+                    model=model_to_use,
                     contents=[
                         types.Content(
                             role="user",
@@ -307,7 +319,7 @@ class GeminiClient(IScriptGenerator):
             input_tokens=0,
             output_tokens=0,
             request_count=1,
-            model_name=self.model_name
+            model_name=model_to_use
         )
         
         # usage_metadataからトークン数を取得
@@ -321,7 +333,7 @@ class GeminiClient(IScriptGenerator):
         prompt_record = {
             "phase": phase,
             "api_provider": "gemini",
-            "model_name": self.model_name,
+            "model_name": model_to_use,
             "system_prompt": system_prompt,
             "user_prompt": user_prompt,
             "raw_response": response.text,

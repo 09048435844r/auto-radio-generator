@@ -59,6 +59,17 @@ class UIOverrides:
 
 
 @dataclass
+class ThumbnailRegenerationState:
+    """サムネイル再作成に必要なコンテキスト"""
+    theme: str                          # 元のテーマ
+    script_summary: str                 # 台本要約（Geminiプロンプト用）
+    output_dir: str                     # 出力先ディレクトリ
+    background_path: str                 # 背景画像パス
+    base_title: str                     # 元の動画タイトル
+    generation_count: int = 0           # 再生成回数（管理用）
+
+
+@dataclass
 class WorkflowResult:
     """ワークフロー実行結果"""
     success: bool
@@ -78,6 +89,9 @@ class WorkflowResult:
     formatted_title: str = ""  # 日付入りタイトル（コピー用）
     formatted_description: str = ""  # 概要欄・チャプター結合版（コピー用）
     uploaded_video_url: Optional[str] = None  # YouTubeアップロードURL（成功時）
+    # サムネイル再作成用
+    theme: str = ""  # 元のテーマ
+    output_dir: Optional[Path] = None  # 出力先ディレクトリ
 
 
 @dataclass
@@ -1774,6 +1788,9 @@ def run_workflow_sync(
                 formatted_title=formatted_title,
                 formatted_description=formatted_description,
                 uploaded_video_url=uploaded_video_url,
+                # サムネイル再作成用
+                theme=theme,
+                output_dir=output_base,
             )
             
         except Exception as e:

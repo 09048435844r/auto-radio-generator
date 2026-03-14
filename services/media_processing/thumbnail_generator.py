@@ -1,9 +1,10 @@
 """YouTubeサムネイル画像生成サービス"""
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageEnhance
 from rich.console import Console
+import json
 
 console = Console()
 
@@ -549,3 +550,91 @@ class ThumbnailGenerator:
         )
         
         return img
+    
+    def regenerate_with_new_title(
+        self,
+        theme: str,
+        script_summary: str,
+        output_dir: str,
+        background_path: str,
+        base_title: str,
+        generation_count: int = 0
+    ) -> Tuple[str, str, str]:
+        """新しいタイトルでサムネイルを再生成
+        
+        Args:
+            theme: 元のテーマ
+            script_summary: 台本要約
+            output_dir: 出力先ディレクトリ
+            background_path: 背景画像パス
+            base_title: 元の動画タイトル
+            generation_count: 再生成回数
+            
+        Returns:
+            Tuple[str, str, str]: (thumbnail_path, video_title, thumbnail_title)
+        """
+        from services.script_generation.gemini_client import GeminiClient
+        from core.models.config import load_config
+        from core.prompt_manager import PromptManager
+        
+        try:
+            console.print(f"[cyan]🔄 新しいサムネイルタイトルを生成中...[/cyan]")
+            
+            # 1. Geminiで新しいタイトル生成（軽量モデル）
+            config = load_config()
+            gemini_client = GeminiClient(config)
+            prompt_manager = PromptManager()
+            
+            # 軽量プロンプトでタイトル生成
+            regeneration_prompt = prompt_manager.get_prompt("thumbnail_regeneration", "default")
+            formatted_prompt = regeneration_prompt.format(
+                theme=theme,
+                script_summary=script_summary
+            )
+            
+            # 軽量モデルでAPI呼び出し（temperature低めで安定性重視）
+            flash_model = config.yaml.script_generator.gemini.flash_model
+            response_text, _ = gemini_client._call_api(
+                system_prompt="",
+                user_prompt=formatted_prompt,
+                use_schema=False,
+                phase="thumbnail_regeneration",
+                model_override=flash_model  # 軽量モデルを指定
+            )
+            
+            # レスポンスをパース
+            metadata = json.loads(response_text.strip())
+            new_thumbnail_title = metadata.get("thumbnail_title", "新着")
+            new_video_title = metadata.get("title", base_title)
+            
+            console.print(f"[green]✓ 新しいタイトル生成完了[/green]")
+            console.print(f"  サムネイル文字: {new_thumbnail_title}")
+            console.print(f"  動画タイトル: {new_video_title[:30]}...")
+            
+            # 2. タイムスタンプ付きでサムネイル生成
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            version_suffix = f"_v{generation_count + 1}" if generation_count > 0 else ""
+            thumbnail_filename = f"thumbnail_regenerated{version_suffix}_{timestamp}.png"
+            thumbnail_path = Path(output_dir) / thumbnail_filename
+            
+            console.print(f"[cyan]🖼️ サムネイル画像を生成中...[/cyan]")
+            
+            # 既存のgenerateメソッドを呼び出し
+            self.generate(
+                title=new_video_title,
+                background_path=Path(background_path),
+                output_path=thumbnail_path,
+                thumbnail_title=new_thumbnail_title
+            )
+            
+            console.print(f"[green]✓ サムネイル再生成完了[/green] {thumbnail_path.name}")
+            
+            return (
+                str(thumbnail_path),
+                new_video_title,
+                new_thumbnail_title
+            )
+            
+        except Exception as e:
+            console.print(f"[red]❌ サムネイル再生成エラー: {str(e)}[/red]")
+            raise

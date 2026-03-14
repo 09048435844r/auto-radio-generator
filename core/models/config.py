@@ -54,6 +54,7 @@ class GeminiConfig(BaseModel):
     """Gemini API設定"""
     model: str = "gemini-3.1-pro-preview"
     fallback_model: str = "gemini-2.5-pro"
+    flash_model: str = "gemini-2.5-flash"  # 軽量モデル（サムネイル再作成用）
     max_tokens: int = 8192
 
 
