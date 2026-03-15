@@ -912,11 +912,11 @@ def generate_video_mock(
     jingle_choice: str = "なし",
     jingle_custom_path: str = "",
     progress=gr.Progress()
-) -> tuple[str | None, str, str, str, str, str]:
+) -> tuple[str | None, str, str, str, str, str, Optional[ThumbnailRegenerationState]]:
     return generate_video(
         theme=theme,
         research_mode=research_mode,
-        selected_bg_filename=background_image,
+        background_image=background_image,
         bgm_file=bgm_file,
         bgm_volume=bgm_volume,
         fade_time=fade_time,
@@ -2590,7 +2590,6 @@ def create_ui() -> gr.Blocks:
                 generator_components["avoid_topics_input"],
                 settings_components["upload_to_youtube_checkbox"],
                 settings_components["footer_text_input"],
-                gr.Checkbox(value=False, visible=False),  # use_mock placeholder
                 generator_components["second_mode_dropdown"],
                 generator_components["jingle_dropdown"],
                 generator_components["jingle_path_input"],
@@ -2602,6 +2601,7 @@ def create_ui() -> gr.Blocks:
                 generator_components["title_output"],
                 generator_components["description_output"],
                 generator_components["youtube_url_output"],
+                thumbnail_state,  # Stateを更新
             ],
             show_progress="full",
         )
