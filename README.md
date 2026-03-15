@@ -241,7 +241,14 @@ YouTube への自動アップロード機能を使う場合、プロジェクト
 プロジェクトルートで以下を実行すると、単体テストを手動実行できます。
 
 ```bash
+# 全テスト実行
 pytest
+
+# サムネイル再作成機能テストのみ
+python -m pytest tests/test_thumbnail_regeneration.py -v
+
+# カバレッジ付きで実行
+python -m pytest tests/ --cov=. --cov-report=html
 ```
 
 ### 自動チェック（pre-commit hook）
@@ -275,6 +282,14 @@ chmod +x .git/hooks/pre-commit
 
 ### 現在のテスト範囲
 
+#### サムネイル再作成機能テスト（新規追加）
+- `tests/test_thumbnail_regeneration.py` - サムネイル再作成とState管理の自動テスト
+  - `TestThumbnailRegenerationState`: Stateデータクラスの基本機能
+  - `TestGenerateVideoMock`: generate_video_mock の戻り値と呼び出し引数
+  - `TestThumbnailRegeneration`: サムネイル再作成の成功・失敗ケース
+  - 実行コマンド: `python -m pytest tests/test_thumbnail_regeneration.py -v`
+
+#### 既存テスト
 現時点では、`services/video_rendering/ffmpeg_renderer.py` の Windows パス変換ロジック（例: 字幕パスのエスケープ処理）を中心に単体テストを整備しています。
 
 主な対象:
@@ -422,6 +437,9 @@ auto_radio_generator/
 └── output/                  # 生成物
     ├── YYYYMMDD_HHMMSS/     # 自動生成モード
     └── manual_builds/       # マニュアル制作モード
+└── tests/                   # テストファイル
+    ├── test_thumbnail_regeneration.py  # サムネイル再作成機能テスト
+    └── test_ffmpeg_renderer.py       # FFmpegレンダラー関連テスト
 ```
 
 ## 🔧 拡張
