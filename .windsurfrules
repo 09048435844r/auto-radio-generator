@@ -29,3 +29,16 @@
 When writing Python scripts, Git hooks, or shell commands that execute external processes (e.g., using `subprocess.run`), NEVER hide, capture, or pipe the standard output/error unless explicitly instructed to do so.
 - AVOID using `stdout=subprocess.PIPE`, `stderr=subprocess.PIPE`, or `capture_output=True`.
 - ALWAYS allow outputs to stream directly to the terminal in real-time. This ensures the user can monitor progress and prevents long-running tasks from appearing as system freezes.
+
+
+# ==========================================
+# Project Context Policy
+# （プロジェクト文脈に関するルール）
+#
+# 【このルールの目的】
+# AIがコードを生成する際、現在のプロジェクトが「Auto Radio Generator（自動ラジオ動画生成システム）」であることを常に認識させ、
+# 「YuruHealth」などの他のプロジェクトに関連する処理を誤って生成しないようにするため。
+# ==========================================
+【重要】
+現在のプロジェクトは「Auto Radio Generator（自動ラジオ動画生成システム）」です。
+もしユーザーの指示が「YuruHealth」など、他のプロジェクトに関連する処理に見える場合は、コードを変更する前に必ず「対象プロジェクトが間違っていないか」を確認してください。

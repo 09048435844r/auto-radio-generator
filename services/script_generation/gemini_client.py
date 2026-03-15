@@ -427,7 +427,7 @@ class GeminiClient(IScriptGenerator):
         """
         try:
             # JSONをパース
-            json_data = json.loads(response_text.strip())
+            json_data = json.loads(response_text.strip(), strict=False)
             
             # Pydanticモデルでバリデーション（ここで検証エラーなら例外が出る）
             script_obj = Script(**json_data)
@@ -438,13 +438,31 @@ class GeminiClient(IScriptGenerator):
             return script_obj
             
         except json.JSONDecodeError as e:
-            console.print(f"[red]✗ JSON解析エラー: {e}[/red]")
-            console.print(f"[dim]レスポンス: {response_text[:200]}...[/dim]")
-            raise
+            console.print(f"[yellow]⚠ JSON解析エラー、サニタイズ再試行: {e}[/yellow]")
+            sanitized_text = self._sanitize_json_response(response_text)
+
+            try:
+                json_data = json.loads(sanitized_text, strict=False)
+                script_obj = Script(**json_data)
+
+                console.print(f"[green]✓ サニタイズ後のPydanticバリデーション成功[/green]")
+                console.print(f"  総ターン数: {script_obj.total_turns}")
+                return script_obj
+            except Exception as retry_error:
+                console.print(f"[red]✗ サニタイズ後も解析失敗: {retry_error}[/red]")
+                console.print(f"[dim]元レスポンス: {response_text[:200]}...[/dim]")
+                console.print(f"[dim]サニタイズ後: {sanitized_text[:200]}...[/dim]")
+                raise
         except Exception as e:
             console.print(f"[red]✗ Pydanticバリデーションエラー: {e}[/red]")
             console.print(f"[dim]JSON: {response_text[:200]}...[/dim]")
             raise
+
+    def _sanitize_json_response(self, text: str) -> str:
+        """軽微なJSONサニタイズ（Markdown code fence除去のみ）"""
+        sanitized = re.sub(r'^\s*```json\s*', '', text, flags=re.IGNORECASE)
+        sanitized = re.sub(r'\s*```\s*$', '', sanitized)
+        return sanitized.strip()
     
     def _build_research_plan_prompt(self, mode: str) -> str:
         """検索計画作成用のシステムプロンプトを構築
