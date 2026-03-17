@@ -1,6 +1,6 @@
-# 🎙️ 自動ラジオ動画生成システム v3.3.2
+# 🎙️ 自動ラジオ動画生成システム v3.4.0
 
-Perplexity + Gemini + VOICEVOX + FFmpeg を連携し、
+Perplexity + **複数LLM (Gemini/OpenAI/Anthropic)** + VOICEVOX + FFmpeg を連携し、
 リサーチから台本生成、音声合成、動画レンダリング、YouTube投稿用メタデータ作成までを一気通貫で自動化するプロジェクトです。
 
 ## 📋 Project Overview
@@ -14,7 +14,10 @@ Perplexity + Gemini + VOICEVOX + FFmpeg を連携し、
 
 ### コア機能
 - **リサーチ**: Perplexity API でテーマを事前調査（5モード対応）
-- **台本生成**: Gemini API で多様な形式の台本を自動生成
+- **台本生成**: **複数LLMプロバイダー対応** - Gemini / OpenAI / Anthropic から選択可能
+  - **Gemini**: 高品質な台本生成（デフォルト）
+  - **OpenAI**: Structured Outputs による確実なJSON出力（gpt-4o-mini / gpt-4o）
+  - **Anthropic**: Tool Calling による構造化出力（Claude 3.5 Sonnet）
 - **音声合成**: VOICEVOX で2人のパーソナリティの音声を合成
 - **字幕生成**: ASS形式の字幕ファイルを自動生成（ワイドスクリーン最適化）
 - **動画生成**: FFmpeg で背景画像・音声・BGM・字幕を合成
@@ -25,6 +28,16 @@ Perplexity + Gemini + VOICEVOX + FFmpeg を連携し、
   - 参考文献の3行構造（📄タイトル / 🔗URL / 空行）
   - セクション間余白ルール（見出し前2行、見出し後0〜1行）
   - エンコーディング耐性のあるWebタイトル取得（`chardet`）
+
+### v3.4.0 新機能（Multi-LLM Provider Support）
+- 🤖 **複数LLMプロバイダー対応**: Gemini / OpenAI / Anthropic から台本生成エンジンを選択可能
+  - **ファクトリーパターン**: プロバイダー名から適切なクライアントを自動生成
+  - **OpenAI Structured Outputs**: `client.beta.chat.completions.parse()` でJSON構造を保証
+  - **Anthropic Tool Calling**: ツール定義による構造化出力の強制
+  - **UI統合**: Gradio UIのドロップダウンで3プロバイダーを動的切り替え
+  - **後方互換性**: デフォルトは `gemini`、既存機能は無変更で動作
+  - **設定ファイル拡張**: `config.yaml` に各プロバイダーのモデル設定を追加
+  - **環境変数**: `.env` に `OPENAI_API_KEY` と `ANTHROPIC_API_KEY` を追加
 
 ### v3.3.0 新機能（Negative Prompt / Audio Pro / Quality）
 - 🧭 **Manually Controlled Topics**: 「避けてほしい話題」(Negative Prompt) による生成内容の制御
@@ -150,7 +163,7 @@ Perplexity + Gemini + VOICEVOX + FFmpeg を連携し、
 | **FFmpeg** | 6.0+ | NVENC対応ビルド推奨（GPU高速化に必要） |
 | **VOICEVOX Engine** | 0.24+ | GPU版推奨（音声合成の高速化） |
 
-Pythonパッケージは `requirements.txt` で管理しています（主な依存: `google-genai`, `openai`, `gradio`, `requests`, `beautifulsoup4`, `chardet`, `pytest`）。
+Pythonパッケージは `requirements.txt` で管理しています（主な依存: `google-genai`, `openai`, `anthropic`, `gradio`, `requests`, `beautifulsoup4`, `chardet`, `pytest`）。
 
 > **Pythonバージョン運用方針（メンテナンス注記）**  
 > 現在は **Python 3.10.6** で安定動作しており、**2026年10月（サポート期限）までは現行環境を維持**します。開発効率を優先しつつ、
@@ -178,7 +191,9 @@ copy .env.example .env
 
 ```env
 PERPLEXITY_API_KEY=pplx-xxxxxxxx  # Perplexity使用時
-GEMINI_API_KEY=AIzaSyxxxxxxxx     # Gemini使用時（推奨）
+GEMINI_API_KEY=AIzaSyxxxxxxxx     # Gemini使用時（デフォルト）
+OPENAI_API_KEY=sk-xxxxxxxx        # OpenAI使用時（オプション）
+ANTHROPIC_API_KEY=sk-ant-xxxxxxxx # Anthropic使用時（オプション）
 VOICEVOX_BASE_URL=http://localhost:50021
 ```
 
@@ -315,8 +330,12 @@ chmod +x .git/hooks/pre-commit
 | `researcher.max_requests_per_workflow` | 1ワークフロー内で許可するPerplexity呼び出し上限 (デフォルト: 6) |
 | `researcher.enable_session_cache` | 同一セッション内で同一クエリのリサーチ結果を再利用 (デフォルト: true) |
 | `researcher.modes` | リサーチモード定義 (debate/voices/trivia/weekly_digest/lecture) |
-| `script_generator.gemini.model` | 台本生成用モデル (デフォルト: gemini-3.1-pro-preview) |
-| `script_generator.gemini.fallback_model` | フォールバックモデル (デフォルト: gemini-2.5-pro) |
+| `script_generator.default_provider` | デフォルトLLMプロバイダー (デフォルト: gemini) |
+| `script_generator.gemini.model` | Gemini台本生成用モデル (デフォルト: gemini-3.1-pro-preview) |
+| `script_generator.gemini.fallback_model` | Geminiフォールバックモデル (デフォルト: gemini-2.5-pro) |
+| `script_generator.openai.model` | OpenAI台本生成用モデル (デフォルト: gpt-4o-mini) |
+| `script_generator.openai.fallback_model` | OpenAIフォールバックモデル (デフォルト: gpt-4o) |
+| `script_generator.anthropic.model` | Anthropic台本生成用モデル (デフォルト: claude-3-5-sonnet-20241022) |
 | `script_generator.structure` | 台本構成比率 (本題/メール/エンディング) |
 | `audio_synthesizer.speakers.main` | メインパーソナリティのVOICEVOX話者ID |
 | `audio_synthesizer.speakers.sub` | サブパーソナリティのVOICEVOX話者ID |
@@ -421,7 +440,11 @@ auto_radio_generator/
 │   └── settings_manager.py  # 設定永続化
 ├── services/                # アプリケーション層
 │   ├── research/            # リサーチ (Perplexity)
-│   ├── script_generation/   # 台本生成 (Gemini)
+│   ├── script_generation/   # 台本生成 (Multi-LLM)
+│   │   ├── gemini_client.py      # Gemini台本生成クライアント
+│   │   ├── openai_client.py      # OpenAI台本生成クライアント (Structured Outputs)
+│   │   ├── anthropic_client.py   # Anthropic台本生成クライアント (Tool Calling)
+│   │   └── llm_factory.py        # LLMプロバイダーファクトリー
 │   ├── audio_synthesis/     # 音声合成 (VOICEVOX)
 │   ├── video_rendering/     # 動画生成 (FFmpeg)・字幕生成
 │   ├── publishing/          # YouTube投稿メタデータ生成・アップロード
@@ -446,9 +469,20 @@ auto_radio_generator/
 
 インターフェース（ABC）を使用しているため、以下の拡張が容易です：
 
-- **OpenAI対応**: `IScriptGenerator` を継承して実装
-- **ElevenLabs対応**: `IAudioSynthesizer` を継承して実装
-- **別レンダラー対応**: `IVideoRenderer` を継承して実装
+- ✅ **OpenAI対応**: `IScriptGenerator` を継承して実装済み（`openai_client.py`）
+- ✅ **Anthropic対応**: `IScriptGenerator` を継承して実装済み（`anthropic_client.py`）
+- **ElevenLabs対応**: `IAudioSynthesizer` を継承して実装可能
+- **別レンダラー対応**: `IVideoRenderer` を継承して実装可能
+
+### LLMプロバイダーの追加方法
+
+新しいLLMプロバイダーを追加する場合：
+
+1. `core/interfaces/script_generator.py` の `IScriptGenerator` を継承
+2. `services/script_generation/` に新しいクライアントを実装
+3. `services/script_generation/llm_factory.py` にプロバイダー追加
+4. `config.yaml` に設定セクション追加
+5. `.env.example` にAPIキー追加
 
 ## 🧭 開発ポリシー
 
