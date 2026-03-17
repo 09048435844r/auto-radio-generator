@@ -134,13 +134,17 @@ async def check_api_health() -> tuple[str, str]:
 
 
 def run_api_health_check():
-    """Wrapper for async health check to run in event loop"""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    """Wrapper for async health check with safe event loop handling"""
     try:
-        return loop.run_until_complete(check_api_health())
-    finally:
-        loop.close()
+        # Preferred path: isolated event loop with no global loop mutation.
+        return asyncio.run(check_api_health())
+    except RuntimeError:
+        # Fallback for environments where asyncio.run is unavailable/unsafe.
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(check_api_health())
+        finally:
+            loop.close()
 
 
 # ログメッセージを蓄積するためのグローバル変数
