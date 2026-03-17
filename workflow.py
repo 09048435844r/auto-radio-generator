@@ -48,6 +48,7 @@ class UIOverrides:
     """UIから渡されるパラメータのオーバーライド設定"""
     research_mode: Optional[ResearchMode] = None  # "debate", "voices", "trivia"
     enable_research: bool = True                   # リサーチを有効化
+    llm_provider: Optional[str] = None             # LLMプロバイダー ("gemini" | "openai" | "anthropic")
     bgm_volume: Optional[float] = None             # 0.0 - 0.5
     fade_in_sec: Optional[float] = None            # 1.0 - 10.0
     fade_out_sec: Optional[float] = None           # 1.0 - 10.0
@@ -515,9 +516,24 @@ class LogFileWriter:
             f.write(f"\n終了時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
 
-def create_script_generator(config: AppConfig) -> GeminiClient:
-    """台本生成エンジン（Gemini）を作成"""
-    return GeminiClient(config)
+def create_script_generator(config: AppConfig, provider: Optional[str] = None):
+    """台本生成エンジンを作成（プロバイダー選択対応）
+    
+    Args:
+        config: アプリケーション設定
+        provider: LLMプロバイダー名 ("gemini" | "openai" | "anthropic")
+                 Noneの場合はconfig.yamlのdefault_providerを使用
+    
+    Returns:
+        IScriptGenerator: プロバイダーに対応するクライアントインスタンス
+    """
+    from services.script_generation.llm_factory import create_script_generator as factory
+    
+    # デフォルトプロバイダーの決定
+    if provider is None:
+        provider = getattr(config.yaml.script_generator, 'default_provider', 'gemini')
+    
+    return factory(config, provider)
 
 
 def create_researcher(config: AppConfig) -> PerplexityResearcher:
@@ -573,7 +589,8 @@ async def execute_planning_phase(
     cb.progress(0.10, "🤔 企画・検索計画を作成中...")
     
     try:
-        script_generator = create_script_generator(config)
+        # 検索計画はGeminiで実行（OpenAI/Anthropicは未対応）
+        script_generator = create_script_generator(config, provider="gemini")
         plan = await script_generator.create_research_plan(theme, mode, instruction)
         
         max_queries = max(1, int(getattr(config.yaml.researcher, "max_queries_per_plan", 3)))
@@ -679,10 +696,12 @@ async def execute_scripting_phase(
     # Step 2: 台本生成
     cb.log(f"\n== Phase 2-2: 台本生成 ==")
     cb.log(f"テーマ: {theme}")
-    cb.progress(0.50, "📝 台本を執筆中 (Gemini Pro)...")
+    # プロバイダーの決定
+    provider = getattr(config.yaml.script_generator, 'default_provider', 'gemini')
+    cb.progress(0.50, f"📝 台本を執筆中 ({provider})...")
     
     script_start = time.time()
-    script_generator = create_script_generator(config)
+    script_generator = create_script_generator(config, provider=provider)
     script = script_generator.generate(theme, research_data, avoid_topics=avoid_topics, excluded_topics=excluded_topics)
 
     phase_label = "Part 2" if excluded_topics and excluded_topics.strip() else "Part 1/Single"
@@ -1000,7 +1019,8 @@ async def generate_video_workflow(
                 progress(0.05, "Step 0: AIが検索計画を作成中...")
                 log(f"\n== Step 0: 検索計画作成 ==")
                 
-                script_generator = create_script_generator(config)
+                # プロバイダーの決定（検索計画はGeminiで実行）
+                script_generator = create_script_generator(config, provider="gemini")
                 plan = await script_generator.create_research_plan(theme, overrides.research_mode, instruction=None)
                 
                 log(f"✓ 検索計画作成完了")
@@ -1102,10 +1122,12 @@ async def generate_video_workflow(
         progress(0.20, "台本を生成中...")
         log(f"\n== 台本生成 ==")
         log(f"テーマ: {theme}")
-        log(f"使用エンジン: Gemini")
+        # プロバイダーの決定
+        provider = overrides.llm_provider or getattr(config.yaml.script_generator, 'default_provider', 'gemini')
+        log(f"使用エンジン: {provider}")
         
         script_start = time.time()
-        script_generator = create_script_generator(config)
+        script_generator = create_script_generator(config, provider=provider)
         script = script_generator.generate(theme, research_data)
 
         diagnostics, suspected_swap = _build_speaker_diagnostics(script)

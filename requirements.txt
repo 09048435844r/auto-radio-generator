@@ -11,7 +11,8 @@ PyYAML>=6.0.0            # YAML設定ファイル
 
 # AI APIs
 google-genai>=1.0.0      # Gemini API (台本生成)
-openai>=1.0.0            # Perplexity API (リサーチ、OpenAI互換)
+openai>=1.0.0            # OpenAI API (台本生成) & Perplexity API (リサーチ、OpenAI互換)
+anthropic>=0.18.0        # Anthropic API (台本生成)
 
 # Audio Processing
 pydub>=0.25.1            # 音声ファイル操作

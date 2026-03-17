@@ -70,6 +70,7 @@ class TestGenerateVideoMock:
         result = generate_video_mock(
             theme="テストテーマ",
             research_mode="trivia",
+            llm_provider="gemini",
             background_image="test_bg.png",
             bgm_file="test_bgm.mp3",
             bgm_volume=0.5,
@@ -111,6 +112,7 @@ class TestGenerateVideoMock:
         mock_generate_video.assert_called_once_with(
             theme="テストテーマ",
             research_mode="trivia",
+            llm_provider="gemini",
             background_image="test_bg.png",
             bgm_file="test_bgm.mp3",
             bgm_volume=0.5,

@@ -721,6 +721,7 @@ def execute_step2_production(
 def generate_video(
     theme: str,
     research_mode: str,
+    llm_provider: str,
     background_image: str,
     bgm_file: str,
     bgm_volume: float,
@@ -741,6 +742,7 @@ def generate_video(
     Args:
         theme: 動画のテーマ
         research_mode: リサーチモード
+        llm_provider: LLMプロバイダー ("gemini" | "openai" | "anthropic")
         background_image: 背景画像ファイル名
         bgm_file: BGMファイル名
         bgm_volume: BGM音量 (0.0-0.5)
@@ -789,6 +791,7 @@ def generate_video(
     overrides = UIOverrides(
         research_mode=mode,
         enable_research=enable_research,
+        llm_provider=llm_provider,
         bgm_volume=bgm_volume,
         fade_in_sec=fade_time,
         fade_out_sec=fade_time,
@@ -899,6 +902,7 @@ def generate_video(
 def generate_video_mock(
     theme: str,
     research_mode: str,
+    llm_provider: str,
     background_image: str,
     bgm_file: str,
     bgm_volume: float,
@@ -916,6 +920,7 @@ def generate_video_mock(
     return generate_video(
         theme=theme,
         research_mode=research_mode,
+        llm_provider=llm_provider,
         background_image=background_image,
         bgm_file=bgm_file,
         bgm_volume=bgm_volume,
@@ -1951,6 +1956,15 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
                             info="Perplexityによるリサーチの方向性を選択",
                             scale=1,
                         )
+                    
+                    with gr.Row():
+                        llm_provider_dropdown = gr.Dropdown(
+                            label="🤖 LLMプロバイダー",
+                            choices=["gemini", "openai", "anthropic"],
+                            value="gemini",
+                            info="台本生成に使用するAIモデルを選択",
+                            scale=1,
+                        )
 
                     avoid_topics_input = gr.Textbox(
                         label="避けてほしい話題 (オプション)",
@@ -2159,6 +2173,7 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
     return {
         "theme_input": theme_input,
         "research_mode_dropdown": research_mode_dropdown,
+        "llm_provider_dropdown": llm_provider_dropdown,
         "second_mode_dropdown": second_mode_dropdown,
         "jingle_dropdown": jingle_dropdown,
         "jingle_path_input": jingle_path_input,
@@ -2537,6 +2552,7 @@ def create_ui() -> gr.Blocks:
             inputs=[
                 generator_components["theme_input"],
                 generator_components["research_mode_dropdown"],
+                generator_components["llm_provider_dropdown"],
                 generator_components["selected_bg_filename"],
                 generator_components["bgm_dropdown"],
                 generator_components["bgm_volume_slider"],
@@ -2581,6 +2597,7 @@ def create_ui() -> gr.Blocks:
             inputs=[
                 generator_components["theme_input"],
                 generator_components["research_mode_dropdown"],
+                generator_components["llm_provider_dropdown"],
                 generator_components["selected_bg_filename"],
                 generator_components["bgm_dropdown"],
                 generator_components["bgm_volume_slider"],

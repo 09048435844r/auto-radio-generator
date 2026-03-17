@@ -44,6 +44,26 @@ class GeminiClient(IScriptGenerator):
         self.personalities = config.yaml.personalities
         self.prompt_manager = PromptManager()
         
+        # Safety settings: 最も緩い設定（医療系ワード等での誤爆防止）
+        self.default_safety_settings = [
+            types.SafetySetting(
+                category="HARM_CATEGORY_HATE_SPEECH",
+                threshold="BLOCK_NONE"
+            ),
+            types.SafetySetting(
+                category="HARM_CATEGORY_DANGEROUS_CONTENT",
+                threshold="BLOCK_NONE"
+            ),
+            types.SafetySetting(
+                category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                threshold="BLOCK_NONE"
+            ),
+            types.SafetySetting(
+                category="HARM_CATEGORY_HARASSMENT",
+                threshold="BLOCK_NONE"
+            ),
+        ]
+        
         # 最後のAPI呼び出しの使用量を保持
         self.last_usage: GeminiUsage | None = None
         
@@ -280,10 +300,14 @@ class GeminiClient(IScriptGenerator):
         model_to_use = model_override if model_override else self.model_name
         
         config_params = {
-            "max_output_tokens": self.max_tokens,
+            "max_output_tokens": 8192,  # 長文台本での途切れ防止のため固定値に設定
             "temperature": 0.7 if is_part2 else 0.85,
             "response_mime_type": "application/json",  # JSONモード有効化
+            "safety_settings": self.default_safety_settings,  # 医療系ワード等での誤爆防止
         }
+        
+        # デバッグ: max_output_tokensの設定値を確認
+        console.print(f"[dim]API呼び出し設定: max_output_tokens={config_params['max_output_tokens']}, model={model_to_use}[/dim]")
         
         # 台本生成時はスキーマを指定して構造化出力を強制
         if use_schema:
@@ -313,6 +337,22 @@ class GeminiClient(IScriptGenerator):
                     continue
                 else:
                     raise  # リトライ上限または回復不可能なエラー
+        
+        # finish_reasonをログ出力（途切れ原因の特定用）
+        if response.candidates and len(response.candidates) > 0:
+            candidate = response.candidates[0]
+            finish_reason = getattr(candidate, 'finish_reason', 'UNKNOWN')
+            console.print(f"[dim]finish_reason: {finish_reason}[/dim]")
+            
+            # 途切れの可能性がある場合は警告
+            if finish_reason in ['MAX_TOKENS', 'SAFETY', 'RECITATION']:
+                console.print(f"[yellow]⚠ 出力が途中で終了した可能性: {finish_reason}[/yellow]")
+                if finish_reason == 'MAX_TOKENS':
+                    console.print(f"[yellow]  → max_output_tokens上限到達。出力が切り詰められました。[/yellow]")
+                elif finish_reason == 'SAFETY':
+                    console.print(f"[yellow]  → セーフティフィルターが発動。特定のワードが原因の可能性があります。[/yellow]")
+                elif finish_reason == 'RECITATION':
+                    console.print(f"[yellow]  → 著作権保護により出力が遮断されました。[/yellow]")
         
         # 使用量を取得
         usage = GeminiUsage(
