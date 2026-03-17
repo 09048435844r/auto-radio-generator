@@ -463,14 +463,23 @@ def _swap_script_speakers(script: Script) -> Script:
 
 @dataclass
 class ProgressCallback:
-    """進捗コールバック用クラス"""
-    log_callback: Optional[Callable[[str], None]] = None
-    progress_callback: Optional[Callable[[float, str], None]] = None
+    """進捗コールバックをまとめるクラス"""
+    
+    def __init__(self, 
+                 log_callback: Optional[Callable[[str], None]] = None,
+                 progress_callback: Optional[Callable[[float, str], None]] = None,
+                 log_writer: Optional['LogFileWriter'] = None):
+        self.log_callback = log_callback
+        self.progress_callback = progress_callback
+        self.log_writer = log_writer
     
     def log(self, msg: str):
         """ログメッセージを送信"""
         if self.log_callback:
             self.log_callback(msg)
+        # ログファイルにも書き込み
+        if self.log_writer:
+            self.log_writer.write(msg)
     
     def progress(self, ratio: float, description: str):
         """進捗を送信 (0.0〜1.0)"""
@@ -1399,6 +1408,8 @@ def run_workflow_sync(
             
             # ログファイルライターを初期化
             log_writer = LogFileWriter(output_base)
+            # ProgressCallbackにlog_writerを設定
+            callbacks.log_writer = log_writer
             callbacks.log(f"出力ディレクトリ: {output_base}")
             
             # Usage集約用
