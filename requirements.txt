@@ -1,5 +1,5 @@
 # ============================================
-# 自動ラジオ動画生成システム v3.3.2
+# 自動ラジオ動画生成システム v3.4.0
 # Python Dependencies
 # ============================================
 
@@ -10,9 +10,9 @@ python-dotenv>=1.0.0     # 環境変数読み込み
 PyYAML>=6.0.0            # YAML設定ファイル
 
 # AI APIs
-google-genai>=1.0.0      # Gemini API (台本生成)
-openai>=1.0.0            # OpenAI API (台本生成) & Perplexity API (リサーチ、OpenAI互換)
-anthropic>=0.18.0        # Anthropic API (台本生成)
+google-genai>=1.0.0      # Gemini API (台本生成・メタデータ生成)
+openai>=1.0.0            # OpenAI API (台本生成・gpt-4o系) & Perplexity API (リサーチ、OpenAI互換)
+anthropic>=0.18.0        # Anthropic API (台本生成・Claude 3.5 Sonnet)
 
 # Audio Processing
 pydub>=0.25.1            # 音声ファイル操作

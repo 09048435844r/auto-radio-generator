@@ -190,15 +190,17 @@ class OpenAIClient(IScriptGenerator):
                     raise
         
         # Log finish_reason
+        import logging
+        logger = logging.getLogger(__name__)
         finish_reason = completion.choices[0].finish_reason
-        console.print(f"[dim]finish_reason: {finish_reason}[/dim]")
+        logger.debug(f"finish_reason: {finish_reason}")
         
         if finish_reason in ['length', 'content_filter']:
-            console.print(f"[yellow]⚠ Output may be truncated: {finish_reason}[/yellow]")
+            logger.warning(f"Output may be truncated: {finish_reason}")
             if finish_reason == 'length':
-                console.print(f"[yellow]  → max_tokens limit reached[/yellow]")
+                logger.warning("max_tokens limit reached")
             elif finish_reason == 'content_filter':
-                console.print(f"[yellow]  → Content filter triggered[/yellow]")
+                logger.warning("Content filter triggered")
         
         # Extract usage
         usage = GeminiUsage(

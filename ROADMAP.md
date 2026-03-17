@@ -1,8 +1,8 @@
 # Auto Radio Generator - Development Roadmap
 
 > **Created:** 2026-02-07  
-> **Base Version:** v3.3.0 (GPU / Mock / UI)  
-> **Last Updated:** 2026-02-28  
+> **Base Version:** v3.4.0 (Multi-LLM Provider Support)  
+> **Last Updated:** 2026-03-17  
 > **Author:** AI Tech Lead (Cascade)
 
 ---
@@ -24,12 +24,12 @@
 
 ---
 
-## 📊 Current Status (v3.3.0)
+## 📊 Current Status (v3.4.0)
 
 ### Core Pipeline
 - [x] **Research Phase** — Perplexity API による5モード対応リサーチ（debate / voices / trivia / weekly_digest / lecture）
 - [x] **AI Producer** — Gemini による検索計画の自動作成（テーマ → 検索クエリ生成）
-- [x] **Script Generation** — Gemini Pro による構造化台本生成
+- [x] **Script Generation** — Multi-LLM Provider対応（Gemini / OpenAI / Anthropic）による構造化台本生成
 - [x] **Audio Synthesis** — VOICEVOX による2話者音声合成 + ASS字幕生成
 - [x] **Video Rendering** — FFmpeg による動画レンダリング（背景 + BGM + 字幕 + スペクトラム）
 - [x] **Thumbnail Generation** — Pillow + BudouX による自動サムネイル画像生成
@@ -43,6 +43,15 @@
 - [x] **Section Spacing Rule** — セクション見出し前2行、見出し後0〜1行の余白ルールを `metadata_builder.py` に実装
 - [x] **Output Tail Trimming** — 概要欄末尾の不要空行をトリムし、投稿フォーマットを安定化
 - [x] **Regression Tests Added** — `tests/test_text_sanitizer.py` / `tests/test_metadata_description_format.py` を追加し、改行保持と書式を自動検証
+
+### v3.4.0 New Features（Multi-LLM Provider Support）
+- [x] **LLM Provider Factory** — プロバイダー名から適切なクライアントを生成するファクトリーパターン実装
+- [x] **OpenAI Integration** — Structured Outputs (`client.beta.chat.completions.parse`) による確実なJSON出力
+- [x] **Anthropic Integration** — Tool Calling による構造化出力の強制
+- [x] **UI Provider Selection** — Gradio UIのドロップダウンで3プロバイダー（Gemini/OpenAI/Anthropic）を動的切り替え
+- [x] **Backward Compatibility** — デフォルトは `gemini`、既存機能は無変更で動作
+- [x] **Configuration Extension** — `config.yaml` に各プロバイダーのモデル設定を追加
+- [x] **Environment Variables** — `.env` に `OPENAI_API_KEY` と `ANTHROPIC_API_KEY` を追加
 
 ### v3.1.x New Features
 - [x] **NVENC GPU Acceleration** — NVIDIA GPU によるハードウェアエンコード（h264_nvenc）、CPU 自動フォールバック付き
@@ -231,7 +240,7 @@
 |-------|-----------|------|
 | **Runtime** | Python 3.10+ | コアランタイム |
 | **Web UI** | Gradio 4.0+ | ブラウザベース UI |
-| **AI (Script)** | Gemini Pro (google-genai) | 台本生成・メタデータ生成 |
+| **AI (Script)** | Gemini / OpenAI / Anthropic | 台本生成（プロバイダー選択可能）・メタデータ生成 |
 | **AI (Research)** | Perplexity (OpenAI-compatible) | テーマリサーチ |
 | **Audio** | VOICEVOX Engine | 音声合成（GPU 推奨） |
 | **Video** | FFmpeg (NVENC) | 動画レンダリング（GPU 高速化） |

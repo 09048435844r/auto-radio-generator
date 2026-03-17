@@ -1953,21 +1953,13 @@ def _generate_youtube_metadata(
         # script.titleが空の場合は元のthemeを使用
         effective_theme = script.title or theme or "テーマ不明"
         
-        print(f"[DEBUG] メタデータ生成開始")
-        print(f"[DEBUG] テーマ: {effective_theme}")
-        print(f"[DEBUG] 台本要約: {script_summary[:100]}...")
-        
         metadata_result = gemini_client.generate_packaging_prompt(
             theme=effective_theme,
             script_summary=script_summary
         )
         
-        print(f"[DEBUG] Geminiレスポンス受信: {len(metadata_result)} chars")
-        print(f"[DEBUG] レスポンス内容: {metadata_result[:200]}...")
-        
         if metadata_result:
             # JSONモードでは、レスポンスは常に正しいJSON形式
-            print(f"[DEBUG] JSONレスポンス: {metadata_result[:200]}...")
             metadata = json.loads(metadata_result.strip())
             
             # 概要欄は後工程のmetadata_builderで構造化するため、ここではAI生成本文のみ保持
@@ -2025,8 +2017,10 @@ def _generate_youtube_metadata(
         # エラー時はフォールバックし、詳細をログ出力
         import traceback
         error_detail = traceback.format_exc()
-        print(f"[ERROR] メタデータ生成エラー: {str(e)}")
-        print(f"[ERROR] Traceback:\n{error_detail}")
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"メタデータ生成エラー: {str(e)}")
+        logger.debug(f"Traceback:\n{error_detail}")
         
         # フォールバック: 台本のタイトル・概要をmetadataに格納
         metadata = {

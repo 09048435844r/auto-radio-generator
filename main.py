@@ -14,7 +14,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.models import load_config, Script
 from core.interfaces import IScriptGenerator
-from services.script_generation import GeminiClient, PerplexityClient
+from services.script_generation import GeminiClient
 from services.audio_synthesis import VoicevoxClient
 from services.video_rendering import FfmpegRenderer
 

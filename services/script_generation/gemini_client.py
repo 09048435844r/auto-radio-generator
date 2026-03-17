@@ -340,19 +340,21 @@ class GeminiClient(IScriptGenerator):
         
         # finish_reasonをログ出力（途切れ原因の特定用）
         if response.candidates and len(response.candidates) > 0:
+            import logging
+            logger = logging.getLogger(__name__)
             candidate = response.candidates[0]
             finish_reason = getattr(candidate, 'finish_reason', 'UNKNOWN')
-            console.print(f"[dim]finish_reason: {finish_reason}[/dim]")
+            logger.debug(f"finish_reason: {finish_reason}")
             
             # 途切れの可能性がある場合は警告
             if finish_reason in ['MAX_TOKENS', 'SAFETY', 'RECITATION']:
-                console.print(f"[yellow]⚠ 出力が途中で終了した可能性: {finish_reason}[/yellow]")
+                logger.warning(f"出力が途中で終了した可能性: {finish_reason}")
                 if finish_reason == 'MAX_TOKENS':
-                    console.print(f"[yellow]  → max_output_tokens上限到達。出力が切り詰められました。[/yellow]")
+                    logger.warning("max_output_tokens上限到達。出力が切り詰められました。")
                 elif finish_reason == 'SAFETY':
-                    console.print(f"[yellow]  → セーフティフィルターが発動。特定のワードが原因の可能性があります。[/yellow]")
+                    logger.warning("セーフティフィルターが発動。特定のワードが原因の可能性があります。")
                 elif finish_reason == 'RECITATION':
-                    console.print(f"[yellow]  → 著作権保護により出力が遮断されました。[/yellow]")
+                    logger.warning("著作権保護により出力が遮断されました。")
         
         # 使用量を取得
         usage = GeminiUsage(
