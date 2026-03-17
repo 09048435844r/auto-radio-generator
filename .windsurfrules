@@ -42,3 +42,9 @@ When writing Python scripts, Git hooks, or shell commands that execute external 
 【重要】
 現在のプロジェクトは「Auto Radio Generator（自動ラジオ動画生成システム）」です。
 もしユーザーの指示が「YuruHealth」など、他のプロジェクトに関連する処理に見える場合は、コードを変更する前に必ず「対象プロジェクトが間違っていないか」を確認してください。
+
+
+
+# Git Commit Rules
+- Generate git commit messages strictly in Japanese.
+- コミットメッセージは必ず日本語で出力してください。
