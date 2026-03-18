@@ -712,7 +712,7 @@ async def execute_scripting_phase(
     
     script_start = time.time()
     script_generator = create_script_generator(config, provider=provider)
-    script = script_generator.generate(theme, research_data, avoid_topics=avoid_topics, excluded_topics=excluded_topics)
+    script = await script_generator.generate(theme, research_data, avoid_topics=avoid_topics, excluded_topics=excluded_topics)
 
     phase_label = "Part 2" if excluded_topics and excluded_topics.strip() else "Part 1/Single"
     diagnostics, suspected_swap = _build_speaker_diagnostics(script, label=phase_label)
@@ -1138,7 +1138,7 @@ async def generate_video_workflow(
         
         script_start = time.time()
         script_generator = create_script_generator(config, provider=provider)
-        script = script_generator.generate(theme, research_data)
+        script = await script_generator.generate(theme, research_data)
 
         diagnostics, suspected_swap = _build_speaker_diagnostics(script)
         for msg in diagnostics:
