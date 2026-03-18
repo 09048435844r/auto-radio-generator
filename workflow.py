@@ -641,6 +641,7 @@ async def execute_scripting_phase(
     preloaded_research_data: Optional[ResearchResult] = None,
     excluded_topics: Optional[str] = None,
     avoid_topics: Optional[str] = None,
+    provider: str = "gemini",
     callbacks: Optional[ProgressCallback] = None
 ) -> ScriptingPhaseResult:
     """台本作成フェーズ: リサーチ → 台本生成
@@ -654,6 +655,7 @@ async def execute_scripting_phase(
         enable_research: リサーチを実行するか
         excluded_topics: 除外すべき既出情報（オプション）
         avoid_topics: 避けてほしい話題（Negative Prompt、オプション）
+        provider: LLMプロバイダー名（"gemini" | "openai" | "anthropic"）
         callbacks: 進捗コールバック
     
     Returns:
@@ -705,8 +707,7 @@ async def execute_scripting_phase(
     # Step 2: 台本生成
     cb.log(f"\n== Phase 2-2: 台本生成 ==")
     cb.log(f"テーマ: {theme}")
-    # プロバイダーの決定
-    provider = getattr(config.yaml.script_generator, 'default_provider', 'gemini')
+    cb.log(f"使用エンジン: {provider}")
     cb.progress(0.50, f"📝 台本を執筆中 ({provider})...")
     
     script_start = time.time()
@@ -1223,7 +1224,8 @@ async def generate_video_workflow(
             script=script,
             chapters=synthesis_result.chapters,
             output_path=metadata_path,
-            theme=theme
+            theme=theme,
+            provider=provider
         )
         log(f"✓ YouTubeメタデータ生成: {metadata_path.name}")
         
@@ -1415,6 +1417,9 @@ def run_workflow_sync(
             # Usage集約用
             total_usage = TotalUsage()
             
+            # プロバイダーの決定
+            provider = overrides_obj.llm_provider or getattr(config.yaml.script_generator, 'default_provider', 'gemini')
+            
             # 実行ログ用: API クライアントインスタンスを保持
             api_clients = {
                 'script_generator': None,
@@ -1478,6 +1483,7 @@ def run_workflow_sync(
                     output_dir=output_base,
                     enable_research=should_enable_research,
                     avoid_topics=avoid_topics,
+                    provider=provider,
                     callbacks=callbacks
                 )
                 
@@ -1508,6 +1514,7 @@ def run_workflow_sync(
                     ) if part1_result.research_content else None,
                     excluded_topics=excluded_topics,
                     avoid_topics=avoid_topics,
+                    provider=provider,
                     callbacks=callbacks
                 )
                 
@@ -1536,6 +1543,7 @@ def run_workflow_sync(
                     output_dir=output_base,
                     enable_research=should_enable_research,
                     avoid_topics=avoid_topics,
+                    provider=provider,
                     callbacks=callbacks
                 )
             
@@ -1582,7 +1590,8 @@ def run_workflow_sync(
                     script=scripting_result.script,
                     chapters=production_result.chapters,
                     output_path=metadata_path,
-                    theme=theme
+                    theme=theme,
+                    provider=provider
                 )
                 callbacks.log(f"✓ YouTubeメタデータ生成: {metadata_path.name}")
             
@@ -1914,7 +1923,8 @@ def _generate_youtube_metadata(
     script: Script,
     chapters: list[ChapterMarker],
     output_path: Path,
-    theme: str = ""
+    theme: str = "",
+    provider: str = "gemini"
 ) -> dict:
     """YouTube投稿用のメタデータファイルを生成（packagingプロンプト使用）
     
@@ -1923,19 +1933,19 @@ def _generate_youtube_metadata(
         chapters: チャプターマーカーリスト
         output_path: 出力パス
         theme: 元のテーマ（script.titleが空の場合に使用）
+        provider: LLMプロバイダー名（"gemini" | "openai" | "anthropic"）
         
     Returns:
         生成されたメタデータ辞書 {"title": str, "thumbnail_title": str, "description": str}
     """
-    from services.script_generation.gemini_client import GeminiClient
     from core.settings_manager import SettingsManager
     from core.models.config import load_config
     
     # 設定をロード
     config = load_config()
     
-    # Geminiクライアントを初期化（configを渡す）
-    gemini_client = GeminiClient(config)
+    # 選択されたプロバイダーでクライアントを初期化
+    script_generator = create_script_generator(config, provider=provider)
     settings = SettingsManager().load()
     
     # 台本の要約を生成
@@ -1953,7 +1963,7 @@ def _generate_youtube_metadata(
         # script.titleが空の場合は元のthemeを使用
         effective_theme = script.title or theme or "テーマ不明"
         
-        metadata_result = gemini_client.generate_packaging_prompt(
+        metadata_result = script_generator.generate_packaging_prompt(
             theme=effective_theme,
             script_summary=script_summary
         )
