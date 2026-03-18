@@ -169,7 +169,7 @@ class AnthropicClient(IScriptGenerator):
                             "description": "Reference URLs (max 5)"
                         }
                     },
-                    "required": ["title", "description", "dialogue"]
+                    "required": ["title", "thumbnail_title", "description", "dialogue"]
                 }
             }
         ] if use_tools else None

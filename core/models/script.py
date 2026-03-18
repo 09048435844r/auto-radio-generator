@@ -100,8 +100,8 @@ class Script(BaseModel):
     theme: str = Field(default="", description="今回のテーマ")
     sections: List[DialogueTurn] = Field(..., min_length=10, description="会話のリスト（最低10ターン以上）")
     
-    # メタデータ（デフォルトNone）
-    thumbnail_title: Optional[str] = None
+    # メタデータ
+    thumbnail_title: str = Field(..., description="サムネイル用の短い釣りタイトル（15文字以内推奨）")
     description: Optional[str] = None
     hashtags: List[str] = Field(default_factory=list, description="動画向けハッシュタグ一覧")
     references: List[str] = Field(default_factory=list, description="参考文献URL一覧")
