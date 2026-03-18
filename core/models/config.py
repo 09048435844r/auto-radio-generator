@@ -21,6 +21,8 @@ class EnvSettings(BaseSettings):
     
     perplexity_api_key: str = Field(default="", alias="PERPLEXITY_API_KEY")
     gemini_api_key: str = Field(default="", alias="GEMINI_API_KEY")
+    openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
+    anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
     voicevox_base_url: str = Field(
         default="http://localhost:50021",
         alias="VOICEVOX_BASE_URL"
@@ -58,6 +60,21 @@ class GeminiConfig(BaseModel):
     max_tokens: int = 8192
 
 
+class OpenAIConfig(BaseModel):
+    """OpenAI API設定"""
+    model: str = "gpt-4o-mini"
+    fallback_model: str = "gpt-4o"
+    max_tokens: int = 8192
+    temperature: float = 0.85
+
+
+class AnthropicConfig(BaseModel):
+    """Anthropic API設定"""
+    model: str = "claude-3-5-sonnet-20241022"
+    max_tokens: int = 8192
+    temperature: float = 0.85
+
+
 class ScriptStructureConfig(BaseModel):
     """台本構成比率"""
     main_topic_ratio: int = 70
@@ -68,6 +85,8 @@ class ScriptStructureConfig(BaseModel):
 class ScriptGeneratorConfig(BaseModel):
     """台本生成エンジン設定"""
     gemini: GeminiConfig = Field(default_factory=GeminiConfig)
+    openai: OpenAIConfig = Field(default_factory=OpenAIConfig)
+    anthropic: AnthropicConfig = Field(default_factory=AnthropicConfig)
     structure: ScriptStructureConfig = Field(default_factory=ScriptStructureConfig)
 
 
