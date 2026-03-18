@@ -335,7 +335,7 @@ chmod +x .git/hooks/pre-commit
 | `script_generator.gemini.fallback_model` | Geminiフォールバックモデル (デフォルト: gemini-2.5-pro) |
 | `script_generator.openai.model` | OpenAI台本生成用モデル (デフォルト: gpt-4o-mini) |
 | `script_generator.openai.fallback_model` | OpenAIフォールバックモデル (デフォルト: gpt-4o) |
-| `script_generator.anthropic.model` | Anthropic台本生成用モデル (デフォルト: claude-3-5-sonnet-20240620) |
+| `script_generator.anthropic.model` | Anthropic台本生成用モデル (デフォルト: claude-sonnet-4-6-20260205) |
 | `script_generator.structure` | 台本構成比率 (本題/メール/エンディング) |
 | `audio_synthesizer.speakers.main` | メインパーソナリティのVOICEVOX話者ID |
 | `audio_synthesizer.speakers.sub` | サブパーソナリティのVOICEVOX話者ID |
