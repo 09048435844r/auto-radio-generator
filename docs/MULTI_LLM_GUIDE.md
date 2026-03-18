@@ -71,7 +71,7 @@ script_generator:
 
 ### Anthropic
 
-**モデル**: `claude-3-5-sonnet-20241022`
+**モデル**: `claude-3-5-sonnet-20240620`
 
 **特徴**:
 - ✅ Tool Callingによる構造化出力
@@ -89,7 +89,7 @@ script_generator:
 script_generator:
   default_provider: "anthropic"
   anthropic:
-    model: "claude-3-5-sonnet-20241022"
+    model: "claude-3-5-sonnet-20240620"
     max_tokens: 8192
     temperature: 0.85
 ```
