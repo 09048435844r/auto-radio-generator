@@ -88,6 +88,7 @@
 | **運用自動化** | テーマ選定が毎回人間入力 | 定期運用に人手が必要 |
 | **手動運用** | テーマ選定が毎回人間入力 | 定期運用に人手が必要 |
 | **手動運用** | BGM / 背景画像の選定が手動 | テーマとの不一致リスク |
+| **コスト管理** | Usage追跡とコスト計算がGemini専用設計 | OpenAI/Anthropic使用時のコスト計算が不正確 |
 
 ---
 
@@ -121,6 +122,37 @@
     - 直近 N 回の生成コスト一覧テーブル
     - 月間合計 / 平均コスト表示
   - 目的: **ランニングコストの可視化と予算管理**
+
+- [ ] **Multi-Provider Usage Tracking Refactoring（マルチプロバイダー対応のUsage追跡リファクタリング）** 🔧 技術的負債解消
+  - **現状の問題点:**
+    - `GeminiUsage` クラスが全プロバイダー（Gemini/OpenAI/Anthropic）で共用されており、名前が不適切
+    - `CostCalculator` がGeminiのレート（$1.25/$5.00 per 1M tokens）しか持たず、OpenAI/Anthropicのコスト計算が不正確
+    - コストレポートが常に「Gemini」と表示され、実際の使用プロバイダーが不明瞭
+  - **リファクタリング方針:**
+    - `core/models/usage.py` に `LLMUsage` クラスを新設し、プロバイダー名を含む汎用的な構造に変更
+      ```python
+      @dataclass
+      class LLMUsage:
+          provider: str  # "gemini" | "openai" | "anthropic"
+          model_name: str
+          input_tokens: int
+          output_tokens: int
+          request_count: int
+      ```
+    - `TotalUsage` クラスの `gemini: GeminiUsage` を `llm: LLMUsage` にリネーム（後方互換性のため段階的移行）
+    - `CostCalculator` にプロバイダー別レートを追加:
+      - OpenAI (gpt-4o-mini): Input $0.15/1M, Output $0.60/1M
+      - Anthropic (claude-3-5-sonnet): Input $3.00/1M, Output $15.00/1M
+    - コスト計算ロジックを `usage.provider` に応じて適切なレートを選択するよう修正
+    - コストレポートの表示を「Gemini」固定から動的プロバイダー名表示に変更
+  - **移行戦略:**
+    - 既存の `GeminiUsage` は互換性のため残し、`LLMUsage` のエイリアスとして定義
+    - 新規コードは `LLMUsage` を使用し、段階的に移行
+    - `execution_record.jsonl` / `cost_history.jsonl` のスキーマに `provider` フィールドを追加
+  - **期待効果:**
+    - 正確なプロバイダー別コスト計算とレポート表示
+    - 将来の新規LLMプロバイダー追加時の拡張性向上
+    - コードの可読性と保守性の改善
 
 - [ ] **Feedback Loop（ユーザー評価記録）**
   - 生成完了後に UI で 👍 / 👎 + 自由コメントを入力可能に
