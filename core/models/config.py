@@ -70,7 +70,7 @@ class OpenAIConfig(BaseModel):
 
 class AnthropicConfig(BaseModel):
     """Anthropic API設定"""
-    model: str = "claude-3-5-sonnet-20241022"
+    model: str = "claude-3-5-sonnet-20240620"
     max_tokens: int = 8192
     temperature: float = 0.85
 

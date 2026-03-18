@@ -131,7 +131,7 @@ script_generator:
   
   # Anthropic設定
   anthropic:
-    model: "claude-3-5-sonnet-20241022"  # Claude 3.5 Sonnet
+    model: "claude-3-5-sonnet-20240620"  # Claude 3.5 Sonnet
     max_tokens: 8192                      # 最大トークン数
     temperature: 0.85                     # 創造性パラメータ
   
