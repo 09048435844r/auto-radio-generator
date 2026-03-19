@@ -9,7 +9,10 @@ from anthropic import Anthropic
 from rich.console import Console
 
 from core.interfaces.script_generator import IScriptGenerator
-from core.models import Script, AppConfig, GeminiUsage
+from core.models import Script, AppConfig, LLMUsage
+
+# Backward compatibility alias
+GeminiUsage = LLMUsage
 from core.prompt_manager import PromptManager
 
 if TYPE_CHECKING:
@@ -250,11 +253,12 @@ class AnthropicClient(IScriptGenerator):
             console.print(f"[yellow]  → max_tokens limit reached[/yellow]")
         
         # Extract usage
-        usage = GeminiUsage(
+        usage = LLMUsage(
+            provider="anthropic",
+            model_name=self.model_name,
             input_tokens=message.usage.input_tokens,
             output_tokens=message.usage.output_tokens,
-            request_count=1,
-            model_name=self.model_name
+            request_count=1
         )
         
         # Log prompt and response

@@ -8,7 +8,10 @@ from openai import OpenAI
 from rich.console import Console
 
 from core.interfaces.script_generator import IScriptGenerator
-from core.models import Script, AppConfig, GeminiUsage
+from core.models import Script, AppConfig, LLMUsage
+
+# Backward compatibility alias
+GeminiUsage = LLMUsage
 from core.prompt_manager import PromptManager
 
 if TYPE_CHECKING:
@@ -203,11 +206,12 @@ class OpenAIClient(IScriptGenerator):
                 logger.warning("Content filter triggered")
         
         # Extract usage
-        usage = GeminiUsage(
+        usage = LLMUsage(
+            provider="openai",
+            model_name=model_to_use,
             input_tokens=completion.usage.prompt_tokens,
             output_tokens=completion.usage.completion_tokens,
-            request_count=1,
-            model_name=model_to_use
+            request_count=1
         )
         
         # Log prompt and response

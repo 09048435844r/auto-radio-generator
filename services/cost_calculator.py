@@ -1,70 +1,79 @@
 """APIコスト計算サービス"""
-from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
+import yaml
 
 from core.models.usage import (
     TotalUsage,
     CostBreakdown,
     PerplexityUsage,
-    GeminiUsage,
+    LLMUsage,
 )
 
-
-@dataclass
-class CostRates:
-    """APIコストレート（USD）"""
-    # Perplexity: $0.005 per request
-    perplexity_per_request: float = 0.005
-    
-    # Gemini 3.0 Pro (仮定レート)
-    # Input: $1.25 / 1M tokens
-    # Output: $5.00 / 1M tokens
-    gemini_input_per_million: float = 1.25
-    gemini_output_per_million: float = 5.00
-    
-    # VOICEVOX: $0.00 (Local)
-    voicevox_per_phrase: float = 0.00
-    
-    # USD to JPY レート
-    usd_to_jpy: float = 150.0
+# Backward compatibility alias
+GeminiUsage = LLMUsage
 
 
 class CostCalculator:
-    """APIコスト計算クラス"""
+    """API cost calculator with model-specific rate support
     
-    def __init__(self, rates: Optional[CostRates] = None):
-        self.rates = rates or CostRates()
+    Loads cost rates from config/costs.yaml for accurate per-model
+    cost calculation across multiple LLM providers.
+    """
     
-    def calculate(self, usage: TotalUsage) -> CostBreakdown:
-        """使用量からコストを計算
+    def __init__(self, config_path: Optional[Path] = None):
+        if config_path is None:
+            config_path = Path(__file__).parent.parent / "config" / "costs.yaml"
+        
+        with open(config_path, "r", encoding="utf-8") as f:
+            self.rates = yaml.safe_load(f)
+    
+    def get_llm_rate(self, model_name: str) -> tuple[float, float]:
+        """Get input/output rates for a specific model
         
         Args:
-            usage: 全API使用量
+            model_name: LLM model name (e.g., "gpt-4o-mini")
         
         Returns:
-            CostBreakdown: コスト内訳
+            tuple[float, float]: (input_rate, output_rate) per 1M tokens
         """
-        # Perplexity コスト
+        model_rates = self.rates["llm_models"].get(model_name)
+        if model_rates is None:
+            # Fallback to gemini-1.5-pro rates for unknown models
+            model_rates = self.rates["llm_models"]["gemini-1.5-pro"]
+        return model_rates["input"], model_rates["output"]
+    
+    def calculate(self, usage: TotalUsage) -> CostBreakdown:
+        """Calculate costs from usage with per-provider, per-model rates
+        
+        Args:
+            usage: Total API usage
+        
+        Returns:
+            CostBreakdown: Cost breakdown
+        """
+        # Perplexity cost
         perplexity_usd = (
-            usage.perplexity.request_count * self.rates.perplexity_per_request
+            usage.perplexity.request_count * self.rates["perplexity"]["per_request"]
         )
         
-        # Gemini コスト
-        gemini_input_usd = (
-            usage.gemini.input_tokens / 1_000_000 * self.rates.gemini_input_per_million
-        )
-        gemini_output_usd = (
-            usage.gemini.output_tokens / 1_000_000 * self.rates.gemini_output_per_million
-        )
+        # LLM costs (per-provider aggregation)
+        total_llm_input_usd = 0.0
+        total_llm_output_usd = 0.0
         
-        # VOICEVOX（無料）
+        for provider, llm_usage in usage.llm_usage.items():
+            input_rate, output_rate = self.get_llm_rate(llm_usage.model_name)
+            total_llm_input_usd += (llm_usage.input_tokens / 1_000_000) * input_rate
+            total_llm_output_usd += (llm_usage.output_tokens / 1_000_000) * output_rate
+        
+        # VOICEVOX (free)
         voicevox_usd = 0.0
         
-        # 合計
-        total_usd = perplexity_usd + gemini_input_usd + gemini_output_usd + voicevox_usd
-        total_jpy = total_usd * self.rates.usd_to_jpy
+        # Total
+        total_usd = perplexity_usd + total_llm_input_usd + total_llm_output_usd + voicevox_usd
+        total_jpy = total_usd * self.rates["currency"]["usd_to_jpy"]
         
-        # 無料枠判定（Gemini無料枠: 月15リクエスト/分、1日1500リクエスト）
+        # Free tier check (simplified)
         is_free_tier = self._check_free_tier(usage)
         free_tier_note = ""
         if is_free_tier:
@@ -72,8 +81,8 @@ class CostCalculator:
         
         return CostBreakdown(
             perplexity_usd=perplexity_usd,
-            gemini_input_usd=gemini_input_usd,
-            gemini_output_usd=gemini_output_usd,
+            gemini_input_usd=total_llm_input_usd,  # Reusing field for all LLM input
+            gemini_output_usd=total_llm_output_usd,  # Reusing field for all LLM output
             voicevox_usd=voicevox_usd,
             total_usd=total_usd,
             total_jpy=total_jpy,
@@ -82,10 +91,13 @@ class CostCalculator:
         )
     
     def _check_free_tier(self, usage: TotalUsage) -> bool:
-        """無料枠かどうかを判定（簡易的）"""
-        # Gemini Free Tierの条件は複雑なため、
-        # ここでは単純に1リクエストなら無料枠と仮定
-        return usage.gemini.request_count <= 1
+        """Check if usage qualifies for free tier (simplified)"""
+        # Gemini Free Tier conditions are complex,
+        # here we simply assume <= 1 request qualifies
+        gemini_usage = usage.llm_usage.get("gemini")
+        if gemini_usage:
+            return gemini_usage.request_count <= 1
+        return False
     
     def format_cost_report(self, usage: TotalUsage, cost: CostBreakdown) -> str:
         """コストレポートをMarkdown形式でフォーマット
@@ -111,18 +123,12 @@ class CostCalculator:
                 f"| Perplexity | {usage.perplexity.request_count} リクエスト |"
             )
         
-        # Gemini
-        if usage.gemini.total_tokens > 0:
-            lines.append(
-                f"| Gemini ({usage.gemini.model_name}) | "
-                f"入力 {usage.gemini.input_tokens:,} / 出力 {usage.gemini.output_tokens:,} tokens |"
-            )
-            
-            # 参考文献候補によるトークン増分を表示
-            ref_overhead = usage.gemini.input_tokens - 264  # 推定ベースライン
-            if ref_overhead > 0:
+        # LLM usage (per-provider)
+        for provider, llm_usage in usage.llm_usage.items():
+            if llm_usage.total_tokens > 0:
                 lines.append(
-                    f"|  ├─ 参考文献候補 | +{ref_overhead:,} tokens (推定: 264) |"
+                    f"| {provider.upper()} ({llm_usage.model_name}) | "
+                    f"入力 {llm_usage.input_tokens:,} / 出力 {llm_usage.output_tokens:,} tokens |"
                 )
         
         # VOICEVOX
@@ -142,10 +148,16 @@ class CostCalculator:
         if usage.perplexity.request_count > 0:
             lines.append(f"| Perplexity | ${cost.perplexity_usd:.4f} |")
         
-        if usage.gemini.total_tokens > 0:
-            gemini_total = cost.gemini_input_usd + cost.gemini_output_usd
-            free_note = " (Free Tier)" if cost.is_free_tier else ""
-            lines.append(f"| Gemini{free_note} | ${gemini_total:.4f} |")
+        # LLM costs (per-provider)
+        for provider, llm_usage in usage.llm_usage.items():
+            if llm_usage.total_tokens > 0:
+                input_rate, output_rate = self.get_llm_rate(llm_usage.model_name)
+                provider_cost = (
+                    (llm_usage.input_tokens / 1_000_000) * input_rate +
+                    (llm_usage.output_tokens / 1_000_000) * output_rate
+                )
+                free_note = " (Free Tier)" if cost.is_free_tier and provider == "gemini" else ""
+                lines.append(f"| {provider.upper()}{free_note} | ${provider_cost:.4f} |")
         
         lines.append(f"| VOICEVOX | $0.00 (無料) |")
         

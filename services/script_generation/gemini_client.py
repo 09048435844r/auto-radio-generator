@@ -9,7 +9,10 @@ from google.genai import types
 from rich.console import Console
 
 from core.interfaces import IScriptGenerator, ResearchResult
-from core.models import Script, AppConfig, GeminiUsage, ResearchPlan
+from core.models import Script, AppConfig, LLMUsage, ResearchPlan
+
+# Backward compatibility alias
+GeminiUsage = LLMUsage
 from core.prompt_manager import PromptManager
 from .time_expressions import get_time_expression
 import logging
@@ -65,7 +68,7 @@ class GeminiClient(IScriptGenerator):
         ]
         
         # 最後のAPI呼び出しの使用量を保持
-        self.last_usage: GeminiUsage | None = None
+        self.last_usage: LLMUsage | None = None
         
         # 実行ログ用: プロンプト記録リスト
         self.prompt_records: list = []
@@ -179,11 +182,12 @@ class GeminiClient(IScriptGenerator):
                     data = json.load(f)
                     script_obj = Script(**data)
                     # 使用量をリセット（Mockなので0）
-                    self.last_usage = GeminiUsage(
+                    self.last_usage = LLMUsage(
+                        provider="gemini",
+                        model_name="mock",
                         input_tokens=0,
                         output_tokens=0,
-                        request_count=0,
-                        model_name="mock"
+                        request_count=0
                     )
                     return script_obj
             else:
@@ -357,11 +361,12 @@ class GeminiClient(IScriptGenerator):
                     logger.warning("著作権保護により出力が遮断されました。")
         
         # 使用量を取得
-        usage = GeminiUsage(
+        usage = LLMUsage(
+            provider="gemini",
+            model_name=model_to_use,
             input_tokens=0,
             output_tokens=0,
-            request_count=1,
-            model_name=model_to_use
+            request_count=1
         )
         
         # usage_metadataからトークン数を取得

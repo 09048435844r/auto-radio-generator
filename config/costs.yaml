@@ -1,0 +1,61 @@
+# =============================================================================
+# API Cost Rates Configuration
+# =============================================================================
+# This file defines the cost rates for all API providers used in the system.
+# Update this file when API pricing changes - no code modification required.
+#
+# Last updated: 2026-03-20
+# =============================================================================
+
+# Perplexity API
+perplexity:
+  per_request: 0.005  # USD per request
+
+# LLM Models (USD per 1M tokens)
+llm_models:
+  # Gemini Models
+  gemini-1.5-pro:
+    input: 1.25
+    output: 5.00
+  gemini-1.5-flash:
+    input: 0.075
+    output: 0.30
+  gemini-1.0-pro:
+    input: 0.50
+    output: 1.50
+  
+  # OpenAI Models
+  gpt-4o:
+    input: 2.50
+    output: 10.00
+  gpt-4o-mini:
+    input: 0.15
+    output: 0.60
+  gpt-4-turbo:
+    input: 10.00
+    output: 30.00
+  gpt-3.5-turbo:
+    input: 0.50
+    output: 1.50
+  
+  # Anthropic Models
+  claude-sonnet-4-6:
+    input: 3.00
+    output: 15.00
+  claude-3-5-sonnet-20240620:
+    input: 3.00
+    output: 15.00
+  claude-3-opus-20240229:
+    input: 15.00
+    output: 75.00
+  claude-3-haiku-20240307:
+    input: 0.25
+    output: 1.25
+
+# VOICEVOX (Local execution - free)
+voicevox:
+  per_phrase: 0.00
+
+# Currency conversion
+currency:
+  usd_to_jpy: 150.0

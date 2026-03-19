@@ -15,24 +15,25 @@ class PerplexityUsage:
 
 
 @dataclass
-class GeminiUsage:
-    """Gemini API使用量"""
+class LLMUsage:
+    """Generic LLM API usage with provider tracking
+    
+    Supports multiple LLM providers (Gemini, OpenAI, Anthropic) with
+    provider-specific tracking for accurate cost calculation.
+    """
+    provider: str  # "gemini" | "openai" | "anthropic"
+    model_name: str
     input_tokens: int = 0
     output_tokens: int = 0
     request_count: int = 0
-    model_name: str = ""
     
     @property
     def total_tokens(self) -> int:
         return self.input_tokens + self.output_tokens
-    
-    def __add__(self, other: "GeminiUsage") -> "GeminiUsage":
-        return GeminiUsage(
-            input_tokens=self.input_tokens + other.input_tokens,
-            output_tokens=self.output_tokens + other.output_tokens,
-            request_count=self.request_count + other.request_count,
-            model_name=self.model_name or other.model_name
-        )
+
+
+# Backward compatibility alias
+GeminiUsage = LLMUsage
 
 
 @dataclass
@@ -44,17 +45,36 @@ class VoicevoxUsage:
 
 @dataclass
 class TotalUsage:
-    """全API使用量の集約"""
+    """Total API usage aggregation with multi-provider support
+    
+    Aggregates usage across all API providers. LLM usage is tracked
+    per-provider in a dictionary to prevent information loss when
+    multiple providers are used in a single workflow.
+    """
     perplexity: PerplexityUsage = field(default_factory=PerplexityUsage)
-    gemini: GeminiUsage = field(default_factory=GeminiUsage)
+    llm_usage: dict[str, LLMUsage] = field(default_factory=dict)
     voicevox: VoicevoxUsage = field(default_factory=VoicevoxUsage)
     
-    # 処理時間
+    # Processing time
     total_duration_sec: float = 0.0
     research_duration_sec: float = 0.0
     script_duration_sec: float = 0.0
     audio_duration_sec: float = 0.0
     render_duration_sec: float = 0.0
+    
+    @property
+    def gemini(self) -> LLMUsage:
+        """Backward compatibility property for existing code"""
+        return self.llm_usage.get(
+            "gemini",
+            LLMUsage(
+                provider="gemini",
+                model_name="",
+                input_tokens=0,
+                output_tokens=0,
+                request_count=0
+            )
+        )
 
 
 @dataclass
