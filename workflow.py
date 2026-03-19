@@ -1029,9 +1029,10 @@ async def generate_video_workflow(
                 progress(0.05, "Step 0: AIが検索計画を作成中...")
                 log(f"\n== Step 0: 検索計画作成 ==")
                 
-                # プロバイダーの決定（検索計画はGeminiで実行）
-                script_generator = create_script_generator(config, provider="gemini")
-                plan = await script_generator.create_research_plan(theme, overrides.research_mode, instruction=None)
+                # リサーチ計画作成はGemini固定（OpenAI/Anthropicは未対応）
+                log(f"使用エンジン: gemini (リサーチ計画作成)")
+                research_planner = create_script_generator(config, provider="gemini")
+                plan = await research_planner.create_research_plan(theme, overrides.research_mode, instruction=None)
                 
                 log(f"✓ 検索計画作成完了")
                 log(f"切り口: {plan.angle}")
