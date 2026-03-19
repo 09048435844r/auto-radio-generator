@@ -2,6 +2,7 @@ from .config import AppConfig, load_config
 from .script import Script, DialogueLine
 from .usage import (
     PerplexityUsage,
+    LLMUsage,
     GeminiUsage,
     VoicevoxUsage,
     TotalUsage,
@@ -17,6 +18,7 @@ __all__ = [
     "Script",
     "DialogueLine",
     "PerplexityUsage",
+    "LLMUsage",
     "GeminiUsage",
     "VoicevoxUsage",
     "TotalUsage",
