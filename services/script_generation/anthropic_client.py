@@ -373,6 +373,33 @@ class AnthropicClient(IScriptGenerator):
         prompt += "上記の情報を基に、ラジオ台本を生成してください。generate_radio_script ツールを使用してください。"
         return prompt
     
+    def generate_packaging_prompt(self, theme: str, script_summary: str) -> str:
+        """packagingプロンプトを使用してメタデータを生成
+        
+        Args:
+            theme: テーマ
+            script_summary: 台本の要約
+            
+        Returns:
+            生成されたメタデータJSON文字列
+        """
+        # プロンプトマネージャーからpackagingプロンプトを取得
+        packaging_prompt = self.prompt_manager.get_prompt("packaging", "default")
+        
+        # 変数を置換
+        formatted_prompt = packaging_prompt.format(
+            theme=theme,
+            script_summary=script_summary
+        )
+        
+        # Anthropicで生成（_call_apiメソッドを使用、Tool Callingは不要）
+        response_text, _ = self._call_api(
+            system_prompt="",
+            user_prompt=formatted_prompt,
+            use_tools=False  # JSON出力のみなのでTool Callingは使わない
+        )
+        return response_text
+    
     async def create_research_plan(self, theme: str, mode: str, instruction: Optional[str] = None):
         """Create research plan (delegates to Gemini for now)
         
