@@ -63,7 +63,7 @@ class OpenAIClient(IScriptGenerator):
         console.print(f"[cyan]Generating script with OpenAI ({self.model_name})...[/cyan]")
         
         # Build prompts
-        system_prompt = self._build_system_prompt(research_data)
+        system_prompt = self._build_system_prompt(research_data, theme)
         user_prompt = self._build_user_prompt(theme, research_data, avoid_topics, excluded_topics)
         
         self.last_usage = None
@@ -253,7 +253,7 @@ class OpenAIClient(IScriptGenerator):
             console.print(f"[dim]JSON: {response_text[:200]}...[/dim]")
             raise
     
-    def _build_system_prompt(self, research_data: Optional["ResearchResult"] = None) -> str:
+    def _build_system_prompt(self, research_data: Optional["ResearchResult"] = None, theme: str = "") -> str:
         """Build system prompt based on research mode"""
         if research_data and research_data.mode == "weekly_digest":
             from services.script_generation.time_expressions import get_time_expression
@@ -263,6 +263,7 @@ class OpenAIClient(IScriptGenerator):
                 title_prefix=time_expr["title_prefix"],
                 intro_phrase=time_expr["intro_phrase"],
                 outro_phrase=time_expr["outro_phrase"],
+                theme=theme,
                 main_char=self.personalities.main,
                 sub_char=self.personalities.sub,
                 main=self.personalities.main,
