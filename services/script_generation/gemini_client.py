@@ -157,7 +157,7 @@ class GeminiClient(IScriptGenerator):
             
             raise
     
-    def generate(self, theme: str, research_data: Optional[ResearchResult] = None, avoid_topics: Optional[str] = None, excluded_topics: Optional[str] = None) -> Script:
+    async def generate(self, theme: str, research_data: Optional[ResearchResult] = None, avoid_topics: Optional[str] = None, excluded_topics: Optional[str] = None) -> Script:
         """テーマとリサーチデータに基づいて台本を生成する
         
         Args:
