@@ -256,8 +256,13 @@ class OpenAIClient(IScriptGenerator):
     def _build_system_prompt(self, research_data: Optional["ResearchResult"] = None) -> str:
         """Build system prompt based on research mode"""
         if research_data and research_data.mode == "weekly_digest":
+            from services.script_generation.time_expressions import get_time_expression
+            time_expr = get_time_expression("weekly_digest")
             return self.prompt_manager.get_script_prompt(
                 "weekly_digest",
+                title_prefix=time_expr["title_prefix"],
+                intro_phrase=time_expr["intro_phrase"],
+                outro_phrase=time_expr["outro_phrase"],
                 main_char=self.personalities.main,
                 sub_char=self.personalities.sub,
                 main=self.personalities.main,
