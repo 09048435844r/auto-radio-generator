@@ -1,28 +1,164 @@
-# Environment
+# =============================================================================
+# Python
+# =============================================================================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Virtual environments
 .env
 .venv/
 venv/
-__pycache__/
-*.pyc
+venv_py313/
+ENV/
+env/
+env.bak/
+venv.bak/
 
-# Output files
+# =============================================================================
+# Project-specific output files
+# =============================================================================
+# 動画生成出力（.gitkeepは保持）
 output/*/
+!output/.gitkeep
 
-# IDE
+# 一時ディレクトリ
+tmp/
+temp/
+tmp_*/
+temp_*/
+
+# ログファイル
+*.log
+logs/*.log
+logs/*.jsonl
+!logs/.gitkeep
+
+# =============================================================================
+# IDE & Editor
+# =============================================================================
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
 
-# OS
+# Windsurf specific
+.windsurf/plans/
+
+# =============================================================================
+# OS generated files
+# =============================================================================
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
+desktop.ini
 
-# Temporary
-*.tmp
-*.log
-
+# =============================================================================
+# Application-specific
+# =============================================================================
 # User settings
 user_settings.json
 
 # YouTube OAuth secrets
 client_secret.json
 token.json
+
+# API test files
+test_anthropic_api.py
+
+# =============================================================================
+# Media files (generated content)
+# =============================================================================
+# 動画ファイル
+*.mp4
+*.avi
+*.mov
+*.wmv
+*.flv
+*.mkv
+
+# 音声ファイル
+*.wav
+*.mp3
+*.ogg
+*.flac
+*.aac
+
+# 画像ファイル（アセット以外）
+output/**/*.png
+output/**/*.jpg
+output/**/*.jpeg
+output/**/*.gif
+output/**/*.webp
+
+# 字幕ファイル
+*.srt
+*.vtt
+*.ass
+
+# =============================================================================
+# Temporary & Cache files
+# =============================================================================
+*.tmp
+*.temp
+*.bak
+*.swp
+*.cache
+.cache/
+
+# =============================================================================
+# Documentation (keep source, ignore generated)
+# =============================================================================
+# Keep all markdown and yaml in docs/
+# But ignore any generated HTML/PDF if added later
+docs/**/*.html
+docs/**/*.pdf
