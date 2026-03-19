@@ -20,7 +20,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.models import (
     load_config, Script, AppConfig,
-    TotalUsage, PerplexityUsage, GeminiUsage, VoicevoxUsage, CostBreakdown,
+    TotalUsage, PerplexityUsage, LLMUsage, GeminiUsage, VoicevoxUsage, CostBreakdown,
     ExecutionLogEntry, PromptRecord, ConfigSnapshot, CostLogEntry
 )
 from core.models.script import DialogueTurn  # 追加インポート
@@ -1146,9 +1146,21 @@ async def generate_video_workflow(
         if suspected_swap:
             log("[yellow][WARN] 口調ヒント上、A/B話者の役割逆転の疑いがあります[/yellow]")
         
-        # Usage記録
+        # Usage記録（プロバイダー別に集約）
         if script_generator.last_usage:
-            total_usage.gemini = script_generator.last_usage
+            provider = script_generator.last_usage.provider
+            if provider in total_usage.llm_usage:
+                # 既存の使用量に加算
+                existing = total_usage.llm_usage[provider]
+                total_usage.llm_usage[provider] = LLMUsage(
+                    provider=provider,
+                    model_name=script_generator.last_usage.model_name,
+                    input_tokens=existing.input_tokens + script_generator.last_usage.input_tokens,
+                    output_tokens=existing.output_tokens + script_generator.last_usage.output_tokens,
+                    request_count=existing.request_count + script_generator.last_usage.request_count
+                )
+            else:
+                total_usage.llm_usage[provider] = script_generator.last_usage
         
         total_usage.script_duration_sec = time.time() - script_start
         log(f"✓ 台本生成完了: {len(script.sections)}フレーズ ({total_usage.script_duration_sec:.1f}秒)")
@@ -1450,7 +1462,9 @@ def run_workflow_sync(
                 )
                 queries = planning_result.queries
                 if planning_result.gemini_usage:
-                    total_usage.gemini = planning_result.gemini_usage
+                    # プロバイダー別に集約
+                    provider = planning_result.gemini_usage.provider
+                    total_usage.llm_usage[provider] = planning_result.gemini_usage
             else:
                 callbacks.log("[INFO] 企画フェーズスキップ（リサーチ無効）")
             
@@ -1551,7 +1565,19 @@ def run_workflow_sync(
             if scripting_result.perplexity_usage:
                 total_usage.perplexity = scripting_result.perplexity_usage
             if scripting_result.gemini_usage:
-                total_usage.gemini = scripting_result.gemini_usage
+                # プロバイダー別に集約
+                provider = scripting_result.gemini_usage.provider
+                if provider in total_usage.llm_usage:
+                    existing = total_usage.llm_usage[provider]
+                    total_usage.llm_usage[provider] = LLMUsage(
+                        provider=provider,
+                        model_name=scripting_result.gemini_usage.model_name,
+                        input_tokens=existing.input_tokens + scripting_result.gemini_usage.input_tokens,
+                        output_tokens=existing.output_tokens + scripting_result.gemini_usage.output_tokens,
+                        request_count=existing.request_count + scripting_result.gemini_usage.request_count
+                    )
+                else:
+                    total_usage.llm_usage[provider] = scripting_result.gemini_usage
             total_usage.research_duration_sec = scripting_result.research_duration_sec
             total_usage.script_duration_sec = scripting_result.script_duration_sec
             
@@ -1773,7 +1799,8 @@ def run_workflow_sync(
                     perplexity_requests=total_usage.perplexity.request_count
                 )
                 
-                # CostLogEntryを作成
+                # CostLogEntryを作成（後方互換性のためgeminiプロパティを使用）
+                # total_usage.geminiは全LLM使用量の合計を返すプロパティ
                 cost_log = CostLogEntry(
                     execution_id=execution_id,
                     timestamp=datetime.now().isoformat(),
