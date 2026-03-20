@@ -791,6 +791,9 @@ def generate_video(
     second_mode_enum = RESEARCH_MODE_MAP.get(second_mode) if second_mode != "なし" else None
     enable_research = mode is not None
     
+    # デバッグ: UIから渡されたllm_providerの値を確認
+    append_log(f"[DEBUG] UI llm_provider = {llm_provider}")
+    
     # オーバーライド設定を作成
     overrides = UIOverrides(
         research_mode=mode,
@@ -804,6 +807,8 @@ def generate_video(
         background_image=background_image,
         bgm_file=bgm_file
     )
+    
+    append_log(f"[DEBUG] UIOverrides.llm_provider = {overrides.llm_provider}")
     
     # 進捗表示用コールバック
     def log_callback(msg: str):
