@@ -1134,6 +1134,8 @@ async def generate_video_workflow(
         log(f"\n== 台本生成 ==")
         log(f"テーマ: {theme}")
         # プロバイダーの決定
+        log(f"[DEBUG] overrides.llm_provider = {overrides.llm_provider}")
+        log(f"[DEBUG] config default_provider = {getattr(config.yaml.script_generator, 'default_provider', 'gemini')}")
         provider = overrides.llm_provider or getattr(config.yaml.script_generator, 'default_provider', 'gemini')
         log(f"使用エンジン: {provider}")
         
