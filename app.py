@@ -1369,25 +1369,29 @@ def render_video_from_assets(
 def generate_script_from_research(
     research_text: str,
     theme: str,
+    model_name: str,
+    comparison_state: list,
     progress=gr.Progress()
-) -> tuple[str, str]:
+) -> tuple[str, str, str, list]:
     """リサーチ結果から台本を生成
     
     Args:
         research_text: Perplexity等のリサーチ結果
         theme: テーマ/タイトル
+        model_name: 使用するモデル名
+        comparison_state: 比較用状態
     
     Returns:
-        (台本JSON, 台本JSON) - Step AとStep Bの両方に出力
+        (台本JSON, 台本JSON, 比較レポート, 更新された状態)
     """
     # 入力検証
     if not research_text or not research_text.strip():
         error_msg = "エラー: リサーチ結果を入力してください。"
-        return error_msg, error_msg
+        return error_msg, error_msg, "", comparison_state
     
     if not theme or not theme.strip():
         error_msg = "エラー: テーマ/タイトルを入力してください。"
-        return error_msg, error_msg
+        return error_msg, error_msg, "", comparison_state
     
     try:
         # ログをクリア
@@ -1400,7 +1404,18 @@ def generate_script_from_research(
         
         # 設定を読み込み
         config = load_config(PROJECT_ROOT)
-        script_generator = create_script_generator(config)
+        
+        # モデル名からプロバイダーを推定
+        from services.script_generation.llm_factory import get_provider_from_model_name
+        try:
+            provider = get_provider_from_model_name(model_name)
+            append_log(f"選択されたモデル: {model_name} ({provider.upper()})")
+        except ValueError as e:
+            error_msg = f"エラー: {str(e)}"
+            append_log(error_msg)
+            return error_msg, error_msg, "", comparison_state
+        
+        script_generator = create_script_generator(config, provider=provider)
         
         progress(0.4, desc="リサーチデータを処理中...")
         
@@ -1440,14 +1455,51 @@ def generate_script_from_research(
         if script.thumbnail_title:
             append_log(f"サムネイルタイトル: {script.thumbnail_title}")
         
+        # コスト表示
+        if hasattr(script_generator, 'last_usage') and script_generator.last_usage:
+            usage = script_generator.last_usage
+            from services.cost_calculator import CostCalculator
+            calculator = CostCalculator()
+            cost_lines = calculator.format_llm_cost_log(usage)
+            for line in cost_lines:
+                append_log(line)
+        
         script_json = json.dumps(script_dict, ensure_ascii=False, indent=2)
-        # Step AとStep Bの両方に同じ内容を返す
-        return script_json, script_json
+        
+        # 比較用に保存してレポート生成
+        comparison_report_md = ""
+        updated_state = comparison_state
+        
+        if hasattr(script_generator, 'last_usage') and script_generator.last_usage:
+            # 同じモデルのデータは上書き
+            updated_state = [
+                d for d in comparison_state 
+                if d["model_name"] != model_name
+            ]
+            
+            updated_state.append({
+                "model_name": model_name,
+                "script_json": script_json,
+                "usage": script_generator.last_usage
+            })
+            
+            # 比較レポート生成（2つ以上のデータがある場合）
+            if len(updated_state) >= 2:
+                from services.comparison_report import generate_comparison_report
+                comparison_report_md = generate_comparison_report(updated_state)
+            else:
+                comparison_report_md = f"*{len(updated_state)}/3 モデルの台本を生成済み。比較には2つ以上必要です。*"
+        else:
+            comparison_report_md = "*使用量情報が取得できませんでした*"
+        
+        return script_json, script_json, comparison_report_md, updated_state
         
     except Exception as e:
         error_msg = f"台本生成中にエラーが発生しました: {str(e)}"
         append_log(f"❌ {error_msg}")
-        return error_msg, error_msg
+        import traceback
+        append_log(f"\n詳細:\n{traceback.format_exc()}")
+        return error_msg, error_msg, "", comparison_state
 
 
 # Dashboard functions
@@ -2259,8 +2311,42 @@ def create_manual_tab(assets: dict) -> dict[str, object]:
         placeholder="例: AIの倫理的課題について",
         info="台本のテーマまたはタイトルを入力してください",
     )
+    
+    # モデル選択ドロップダウン
+    from services.script_generation.llm_factory import get_available_models
+    try:
+        available_models = get_available_models(load_config(PROJECT_ROOT))
+        default_model = available_models[0] if available_models else "gemini-1.5-pro"
+    except Exception:
+        available_models = ["gemini-1.5-pro", "gpt-4o-mini", "claude-sonnet-4-6"]
+        default_model = "gemini-1.5-pro"
+    
+    llm_model_manual = gr.Dropdown(
+        label="🤖 台本生成モデル",
+        choices=available_models,
+        value=default_model,
+        info="台本生成に使用するLLMモデルを選択（モデル比較に便利）",
+    )
+    
     generate_script_btn = gr.Button("📝 この内容で台本を作成", variant="primary", size="lg")
     script_output = gr.Code(label="生成された台本", language="json", lines=20, interactive=True)
+    
+    # 比較用State
+    comparison_state = gr.State(value=[])
+    
+    # 比較レポート表示エリア
+    with gr.Row():
+        comparison_report = gr.Markdown(
+            label="📊 台本比較レポート",
+            value="*複数のモデルで台本を生成すると、ここに比較レポートが表示されます*",
+        )
+    
+    # 比較クリアボタン
+    clear_comparison_btn = gr.Button(
+        "🗑️ 比較データをクリア",
+        variant="secondary",
+        size="sm"
+    )
 
     gr.Markdown("---")
     gr.Markdown("### 🎤 Step B: 音声合成 (Audio Synthesis)")
@@ -2342,8 +2428,12 @@ def create_manual_tab(assets: dict) -> dict[str, object]:
         "step_mode": step_mode,
         "research_input": research_input,
         "theme_input_manual": theme_input_manual,
+        "llm_model_manual": llm_model_manual,
         "generate_script_btn": generate_script_btn,
         "script_output": script_output,
+        "comparison_state": comparison_state,
+        "comparison_report": comparison_report,
+        "clear_comparison_btn": clear_comparison_btn,
         "script_editor": script_editor,
         "synthesize_btn": synthesize_btn,
         "audio_output": audio_output,
@@ -2705,9 +2795,33 @@ def create_ui() -> gr.Blocks:
         # 台本生成 (Step Aの出力をStep Bのエディタにも反映)
         manual_components["generate_script_btn"].click(
             fn=generate_script_from_research,
-            inputs=[manual_components["research_input"], manual_components["theme_input_manual"]],
-            outputs=[manual_components["script_output"], manual_components["script_editor"]],
+            inputs=[
+                manual_components["research_input"], 
+                manual_components["theme_input_manual"],
+                manual_components["llm_model_manual"],
+                manual_components["comparison_state"]
+            ],
+            outputs=[
+                manual_components["script_output"], 
+                manual_components["script_editor"],
+                manual_components["comparison_report"],
+                manual_components["comparison_state"]
+            ],
             show_progress="full"
+        )
+        
+        # 比較データクリア
+        def clear_comparison_data():
+            """比較データをクリア"""
+            return "*比較データをクリアしました。新しいテーマで検証を開始できます。*", []
+        
+        manual_components["clear_comparison_btn"].click(
+            fn=clear_comparison_data,
+            inputs=[],
+            outputs=[
+                manual_components["comparison_report"],
+                manual_components["comparison_state"]
+            ]
         )
         
         # 音声合成 (Step B) - Step Cの入力にも反映

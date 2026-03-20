@@ -99,6 +99,31 @@ class CostCalculator:
             return gemini_usage.request_count <= 1
         return False
     
+    def format_llm_cost_log(self, usage: LLMUsage) -> list[str]:
+        """Format LLM usage and cost as log lines
+        
+        Args:
+            usage: LLM usage data
+        
+        Returns:
+            list[str]: List of log lines
+        """
+        input_rate, output_rate = self.get_llm_rate(usage.model_name)
+        cost_usd = (
+            (usage.input_tokens / 1_000_000) * input_rate +
+            (usage.output_tokens / 1_000_000) * output_rate
+        )
+        cost_jpy = cost_usd * self.rates["currency"]["usd_to_jpy"]
+        
+        return [
+            "",
+            "【使用量・コスト】",
+            f"{usage.provider.upper()}: {usage.model_name}",
+            f"  入力トークン: {usage.input_tokens:,}",
+            f"  出力トークン: {usage.output_tokens:,}",
+            f"  コスト: ${cost_usd:.4f} (約{cost_jpy:.1f}円)"
+        ]
+    
     def format_cost_report(self, usage: TotalUsage, cost: CostBreakdown) -> str:
         """コストレポートをMarkdown形式でフォーマット
         
