@@ -124,15 +124,15 @@ script_generator:
   
   # OpenAI設定
   openai:
-    model: "gpt-4o-mini"                 # メインモデル（コスト効率重視）
-    fallback_model: "gpt-4o"             # フォールバックモデル（高品質）
-    max_tokens: 8192                      # 最大トークン数
+    model: "gpt-4o"                 # メインモデル（高品質）
+    fallback_model: "gpt-4o-mini"             # フォールバックモデル（コスト効率重視）
+    max_tokens: 16384                      # 最大トークン数
     temperature: 0.85                     # 創造性パラメータ
   
   # Anthropic設定
   anthropic:
     model: "claude-sonnet-4-6"  # Claude Sonnet 4.6
-    max_tokens: 8192                      # 最大トークン数
+    max_tokens: 16384                      # 最大トークン数
     temperature: 0.85                     # 創造性パラメータ
   
   # 台本の構成比率（合計100%）
