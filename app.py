@@ -1497,6 +1497,8 @@ def generate_script_from_research(
     Returns:
         (台本JSON, 台本JSON, 比較レポート, 更新された状態)
     """
+    import asyncio
+    
     # 入力検証
     if not research_text or not research_text.strip():
         error_msg = "エラー: リサーチ結果を入力してください。"
@@ -1542,8 +1544,11 @@ def generate_script_from_research(
         
         progress(0.6, desc="台本を生成中...")
         
-        # 台本を生成
-        script = script_generator.generate(theme.strip(), research_result)
+        # 台本を生成（非同期処理）
+        async def generate_async():
+            return await script_generator.generate(theme.strip(), research_result)
+        
+        script = asyncio.run(generate_async())
         
         progress(0.9, desc="結果を整形中...")
         
