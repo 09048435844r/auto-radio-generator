@@ -1433,7 +1433,10 @@ def run_workflow_sync(
             total_usage = TotalUsage()
             
             # プロバイダーの決定
+            callbacks.log(f"[DEBUG] overrides_obj.llm_provider = {overrides_obj.llm_provider}")
+            callbacks.log(f"[DEBUG] config default_provider = {getattr(config.yaml.script_generator, 'default_provider', 'gemini')}")
             provider = overrides_obj.llm_provider or getattr(config.yaml.script_generator, 'default_provider', 'gemini')
+            callbacks.log(f"[DEBUG] 選択されたプロバイダー: {provider}")
             
             # 実行ログ用: API クライアントインスタンスを保持
             api_clients = {
