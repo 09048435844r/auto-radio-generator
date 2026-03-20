@@ -110,12 +110,12 @@ class FfmpegRenderer(IVideoRenderer):
                 continue
 
             short_title = self._truncate_topic_title(chapter.title, max_length=20)
-            overlay_text = self._escape_drawtext_text(f"話題：{short_title}")
+            overlay_text = self._escape_drawtext_text(short_title)
             drawtext_filters.append(
                 (
                     f"drawtext=text='{overlay_text}':"
                     f"fontfile='{drawtext_fontfile}':"
-                    f"fontsize=64:fontcolor=white:"
+                    f"fontsize=80:fontcolor=white:"
                     f"x=(w-text_w)/2:y=50:"
                     f"box=1:boxcolor=black@0.5:boxborderw=10:"
                     f"enable='between(t,{start_sec:.3f},{end_sec:.3f})'"
@@ -332,36 +332,12 @@ class FfmpegRenderer(IVideoRenderer):
         composed_video_filter_chain = ",".join(composed_video_filters)
         
         # ビデオフィルター構築
-        if enable_spectrum:
-            # 音声波形ビジュアライザーを追加
-            # showwaves: 波形表示、画面上部1/3付近に配置（字幕との被りを防ぐ）
-            spectrum_height = int(int(height) * 0.12)  # 画面高さの12%
-            spectrum_y = int(int(height) * 0.25)  # 画面上部25%の位置（上部1/3付近）
-            
-            # 波形生成フィルター（視認性向上: 太い線、明るい色）
-            waves_filter = (
-                f"[1:a]showwaves=s={width}x{spectrum_height}:"
-                f"mode=line:colors=white:"
-                f"rate={fps}:scale=lin[waves]"
-            )
-            
-            # 背景画像スケーリング
-            bg_scale_filter = f"[0:v]scale={width}:{height}[bg]"
-            
-            # 波形を背景にオーバーレイ
-            overlay_filter = f"[bg][waves]overlay=0:{spectrum_y}:format=auto[composed]"
-            
-            # 日付 → トピックオーバーレイ → 字幕を合成
-            video_filter = (
-                f"{waves_filter};{bg_scale_filter};{overlay_filter};"
-                f"[composed]{composed_video_filter_chain}[vout]"
-            )
-        else:
-            # スペクトラムなし（日付 → トピックオーバーレイ → 字幕）
-            video_filter = (
-                f"[0:v]scale={width}:{height},"
-                f"{composed_video_filter_chain}[vout]"
-            )
+        # TASK-7: 波形表示を完全に削除（視認性向上のため）
+        # 日付 → トピックオーバーレイ → 字幕のみを表示
+        video_filter = (
+            f"[0:v]scale={width}:{height},"
+            f"{composed_video_filter_chain}[vout]"
+        )
         
         # フィルター全体
         filter_complex = f"{bgm_filter};{audio_mix_filter};{video_filter}"
