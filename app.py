@@ -1071,6 +1071,111 @@ def generate_script_only(
         return "", get_logs()
 
 
+def research_only(
+    theme: str,
+    research_mode: str,
+    progress=gr.Progress()
+) -> tuple[str, str]:
+    """リサーチのみを実行してJSONLファイルに保存
+    
+    Args:
+        theme: 動画のテーマ
+        research_mode: リサーチモード
+        progress: Gradio進捗バー
+    
+    Returns:
+        (保存パス, ログ出力)
+    """
+    import asyncio
+    from services.research import PerplexityResearcher
+    from services.script_generation import GeminiClient
+    from datetime import datetime
+    
+    clear_logs()
+    append_log("🔍 リサーチのみモード")
+    append_log("=" * 40)
+    append_log("リサーチ結果を保存します")
+    
+    if not theme or not theme.strip():
+        return "", "エラー: テーマを入力してください。"
+    
+    try:
+        config = load_config(PROJECT_ROOT)
+        mode = RESEARCH_MODE_MAP.get(research_mode)
+        
+        if not mode:
+            return "", "エラー: リサーチモードを選択してください。"
+        
+        async def execute_research():
+            progress(0.1, desc="Step 0: AIが検索計画を作成中...")
+            append_log(f"\n== Step 0: 検索計画作成 ==")
+            append_log(f"テーマ: {theme.strip()}")
+            
+            script_generator = GeminiClient(config)
+            plan = await script_generator.create_research_plan(theme.strip(), mode, instruction=None)
+            
+            append_log(f"\n✓ 検索計画作成完了")
+            append_log(f"切り口: {plan.angle}")
+            append_log(f"\n検索クエリ:")
+            for i, q in enumerate(plan.queries, 1):
+                append_log(f"  {i}. {q}")
+            
+            progress(0.5, desc="Step 1: 並列リサーチ中...")
+            append_log(f"\n== Step 1: 並列リサーチ ({research_mode}) ==")
+            
+            researcher = PerplexityResearcher(config)
+            research_result = await researcher.research_multi(plan.queries, mode)
+            
+            append_log(f"\n✓ 並列リサーチ完了")
+            append_log(f"収集した情報: {len(research_result.content)}文字")
+            
+            return research_result, plan
+        
+        research_result, plan = asyncio.run(execute_research())
+        
+        progress(0.9, desc="リサーチ結果を保存中...")
+        
+        # 保存先ディレクトリ
+        research_dir = PROJECT_ROOT / "data" / "research"
+        research_dir.mkdir(parents=True, exist_ok=True)
+        
+        # ファイル名（タイムスタンプ付き）
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_theme = "".join(c for c in theme.strip()[:30] if c.isalnum() or c in (' ', '_')).replace(' ', '_')
+        filename = f"research_{timestamp}_{safe_theme}.jsonl"
+        filepath = research_dir / filename
+        
+        # JSONL形式で保存
+        research_data = {
+            "timestamp": datetime.now().isoformat(),
+            "theme": theme.strip(),
+            "mode": research_mode,
+            "angle": plan.angle,
+            "queries": plan.queries,
+            "content": research_result.content,
+            "sources": research_result.sources
+        }
+        
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(json.dumps(research_data, ensure_ascii=False) + "\n")
+        
+        progress(1.0, desc="完了!")
+        append_log(f"\n✓ リサーチ結果を保存しました")
+        append_log(f"保存先: {filepath}")
+        append_log("\n" + "=" * 40)
+        append_log("✓ リサーチのみモード完了")
+        append_log("保存されたリサーチ結果は手動モードで利用できます")
+        
+        return str(filepath), get_logs()
+        
+    except Exception as e:
+        error_msg = f"リサーチ中にエラーが発生しました: {str(e)}"
+        append_log(f"\n❌ {error_msg}")
+        import traceback
+        append_log(f"\n詳細:\n{traceback.format_exc()}")
+        return "", get_logs()
+
+
 def synthesize_audio_from_script(
     script_json: str,
     progress=gr.Progress()
@@ -2186,6 +2291,20 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
                             size="lg",
                             scale=1,
                         )
+                    
+                    with gr.Row():
+                        research_only_btn = gr.Button(
+                            "🔍 リサーチのみ実行",
+                            variant="secondary",
+                            size="sm",
+                        )
+                    
+                    research_output = gr.Textbox(
+                        label="保存されたリサーチファイル",
+                        placeholder="リサーチ実行後にファイルパスが表示されます",
+                        interactive=False,
+                        visible=False
+                    )
 
                     gr.Markdown(
                         """
@@ -2264,6 +2383,8 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
         "youtube_upload_checkbox": youtube_upload_checkbox,
         "generate_btn": generate_btn,
         "script_only_btn": script_only_btn,
+        "research_only_btn": research_only_btn,
+        "research_output": research_output,
         "video_output": video_output,
         "youtube_url_output": youtube_url_output,
         "log_output": log_output,
@@ -2281,7 +2402,7 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
 
 def create_manual_tab(assets: dict) -> dict[str, object]:
     """Create Manual tab UI and return component references."""
-    with gr.Accordion("🛠 こだわりステップモード", open=False):
+    with gr.Accordion("🛠 こだわりステップモード", open=True):
         gr.Markdown(
             """
             **高度な制作モード** - 各ステップを個別に実行・調整できます
@@ -2317,7 +2438,12 @@ def create_manual_tab(assets: dict) -> dict[str, object]:
     try:
         available_models = get_available_models(load_config(PROJECT_ROOT))
         default_model = available_models[0] if available_models else "gemini-1.5-pro"
-    except Exception:
+        print(f"[DEBUG] Available models: {available_models}")
+        print(f"[DEBUG] Default model: {default_model}")
+    except Exception as e:
+        print(f"[ERROR] Failed to load available models: {e}")
+        import traceback
+        traceback.print_exc()
         available_models = ["gemini-1.5-pro", "gpt-4o-mini", "claude-sonnet-4-6"]
         default_model = "gemini-1.5-pro"
     
@@ -2327,6 +2453,7 @@ def create_manual_tab(assets: dict) -> dict[str, object]:
         value=default_model,
         info="台本生成に使用するLLMモデルを選択（モデル比較に便利）",
     )
+    print(f"[DEBUG] llm_model_manual created: {llm_model_manual}")
     
     generate_script_btn = gr.Button("📝 この内容で台本を作成", variant="primary", size="lg")
     script_output = gr.Code(label="生成された台本", language="json", lines=20, interactive=True)
@@ -2488,22 +2615,22 @@ def create_ui() -> gr.Blocks:
             # サムネイル再作成用State
             thumbnail_state = gr.State(value=None)
             
-            with gr.TabItem("🎬 Generator", id="generator"):
+            with gr.TabItem("🎬 動画生成", id="generator"):
                 generator_components = create_generator_tab(saved_settings=saved_settings, assets=assets)
 
             # Tab 2: Dashboard
-            with gr.TabItem("📊 Dashboard", id="dashboard"):
+            with gr.TabItem("📊 ダッシュボード", id="dashboard"):
                 dashboard_components = create_dashboard_tab()
 
             # Tab 3: Settings
-            with gr.TabItem("⚙️ Settings", id="settings"):
+            with gr.TabItem("⚙️ 設定", id="settings"):
                 settings_components = create_settings_tab(
                     config=config,
                     default_upload_enabled=default_enable_upload,
                     default_footer_text=default_footer_text,
                 )
             
-            with gr.TabItem("🛠️ Manual", id="manual"):
+            with gr.TabItem("🛠️ 手動制作", id="manual"):
                 manual_components = create_manual_tab(assets=assets)
 
         step_components = generator_components["step_components"]
@@ -2789,6 +2916,14 @@ def create_ui() -> gr.Blocks:
             fn=generate_script_only,
             inputs=[generator_components["theme_input"], generator_components["research_mode_dropdown"]],
             outputs=[manual_components["script_editor"], generator_components["log_output"]],
+            show_progress="full"
+        )
+        
+        # リサーチのみ実行
+        generator_components["research_only_btn"].click(
+            fn=research_only,
+            inputs=[generator_components["theme_input"], generator_components["research_mode_dropdown"]],
+            outputs=[generator_components["research_output"], generator_components["log_output"]],
             show_progress="full"
         )
         
