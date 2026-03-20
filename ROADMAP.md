@@ -89,6 +89,7 @@
 | **手動運用** | テーマ選定が毎回人間入力 | 定期運用に人手が必要 |
 | **手動運用** | BGM / 背景画像の選定が手動 | テーマとの不一致リスク |
 | **コスト管理** | Usage追跡とコスト計算がGemini専用設計 | OpenAI/Anthropic使用時のコスト計算が不正確 |
+| **技術的負債** | 音声スペクトラム機能が未使用のまま残存 | コードの複雑性増加、保守コスト |
 
 ---
 
@@ -245,6 +246,71 @@
   - `YouTubeClient` に `insert_comment(video_id, text)` などのメソッドを追加
   - ワークフロー最終工程（アップロード・再生リスト追加の後段）でコメント投稿処理を呼び出す構成を想定
   - `workflow.py` の動画生成フェーズで各パートの累積時間を算出し、チャプター付き概要欄を `YouTubeClient.upload_video(..., description=...)` へ渡す実装を想定
+
+---
+
+## 🔧 Technical Debt（技術的負債）
+
+### 音声スペクトラム機能の削除
+
+**現状:**
+- v3.4.0時点で、動画レンダリング時の音声スペクトラム（波形）表示機能が実装されているが、実際には使用されていない
+- UIからは非表示化されているが、コード全体に機能が残存している
+
+**影響範囲:**
+1. **UIレイヤー (`app.py`)**
+   - `spectrum_checkbox` コンポーネントが `visible=False` で残存
+   - `generate_video()` 関数の引数 `enable_spectrum: bool` が全ての呼び出し箇所に存在
+   - `UIOverrides` データクラスに `enable_spectrum` フィールドが含まれる
+   - 設定保存機能 (`user_settings.json`) に `enable_spectrum` が記録される
+
+2. **ワークフローレイヤー (`workflow.py`)**
+   - `UIOverrides` クラスに `enable_spectrum: bool` フィールドが定義
+   - ワークフロー実行時に `enable_spectrum` が引き回される
+
+3. **動画レンダリングレイヤー (`services/video_rendering/ffmpeg_renderer.py`)**
+   - `_build_ffmpeg_command()` メソッド内に波形表示の条件分岐ロジックが残存
+   - `enable_spectrum` パラメータに基づいて FFmpeg フィルターを切り替える処理
+   - スペクトラム関連の設定値（`spectrum_color`, `spectrum_mode`）が `config.yaml` に定義
+
+4. **設定ファイル (`config.yaml`)**
+   - `video_renderer.enable_spectrum`, `spectrum_color`, `spectrum_mode` などの設定項目
+
+**削除の難易度: 🟡 中程度**
+- 単純な機能削除だが、影響範囲が広く、以下の作業が必要:
+  1. UI コンポーネントの完全削除
+  2. 関数シグネチャからの `enable_spectrum` 引数削除（10箇所以上）
+  3. データクラスのフィールド削除と既存設定ファイルのマイグレーション
+  4. FFmpeg コマンド生成ロジックの簡素化
+  5. 設定ファイルのスキーマ更新
+  6. 既存の `user_settings.json` との後方互換性確保
+
+**削除のメリット:**
+- コードの複雑性削減（約150行の削除見込み）
+- 関数シグネチャの簡素化
+- 設定項目の削減による保守性向上
+- 新規開発者の学習コスト削減
+
+**削除のリスク:**
+- 既存の設定ファイル (`user_settings.json`) を持つユーザーへの影響
+- 過去の実行ログ (`execution_record.jsonl`) に `enable_spectrum` フィールドが記録されている場合の互換性
+
+**推奨アプローチ:**
+1. **Phase 1: 非推奨化（Deprecation）** - 現在完了
+   - UIから非表示化（`visible=False`）✅
+   - 内部的には機能を維持し、後方互換性を確保 ✅
+
+2. **Phase 2: 段階的削除（将来のメジャーバージョンアップ時）**
+   - v4.0.0 などのメジャーバージョンアップ時に実施
+   - マイグレーションスクリプトを提供し、既存設定ファイルを自動変換
+   - CHANGELOG に破壊的変更として明記
+
+3. **Phase 3: 完全削除**
+   - 上記の影響範囲すべてからコードを削除
+   - テストケースの更新
+   - ドキュメントの更新
+
+**優先度: 🔵 低（機能的な問題はなく、保守性の改善が主目的）**
 
 ---
 
