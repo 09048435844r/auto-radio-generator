@@ -120,7 +120,7 @@ script_generator:
     model: "gemini-3.1-pro-preview"              # メインモデル（高品質）
     fallback_model: "gemini-2.5-pro"   # フォールバックモデル（高速）
     flash_model: "gemini-2.5-flash"          # 軽量モデル（サムネイル再作成用）
-    max_tokens: 8192                      # 最大トークン数（台本の長さ）
+    max_tokens: 16384                     # 最大トークン数（台本の長さ）※8192では不足するため増加
   
   # OpenAI設定
   openai:
