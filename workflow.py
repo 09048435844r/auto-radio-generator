@@ -1534,14 +1534,15 @@ def run_workflow_sync(
                 )
                 
                 # 2つの台本を結合
+                # LLMUsage加算（同じプロバイダーを使用）
+                default_usage = LLMUsage(provider=provider, model_name="", input_tokens=0, output_tokens=0, request_count=0)
+                combined_usage = (part1_result.gemini_usage or default_usage) + (part2_result.gemini_usage or default_usage)
+                
                 scripting_result = ScriptingPhaseResult(
                     script=_merge_scripts([part1_result.script, part2_result.script], jingle_path, add_chapter_markers=True),
                     research_content=part1_result.research_content,  # 第1部のリサーチ内容を保持
                     research_sources=part1_result.research_sources,
-                    gemini_usage=(
-                        (part1_result.gemini_usage or GeminiUsage()) + 
-                        (part2_result.gemini_usage or GeminiUsage())
-                    ),
+                    gemini_usage=combined_usage,
                     perplexity_usage=part1_result.perplexity_usage,
                     research_duration_sec=part1_result.research_duration_sec + part2_result.research_duration_sec,
                     script_duration_sec=part1_result.script_duration_sec + part2_result.script_duration_sec,

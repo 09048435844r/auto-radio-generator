@@ -30,6 +30,18 @@ class LLMUsage:
     @property
     def total_tokens(self) -> int:
         return self.input_tokens + self.output_tokens
+    
+    def __add__(self, other: "LLMUsage") -> "LLMUsage":
+        """Add two LLMUsage objects (must be same provider)"""
+        if self.provider != other.provider:
+            raise ValueError(f"Cannot add LLMUsage from different providers: {self.provider} vs {other.provider}")
+        return LLMUsage(
+            provider=self.provider,
+            model_name=self.model_name or other.model_name,
+            input_tokens=self.input_tokens + other.input_tokens,
+            output_tokens=self.output_tokens + other.output_tokens,
+            request_count=self.request_count + other.request_count
+        )
 
 
 # Backward compatibility alias
