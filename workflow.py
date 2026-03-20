@@ -1468,9 +1468,9 @@ def run_workflow_sync(
                 )
                 queries = planning_result.queries
                 if planning_result.gemini_usage:
-                    # プロバイダー別に集約
-                    provider = planning_result.gemini_usage.provider
-                    total_usage.llm_usage[provider] = planning_result.gemini_usage
+                    # プロバイダー別に集約（企画フェーズはGemini固定）
+                    planning_provider = planning_result.gemini_usage.provider
+                    total_usage.llm_usage[planning_provider] = planning_result.gemini_usage
             else:
                 callbacks.log("[INFO] 企画フェーズスキップ（リサーチ無効）")
             
