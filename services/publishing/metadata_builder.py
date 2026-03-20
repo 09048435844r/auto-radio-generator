@@ -69,6 +69,7 @@ def build_video_description(
     dynamic_tags: List[str],
     fixed_tags: List[str],
     footer_text: str,
+    llm_model_info: str = "",
 ) -> str:
     """Build a rich YouTube description with a fixed, maintainable structure.
 
@@ -81,7 +82,9 @@ def build_video_description(
     6. <空行>
     7. 【タグ】(dynamic_tags + fixed_tags)
     8. <空行>
-    9. footer_text
+    9. llm_model_info (使用モデル情報)
+    10. <空行>
+    11. footer_text
     """
     description_text = (script_description or "").strip() or "（概要未設定）"
     chapter_lines = _normalize_non_empty(chapters)
@@ -118,6 +121,12 @@ def build_video_description(
         lines.append(" ".join(merged_tags))
     else:
         lines.append("#ラジオ")
+
+    # 使用モデル情報を追加（存在する場合）
+    if llm_model_info:
+        lines.append("")
+        lines.append("")
+        lines.append(llm_model_info)
 
     lines.append(footer)
 

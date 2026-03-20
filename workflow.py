@@ -1293,6 +1293,16 @@ async def generate_video_workflow(
             getattr(publishing_config, "footer_text", "") if publishing_config else ""
         )
 
+        # 使用モデル情報を生成
+        llm_model_info = ""
+        if total_usage.llm_usage:
+            model_parts = []
+            for provider, usage in total_usage.llm_usage.items():
+                if usage.model_name:
+                    model_parts.append(f"{provider.upper()}: {usage.model_name}")
+            if model_parts:
+                llm_model_info = "■台本生成モデル\n" + "\n".join(model_parts)
+
         formatted_description = build_video_description(
             script_description=script_description,
             chapters=chapter_lines,
@@ -1300,6 +1310,7 @@ async def generate_video_workflow(
             dynamic_tags=dynamic_tags,
             fixed_tags=fixed_tags,
             footer_text=(configured_footer or "").strip(),
+            llm_model_info=llm_model_info,
         )
         
         # 総所要時間
@@ -1690,6 +1701,16 @@ def run_workflow_sync(
                 else (configured_footer or "").strip()
             )
 
+            # 使用モデル情報を生成
+            llm_model_info = ""
+            if total_usage.llm_usage:
+                model_parts = []
+                for provider, usage in total_usage.llm_usage.items():
+                    if usage.model_name:
+                        model_parts.append(f"{provider.upper()}: {usage.model_name}")
+                if model_parts:
+                    llm_model_info = "■台本生成モデル\n" + "\n".join(model_parts)
+
             formatted_description = build_video_description(
                 script_description=script_description,
                 chapters=chapter_lines,
@@ -1697,6 +1718,7 @@ def run_workflow_sync(
                 dynamic_tags=dynamic_tags,
                 fixed_tags=fixed_tags,
                 footer_text=resolved_footer,
+                llm_model_info=llm_model_info,
             )
             
             # 総所要時間

@@ -26,6 +26,7 @@ def test_build_video_description_section_spacing_and_reference_block():
         dynamic_tags=["#tag1"],
         fixed_tags=["#fixed"],
         footer_text="footer",
+        llm_model_info="",
     )
 
     # セクション間は2行空行、見出し直後は0行
@@ -40,3 +41,21 @@ def test_build_video_description_section_spacing_and_reference_block():
 
     # 末尾に不要な空行を残さない
     assert description.endswith("footer")
+
+
+def test_build_video_description_with_llm_model_info():
+    """使用モデル情報が正しく挿入されることを検証"""
+    description = build_video_description(
+        script_description="概要テキスト",
+        chapters=["00:00 オープニング"],
+        references=[],
+        dynamic_tags=["#tag1"],
+        fixed_tags=["#fixed"],
+        footer_text="footer",
+        llm_model_info="■台本生成モデル\nOPENAI: gpt-4o",
+    )
+
+    # モデル情報がタグの後、フッターの前に挿入されていることを確認
+    assert "■台本生成モデル\nOPENAI: gpt-4o" in description
+    assert description.index("■台本生成モデル") > description.index("#tag1")
+    assert description.index("■台本生成モデル") < description.index("footer")
