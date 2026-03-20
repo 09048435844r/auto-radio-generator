@@ -52,7 +52,7 @@ def get_provider_from_model_name(model_name: str) -> str:
     """Infer provider name from model name
     
     Args:
-        model_name: Model name (e.g., "gpt-4o-mini", "gemini-1.5-pro")
+        model_name: Model name (e.g., "gpt-5.4", "gemini-3.1-pro", "claude-sonnet-4.6")
     
     Returns:
         str: Provider name ("gemini" | "openai" | "anthropic")
@@ -62,7 +62,7 @@ def get_provider_from_model_name(model_name: str) -> str:
     """
     if model_name.startswith("gemini-"):
         return "gemini"
-    elif model_name.startswith(("gpt-", "o1-")):
+    elif model_name.startswith(("gpt-", "o1-", "o3-")):
         return "openai"
     elif model_name.startswith("claude-"):
         return "anthropic"

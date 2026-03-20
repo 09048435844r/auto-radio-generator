@@ -117,23 +117,24 @@ script_generator:
   
   # Gemini設定
   gemini:
-    model: "gemini-3.1-pro-preview"              # メインモデル（高品質）
-    fallback_model: "gemini-2.5-pro"   # フォールバックモデル（高速）
-    flash_model: "gemini-2.5-flash"          # 軽量モデル（サムネイル再作成用）
-    max_tokens: 16384                     # 最大トークン数（台本の長さ）※8192では不足するため増加
+    model: "gemini-3.1-pro"              # メインモデル（高品質・最新）
+    fallback_model: "gemini-2.5-pro"     # フォールバックモデル（高速）
+    flash_model: "gemini-2.5-flash"      # 軽量モデル（サムネイル再作成用）
+    max_tokens: 16384                     # 最大トークン数（台本の長さ）
   
   # OpenAI設定
   openai:
-    model: "gpt-4o"                 # メインモデル（高品質）
-    fallback_model: "gpt-4o-mini"             # フォールバックモデル（コスト効率重視）
+    model: "gpt-5.4"                      # メインモデル（最新・高品質）
+    fallback_model: "gpt-5.4-mini"        # フォールバックモデル（コスト効率重視）
     max_tokens: 16384                      # 最大トークン数
-    temperature: 0.85                     # 創造性パラメータ
+    temperature: 0.85                      # 創造性パラメータ
   
   # Anthropic設定
   anthropic:
-    model: "claude-sonnet-4-6"  # Claude Sonnet 4.6
+    model: "claude-sonnet-4.6"            # Claude Sonnet 4.6（最新）
+    fallback_model: "claude-haiku-4.5"    # フォールバックモデル（コスト効率重視）
     max_tokens: 16384                      # 最大トークン数
-    temperature: 0.85                     # 創造性パラメータ
+    temperature: 0.85                      # 創造性パラメータ
   
   # 台本の構成比率（合計100%）
   # ラジオ番組の構成を3部に分割します。
