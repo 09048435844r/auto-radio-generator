@@ -1145,7 +1145,15 @@ def research_only(
         filename = f"research_{timestamp}_{safe_theme}.jsonl"
         filepath = research_dir / filename
         
-        # JSONL形式で保存
+        # JSONL形式で保存（ResearchSourceオブジェクトを辞書に変換）
+        sources_list = [
+            {
+                "url": source.url,
+                "title": source.title
+            }
+            for source in research_result.sources
+        ]
+        
         research_data = {
             "timestamp": datetime.now().isoformat(),
             "theme": theme.strip(),
@@ -1153,7 +1161,7 @@ def research_only(
             "angle": plan.angle,
             "queries": plan.queries,
             "content": research_result.content,
-            "sources": research_result.sources
+            "sources": sources_list
         }
         
         with open(filepath, "w", encoding="utf-8") as f:
