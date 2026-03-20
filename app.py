@@ -2088,8 +2088,9 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
                         )
                         spectrum_checkbox = gr.Checkbox(
                             label="音声スペクトラムを表示",
-                            value=saved_settings.enable_spectrum,
+                            value=False,
                             info="画面下部に音声の波形を表示",
+                            visible=False,
                         )
 
                 with gr.Group(elem_classes="group-container"):
@@ -2111,7 +2112,14 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
                     )
 
                 with gr.Group(elem_classes="group-container"):
-                    gr.Markdown("### � 生成アクション")
+                    gr.Markdown("### 🎬 生成アクション")
+                    
+                    youtube_upload_checkbox = gr.Checkbox(
+                        label="YouTubeに自動アップロード",
+                        value=False,
+                        info="動画生成後、自動的にYouTubeにアップロードします",
+                    )
+                    
                     with gr.Row():
                         generate_btn = gr.Button(
                             "🚀 動画を生成する",
@@ -2201,6 +2209,7 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
         "gemini_status": gemini_status,
         "perplexity_status": perplexity_status,
         "check_api_btn": check_api_btn,
+        "youtube_upload_checkbox": youtube_upload_checkbox,
         "generate_btn": generate_btn,
         "script_only_btn": script_only_btn,
         "video_output": video_output,
