@@ -288,6 +288,440 @@ def load_initial_background(filename: str) -> str | None:
     return get_background_image_path(filename)
 
 
+def create_step_mode_ui(assets: dict) -> dict:
+    """こだわりステップモードのUI構築
+    
+    Args:
+        assets: アセット情報（背景画像、BGMリスト）
+    
+    Returns:
+        UIコンポーネントの辞書
+    """
+    components = {}
+    
+    with gr.Accordion("🛠 こだわりステップモード (上級者向け)", open=False):
+        gr.Markdown("""
+        **高度な制作モード** - 各ステップを個別に実行・調整できます
+        
+        🔹 **Step 0**: 企画 → 検索クエリ案を生成  
+        🔹 **Step 1**: リサーチ & 台本 → クエリでリサーチし台本を作成  
+        🔹 **Step 2**: 制作 → 台本から動画を生成
+        """)
+        
+        # ========== Step 0: 企画フェーズ ==========
+        gr.Markdown("---")
+        gr.Markdown("### 📋 Step 0: 企画 (Planning)")
+        
+        with gr.Row():
+            components["step0_theme"] = gr.Textbox(
+                label="テーマ",
+                placeholder="例: 量子コンピュータの最新動向",
+                lines=2,
+                scale=3
+            )
+            components["step0_mode"] = gr.Dropdown(
+                label="リサーチモード",
+                choices=list(RESEARCH_MODE_MAP.keys()),
+                value="トリビア (雑学)",
+                scale=1
+            )
+        
+        components["step0_execute_btn"] = gr.Button(
+            "📋 Step 0: 企画・クエリ案出し",
+            variant="primary",
+            size="lg"
+        )
+        
+        gr.Markdown("**生成されたクエリ案:**")
+        with gr.Row():
+            components["step0_query1"] = gr.Textbox(label="クエリ1", lines=2, interactive=True)
+            components["step0_query2"] = gr.Textbox(label="クエリ2", lines=2, interactive=True)
+            components["step0_query3"] = gr.Textbox(label="クエリ3", lines=2, interactive=True)
+        
+        components["step0_angle"] = gr.Textbox(
+            label="切り口・コンセプト",
+            lines=2,
+            interactive=True
+        )
+        
+        # ========== Step 1: リサーチ & 台本フェーズ ==========
+        gr.Markdown("---")
+        gr.Markdown("### 🔍 Step 1: リサーチ & 台本 (Research & Scripting)")
+        
+        gr.Markdown("**使用するクエリ（Step 0から自動入力 or 手動編集）:**")
+        with gr.Row():
+            components["step1_query1"] = gr.Textbox(label="クエリ1", lines=2, interactive=True)
+            components["step1_query2"] = gr.Textbox(label="クエリ2", lines=2, interactive=True)
+            components["step1_query3"] = gr.Textbox(label="クエリ3", lines=2, interactive=True)
+        
+        components["step1_excluded_topics"] = gr.Textbox(
+            label="既出情報の除外",
+            placeholder="例: 前回の動画で話した内容、避けたい話題など",
+            lines=3,
+            info="この情報は台本生成時に考慮されます（オプション）"
+        )
+        
+        components["step1_execute_btn"] = gr.Button(
+            "🔍 Step 1: 上記クエリで台本を作成",
+            variant="primary",
+            size="lg"
+        )
+        
+        gr.Markdown("**生成された台本:**")
+        components["step1_title"] = gr.Textbox(
+            label="タイトル",
+            lines=1,
+            interactive=True
+        )
+        components["step1_thumbnail"] = gr.Textbox(
+            label="サムネイル文字",
+            lines=1,
+            interactive=True
+        )
+        components["step1_description"] = gr.Textbox(
+            label="概要欄",
+            lines=5,
+            interactive=True
+        )
+        components["step1_script_json"] = gr.Code(
+            label="台本JSON (編集可能)",
+            language="json",
+            lines=15,
+            interactive=True
+        )
+        
+        components["step1_log"] = gr.Textbox(
+            label="処理ログ",
+            lines=8,
+            interactive=False
+        )
+        
+        # ========== Step 2: 制作フェーズ ==========
+        gr.Markdown("---")
+        gr.Markdown("### 🎬 Step 2: 制作 (Production)")
+        
+        gr.Markdown("**動画設定:**")
+        with gr.Row():
+            components["step2_background"] = gr.Dropdown(
+                label="背景画像",
+                choices=assets.get("backgrounds", ["default.png"]),
+                value=assets.get("backgrounds", ["default.png"])[0] if assets.get("backgrounds") else None
+            )
+            components["step2_bgm"] = gr.Dropdown(
+                label="BGM",
+                choices=assets.get("bgm", ["default.mp3"]),
+                value=assets.get("bgm", ["default.mp3"])[0] if assets.get("bgm") else None
+            )
+        
+        with gr.Row():
+            components["step2_bgm_volume"] = gr.Slider(
+                label="BGM音量",
+                minimum=0.0,
+                maximum=0.5,
+                value=0.15,
+                step=0.01
+            )
+            components["step2_speed"] = gr.Slider(
+                label="話速",
+                minimum=0.8,
+                maximum=1.5,
+                value=1.0,
+                step=0.05
+            )
+        
+        components["step2_spectrum"] = gr.Checkbox(
+            label="音声スペクトラムを表示",
+            value=True
+        )
+        
+        components["step2_execute_btn"] = gr.Button(
+            "🎬 Step 2: この内容で動画を生成",
+            variant="primary",
+            size="lg"
+        )
+        
+        components["step2_video"] = gr.Video(
+            label="生成された動画",
+            height=360
+        )
+        
+        components["step2_log"] = gr.Textbox(
+            label="処理ログ",
+            lines=8,
+            interactive=False
+        )
+    
+    return components
+
+
+def execute_step0_planning(
+    theme: str,
+    research_mode: str,
+    progress=gr.Progress()
+) -> tuple[str, str, str, str]:
+    """Step 0: 企画フェーズを実行
+    
+    Args:
+        theme: テーマ
+        research_mode: リサーチモード
+        progress: Gradio進捗バー
+    
+    Returns:
+        (クエリ1, クエリ2, クエリ3, 切り口)
+    """
+    if not theme or not theme.strip():
+        return "", "", "", "エラー: テーマを入力してください"
+    
+    mode = RESEARCH_MODE_MAP.get(research_mode)
+    if not mode:
+        return "", "", "", "エラー: リサーチモードを選択してください"
+    
+    try:
+        from workflow import execute_planning_phase, ProgressCallback
+        import asyncio
+        
+        config = load_config()
+        
+        # コールバック設定
+        cb = ProgressCallback()
+        cb.log = lambda msg: None  # ログは不要
+        cb.progress = lambda ratio, desc: progress(ratio, desc=desc)
+        
+        # 企画フェーズを実行
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(
+            execute_planning_phase(
+                theme=theme.strip(),
+                mode=mode,
+                config=config,
+                callbacks=cb
+            )
+        )
+        loop.close()
+        
+        queries = result.queries
+        angle = result.angle or ""
+        
+        return (
+            queries[0] if len(queries) > 0 else "",
+            queries[1] if len(queries) > 1 else "",
+            queries[2] if len(queries) > 2 else "",
+            angle
+        )
+        
+    except Exception as e:
+        import traceback
+        error_msg = f"エラー: {str(e)}\n{traceback.format_exc()}"
+        return "", "", "", error_msg
+
+
+def execute_step1_scripting(
+    theme: str,
+    research_mode: str,
+    query1: str,
+    query2: str,
+    query3: str,
+    excluded_topics: str,
+    progress=gr.Progress()
+) -> tuple[str, str, str, str, str]:
+    """Step 1: リサーチ & 台本フェーズを実行
+    
+    Args:
+        theme: テーマ
+        research_mode: リサーチモード
+        query1, query2, query3: 検索クエリ
+        excluded_topics: 除外トピック
+        progress: Gradio進捗バー
+    
+    Returns:
+        (タイトル, サムネイル文字, 概要欄, 台本JSON, ログ)
+    """
+    if not theme or not theme.strip():
+        return "", "", "", "", "エラー: テーマを入力してください"
+    
+    mode = RESEARCH_MODE_MAP.get(research_mode)
+    if not mode:
+        return "", "", "", "", "エラー: リサーチモードを選択してください"
+    
+    queries = [q.strip() for q in [query1, query2, query3] if q and q.strip()]
+    if not queries:
+        return "", "", "", "", "エラー: 少なくとも1つのクエリを入力してください"
+    
+    try:
+        from workflow import execute_scripting_phase, ProgressCallback
+        import asyncio
+        from pathlib import Path
+        from datetime import datetime
+        import json
+        
+        config = load_config()
+        
+        # 出力ディレクトリ
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = PROJECT_ROOT / "output" / "step_mode" / timestamp
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # ログ収集
+        log_messages = []
+        
+        def log_callback(msg: str):
+            log_messages.append(msg)
+        
+        def progress_callback(ratio: float, desc: str):
+            progress(ratio, desc=desc)
+        
+        cb = ProgressCallback()
+        cb.log = log_callback
+        cb.progress = progress_callback
+        
+        # 台本生成フェーズを実行
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(
+            execute_scripting_phase(
+                theme=theme.strip(),
+                mode=mode,
+                queries=queries,
+                config=config,
+                output_dir=output_dir,
+                enable_research=True,
+                excluded_topics=excluded_topics.strip() if excluded_topics else None,
+                callbacks=cb
+            )
+        )
+        loop.close()
+        
+        script = result.script
+        
+        # 台本JSONを整形
+        script_json = json.dumps(script.model_dump(), ensure_ascii=False, indent=2)
+        
+        # ログを整形
+        log_text = "\n".join(log_messages)
+        
+        return (
+            script.title or "",
+            script.thumbnail_title or "",
+            script.description or "",
+            script_json,
+            log_text
+        )
+        
+    except Exception as e:
+        import traceback
+        error_msg = f"エラー: {str(e)}\n{traceback.format_exc()}"
+        return "", "", "", "", error_msg
+
+
+def execute_step2_production(
+    title: str,
+    description: str,
+    script_json: str,
+    background_image: str,
+    bgm_file: str,
+    bgm_volume: float,
+    speed_scale: float,
+    enable_spectrum: bool,
+    progress=gr.Progress()
+) -> tuple[str | None, str]:
+    """Step 2: 制作フェーズを実行
+    
+    Args:
+        title: タイトル
+        description: 概要欄
+        script_json: 台本JSON
+        background_image: 背景画像
+        bgm_file: BGMファイル
+        bgm_volume: BGM音量
+        speed_scale: 話速
+        enable_spectrum: スペクトラム表示
+        progress: Gradio進捗バー
+    
+    Returns:
+        (動画パス, ログ)
+    """
+    if not script_json or not script_json.strip():
+        return None, "エラー: 台本JSONを入力してください"
+    
+    try:
+        from workflow import execute_production_phase, ProgressCallback
+        import asyncio
+        from pathlib import Path
+        from datetime import datetime
+        import json
+        
+        config = load_config()
+        
+        # 台本JSONをパース
+        script_data = json.loads(script_json)
+        script = Script.model_validate(script_data)
+        
+        # タイトルと概要欄を更新
+        if title:
+            script.title = title
+        if description:
+            script.description = description
+        
+        # 出力ディレクトリ
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = PROJECT_ROOT / "output" / "step_mode" / timestamp
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # ログ収集
+        log_messages = []
+        
+        def log_callback(msg: str):
+            log_messages.append(msg)
+        
+        def progress_callback(ratio: float, desc: str):
+            progress(ratio, desc=desc)
+        
+        cb = ProgressCallback()
+        cb.log = log_callback
+        cb.progress = progress_callback
+        
+        # オーバーライド設定
+        overrides = UIOverrides(
+            bgm_volume=bgm_volume,
+            fade_in_sec=3.0,
+            fade_out_sec=3.0,
+            speed_scale=speed_scale,
+            enable_spectrum=enable_spectrum,
+            background_image=background_image,
+            bgm_file=bgm_file
+        )
+        
+        # 制作フェーズを実行
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(
+            execute_production_phase(
+                script=script,
+                config=config,
+                output_dir=output_dir,
+                overrides=overrides,
+                callbacks=cb
+            )
+        )
+        loop.close()
+        
+        # ログを整形
+        log_text = "\n".join(log_messages)
+        
+        if result.video_path and result.video_path.exists():
+            return str(result.video_path), log_text
+        else:
+            return None, log_text + "\n\nエラー: 動画ファイルが生成されませんでした"
+        
+    except json.JSONDecodeError as e:
+        return None, f"エラー: 台本JSONのパースに失敗しました: {str(e)}"
+    except Exception as e:
+        import traceback
+        error_msg = f"エラー: {str(e)}\n{traceback.format_exc()}"
+        return None, error_msg
+
+
 def generate_video(
     theme: str,
     research_mode: str,
@@ -1828,19 +2262,7 @@ def regenerate_thumbnail_from_state(
 
 def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
     """Create Generator tab UI and return component references."""
-    # モード選択ラジオボタン（タブ最上部）
-    mode_selector = gr.Radio(
-        choices=["🚀 全自動モード", "🛠️ ステップモード"],
-        value="🚀 全自動モード",
-        label="🎥 制作モード",
-        info="全自動: テーマ入力のみで動画完成 / ステップ: 各工程を個別に実行・調整可能",
-    )
-
-    with gr.Column(visible=True) as auto_mode_column:
-        gr.Markdown("""
-        ### 🚀 全自動モード
-        テーマを入力するだけで、リサーチから動画生成までを自動実行します。
-        """)
+    with gr.Accordion("🚀 全自動モード", open=True):
         with gr.Row():
             with gr.Column(scale=1):
                 with gr.Group(elem_classes="group-container"):
@@ -2095,188 +2517,9 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
                             regenerated_thumbnail_title = gr.Textbox(label="サムネイル文字", interactive=False)
                             regenerate_status = gr.Textbox(label="処理ログ", lines=5, interactive=False)
 
-    # ========== ステップモードUI（手動制作タブから統合） ==========
-    with gr.Column(visible=False) as step_mode_column:
-        gr.Markdown("""
-        ### 🛠️ ステップモード
-        各工程を個別に実行・調整できます。リサーチデータの読み込みや、LLMモデル比較も可能です。
-        """)
-
-        gr.Markdown("### 📝 Step A: リサーチ結果から台本生成")
-
-        with gr.Row():
-            step_load_research_btn = gr.Button(
-                "📂 最新のリサーチデータを読み込む",
-                variant="secondary",
-                size="sm"
-            )
-
-        step_research_input = gr.Textbox(
-            label="Perplexity等のリサーチ結果を貼り付け",
-            placeholder="ここにリサーチ結果のテキストを貼り付けてください...",
-            lines=10,
-            info="Perplexityや他のソースで得たリサーチ結果を貼り付け",
-        )
-        step_theme_input = gr.Textbox(
-            label="テーマ/タイトル",
-            placeholder="例: AIの倫理的課題について",
-            info="台本のテーマまたはタイトルを入力してください",
-        )
-
-        # モデル選択ドロップダウン
-        from services.script_generation.llm_factory import get_available_models
-        try:
-            _available_models = get_available_models(load_config(PROJECT_ROOT))
-            _default_model = _available_models[0] if _available_models else "gemini-1.5-pro"
-        except Exception:
-            _available_models = ["gemini-1.5-pro", "gpt-4o-mini", "claude-sonnet-4-6"]
-            _default_model = "gemini-1.5-pro"
-
-        step_llm_model = gr.Dropdown(
-            label="🤖 台本生成モデル",
-            choices=_available_models,
-            value=_default_model,
-            info="台本生成に使用するLLMモデルを選択（モデル比較に便利）",
-        )
-
-        step_generate_script_btn = gr.Button("📝 この内容で台本を作成", variant="primary", size="lg")
-        step_script_output = gr.Code(label="生成された台本", language="json", lines=20, interactive=True)
-
-        # 比較用State
-        step_comparison_state = gr.State(value=[])
-
-        # 比較レポート表示エリア
-        with gr.Row():
-            step_comparison_report = gr.Markdown(
-                label="📊 台本比較レポート",
-                value="*複数のモデルで台本を生成すると、ここに比較レポートが表示されます*",
-            )
-
-        # 復元UI
-        with gr.Row():
-            with gr.Column(scale=3):
-                step_restore_dropdown = gr.Dropdown(
-                    label="📋 過去の生成結果から復元",
-                    choices=[],
-                    interactive=True,
-                    info="比較セッション内の任意のモデルの台本をエディタに復元"
-                )
-            with gr.Column(scale=1):
-                step_restore_btn = gr.Button(
-                    "↩️ 復元",
-                    variant="secondary",
-                    size="sm"
-                )
-
-        # 比較操作ボタン
-        with gr.Row():
-            step_clear_comparison_btn = gr.Button(
-                "🗑️ 比較データをクリア",
-                variant="secondary",
-                size="sm"
-            )
-            step_export_session_btn = gr.Button(
-                "💾 比較セッションを保存",
-                variant="primary",
-                size="sm"
-            )
-
-        step_export_status = gr.Textbox(
-            label="保存ステータス",
-            interactive=False,
-            visible=False
-        )
-
-        gr.Markdown("---")
-        gr.Markdown("### 🎤 Step B: 音声合成 (Audio Synthesis)")
-        step_script_editor = gr.Code(
-            label="台本JSON (編集可能) - Step Aで生成された台本を編集できます",
-            language="json",
-            lines=15,
-            interactive=True,
-        )
-        step_synthesize_btn = gr.Button("🎤 この台本で音声を合成する", variant="primary", size="lg")
-
-        with gr.Row():
-            with gr.Column():
-                step_audio_output = gr.Audio(label="生成された音声", interactive=False)
-                step_subtitle_output = gr.File(label="字幕ファイル (.ass)", interactive=False)
-            with gr.Column():
-                step_synthesis_log = gr.Textbox(label="処理ログ", lines=10, interactive=False)
-
-        gr.Markdown("---")
-        gr.Markdown("### 🎬 Step C: 動画書き出し (Rendering)")
-
-        with gr.Row():
-            with gr.Column():
-                step_audio_input = gr.Audio(label="音声ファイル", sources=["upload"], type="filepath", interactive=True)
-                step_subtitle_input = gr.File(
-                    label="字幕ファイル (.ass)",
-                    file_types=[".ass"],
-                    type="filepath",
-                    interactive=True,
-                )
-            with gr.Column():
-                step_background_input = gr.Image(
-                    label="背景/サムネイル画像 (1920x1080推奨)",
-                    sources=["upload"],
-                    type="filepath",
-                    interactive=True,
-                )
-                step_bgm_dropdown = gr.Dropdown(
-                    label="BGM",
-                    choices=assets.get("bgm", ["default.mp3"]),
-                    value=assets.get("bgm", ["default.mp3"])[0] if assets.get("bgm") else None,
-                    info="assets/bgm/ 内の音声",
-                )
-
-        step_render_btn = gr.Button("🎬 動画を生成する (Render Video)", variant="primary", size="lg")
-
-        with gr.Row():
-            with gr.Column():
-                step_video_output = gr.Video(label="完成動画", interactive=False)
-                step_video_file_output = gr.File(label="動画ファイルダウンロード", interactive=False)
-            with gr.Column():
-                step_render_log = gr.Textbox(label="処理ログ", lines=10, interactive=False)
-
-        gr.Markdown("""
-        ### 📖 使い方
-
-        **Step A: 台本生成**
-        1. Perplexity等でリサーチした結果を上のテキストボックスに貼り付け
-        2. テーマ/タイトルを入力
-        3. 「この内容で台本を作成」ボタンをクリック
-
-        **Step B: 音声合成**
-        1. 生成された台本が自動的にエディタに反映されます
-        2. 必要に応じて台本を編集
-        3. 「この台本で音声を合成する」ボタンをクリック
-
-        **Step C: 動画レンダリング**
-        1. Step Bの音声と字幕が自動的にセットされます
-        2. 背景画像をアップロード
-        3. BGMを選択
-        4. 「動画を生成する」ボタンをクリック
-        """)
-
-    # モード切り替えイベントハンドラ（create_generator_tab内で直接配線）
-    def _toggle_mode(mode):
-        if mode == "🚀 全自動モード":
-            return gr.update(visible=True), gr.update(visible=False)
-        else:
-            return gr.update(visible=False), gr.update(visible=True)
-
-    mode_selector.change(
-        fn=_toggle_mode,
-        inputs=[mode_selector],
-        outputs=[auto_mode_column, step_mode_column]
-    )
+    step_components = create_step_mode_ui(assets)
 
     return {
-        "mode_selector": mode_selector,
-        "auto_mode_column": auto_mode_column,
-        "step_mode_column": step_mode_column,
-        # 全自動モードコンポーネント
         "theme_input": theme_input,
         "research_mode_dropdown": research_mode_dropdown,
         "llm_provider_dropdown": llm_provider_dropdown,
@@ -2314,33 +2557,227 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
         "regenerated_title": regenerated_title,
         "regenerated_thumbnail_title": regenerated_thumbnail_title,
         "regenerate_status": regenerate_status,
-        # ステップモードコンポーネント（手動タブから統合）
-        "step_load_research_btn": step_load_research_btn,
-        "step_research_input": step_research_input,
-        "step_theme_input": step_theme_input,
-        "step_llm_model": step_llm_model,
-        "step_generate_script_btn": step_generate_script_btn,
-        "step_script_output": step_script_output,
-        "step_comparison_state": step_comparison_state,
-        "step_comparison_report": step_comparison_report,
-        "step_restore_dropdown": step_restore_dropdown,
-        "step_restore_btn": step_restore_btn,
-        "step_clear_comparison_btn": step_clear_comparison_btn,
-        "step_export_session_btn": step_export_session_btn,
-        "step_export_status": step_export_status,
-        "step_script_editor": step_script_editor,
-        "step_synthesize_btn": step_synthesize_btn,
-        "step_audio_output": step_audio_output,
-        "step_subtitle_output": step_subtitle_output,
-        "step_synthesis_log": step_synthesis_log,
-        "step_audio_input": step_audio_input,
-        "step_subtitle_input": step_subtitle_input,
-        "step_background_input": step_background_input,
-        "step_bgm_dropdown": step_bgm_dropdown,
-        "step_render_btn": step_render_btn,
-        "step_video_output": step_video_output,
-        "step_video_file_output": step_video_file_output,
-        "step_render_log": step_render_log,
+        "step_components": step_components,
+    }
+
+
+def create_manual_tab(assets: dict) -> dict[str, object]:
+    """Create Manual tab UI and return component references."""
+    with gr.Accordion("🛠 こだわりステップモード", open=True):
+        gr.Markdown(
+            """
+            **高度な制作モード** - 各ステップを個別に実行・調整できます
+
+            🔹 **Step A**: リサーチ → 台本生成（個別調整可能）
+            🔹 **Step B**: 台本 → 音声合成（個別調整可能）
+            🔹 **Step C**: 音声・字幕 → 動画レンダリング（個別調整可能）
+            """
+        )
+
+        step_mode = gr.Radio(
+            choices=["通常モード（一括）", "こだわりステップモード"],
+            value="通常モード（一括）",
+            label="制作モード",
+            info="こだわりステップモードでは各工程を個別に実行・調整できます",
+        )
+
+    gr.Markdown("### 📝 Step A: リサーチ結果から台本生成")
+    
+    # リサーチデータ読み込みボタン
+    with gr.Row():
+        load_research_btn = gr.Button(
+            "📂 最新のリサーチデータを読み込む",
+            variant="secondary",
+            size="sm"
+        )
+    
+    research_input = gr.Textbox(
+        label="Perplexity等のリサーチ結果を貼り付け",
+        placeholder="ここにリサーチ結果のテキストを貼り付けてください...",
+        lines=10,
+        info="Perplexityや他のソースで得たリサーチ結果を貼り付け",
+    )
+    theme_input_manual = gr.Textbox(
+        label="テーマ/タイトル",
+        placeholder="例: AIの倫理的課題について",
+        info="台本のテーマまたはタイトルを入力してください",
+    )
+    
+    # モデル選択ドロップダウン
+    from services.script_generation.llm_factory import get_available_models
+    try:
+        available_models = get_available_models(load_config(PROJECT_ROOT))
+        default_model = available_models[0] if available_models else "gemini-1.5-pro"
+        print(f"[DEBUG] Available models: {available_models}")
+        print(f"[DEBUG] Default model: {default_model}")
+    except Exception as e:
+        print(f"[ERROR] Failed to load available models: {e}")
+        import traceback
+        traceback.print_exc()
+        available_models = ["gemini-1.5-pro", "gpt-4o-mini", "claude-sonnet-4-6"]
+        default_model = "gemini-1.5-pro"
+    
+    llm_model_manual = gr.Dropdown(
+        label="🤖 台本生成モデル",
+        choices=available_models,
+        value=default_model,
+        info="台本生成に使用するLLMモデルを選択（モデル比較に便利）",
+    )
+    print(f"[DEBUG] llm_model_manual created: {llm_model_manual}")
+    
+    generate_script_btn = gr.Button("📝 この内容で台本を作成", variant="primary", size="lg")
+    script_output = gr.Code(label="生成された台本", language="json", lines=20, interactive=True)
+    
+    # 比較用State
+    comparison_state = gr.State(value=[])
+    
+    # 比較レポート表示エリア
+    with gr.Row():
+        comparison_report = gr.Markdown(
+            label="📊 台本比較レポート",
+            value="*複数のモデルで台本を生成すると、ここに比較レポートが表示されます*",
+        )
+    
+    # 復元UI（過去の生成結果から台本を復元）
+    with gr.Row():
+        with gr.Column(scale=3):
+            restore_model_dropdown = gr.Dropdown(
+                label="📋 過去の生成結果から復元",
+                choices=[],
+                interactive=True,
+                info="比較セッション内の任意のモデルの台本をエディタに復元（APIを再実行せずに過去の台本を採用可能）"
+            )
+        with gr.Column(scale=1):
+            restore_script_btn = gr.Button(
+                "↩️ 復元",
+                variant="secondary",
+                size="sm"
+            )
+    
+    # 比較操作ボタン
+    with gr.Row():
+        clear_comparison_btn = gr.Button(
+            "🗑️ 比較データをクリア",
+            variant="secondary",
+            size="sm"
+        )
+        export_session_btn = gr.Button(
+            "💾 比較セッションを保存",
+            variant="primary",
+            size="sm"
+        )
+    
+    # エクスポートステータス表示
+    export_status = gr.Textbox(
+        label="保存ステータス",
+        interactive=False,
+        visible=False
+    )
+
+    gr.Markdown("---")
+    gr.Markdown("### 🎤 Step B: 音声合成 (Audio Synthesis)")
+    script_editor = gr.Code(
+        label="台本JSON (編集可能) - Step Aで生成された台本を編集できます",
+        language="json",
+        lines=15,
+        interactive=True,
+    )
+    synthesize_btn = gr.Button("🎤 この台本で音声を合成する", variant="primary", size="lg")
+
+    with gr.Row():
+        with gr.Column():
+            audio_output = gr.Audio(label="生成された音声", interactive=False)
+            subtitle_output = gr.File(label="字幕ファイル (.ass)", interactive=False)
+        with gr.Column():
+            synthesis_log = gr.Textbox(label="処理ログ", lines=10, interactive=False)
+
+    gr.Markdown("---")
+    gr.Markdown("### 🎬 Step C: 動画書き出し (Rendering)")
+
+    with gr.Row():
+        with gr.Column():
+            audio_input = gr.Audio(label="音声ファイル", sources=["upload"], type="filepath", interactive=True)
+            subtitle_input = gr.File(
+                label="字幕ファイル (.ass)",
+                file_types=[".ass"],
+                type="filepath",
+                interactive=True,
+            )
+        with gr.Column():
+            background_input = gr.Image(
+                label="背景/サムネイル画像 (1920x1080推奨)",
+                sources=["upload"],
+                type="filepath",
+                interactive=True,
+            )
+            bgm_dropdown_manual = gr.Dropdown(
+                label="BGM",
+                choices=assets.get("bgm", ["default.mp3"]),
+                value=assets.get("bgm", ["default.mp3"])[0] if assets.get("bgm") else None,
+                info="assets/bgm/ 内の音声",
+            )
+
+    render_btn = gr.Button("🎬 動画を生成する (Render Video)", variant="primary", size="lg")
+
+    with gr.Row():
+        with gr.Column():
+            video_output_manual = gr.Video(label="完成動画", interactive=False)
+            video_file_output = gr.File(label="動画ファイルダウンロード", interactive=False)
+        with gr.Column():
+            render_log = gr.Textbox(label="処理ログ", lines=10, interactive=False)
+
+    gr.Markdown(
+        """
+        ### 📖 使い方
+
+        **Step A: 台本生成**
+        1. Perplexity等でリサーチした結果を上のテキストボックスに貼り付け
+        2. テーマ/タイトルを入力
+        3. 「この内容で台本を作成」ボタンをクリック
+
+        **Step B: 音声合成**
+        1. 生成された台本が自動的にエディタに反映されます
+        2. 必要に応じて台本を編集
+        3. 「この台本で音声を合成する」ボタンをクリック
+        4. 生成された音声と字幕がStep Cに自動反映されます
+
+        **Step C: 動画レンダリング**
+        1. Step Bの音声と字幕が自動的にセットされます
+        2. 背景画像をアップロード
+        3. BGMを選択
+        4. 「動画を生成する」ボタンをクリック
+        5. 完成した動画をダウンロード
+        """
+    )
+
+    return {
+        "step_mode": step_mode,
+        "load_research_btn": load_research_btn,
+        "research_input": research_input,
+        "theme_input_manual": theme_input_manual,
+        "llm_model_manual": llm_model_manual,
+        "generate_script_btn": generate_script_btn,
+        "script_output": script_output,
+        "comparison_state": comparison_state,
+        "comparison_report": comparison_report,
+        "restore_model_dropdown": restore_model_dropdown,
+        "restore_script_btn": restore_script_btn,
+        "clear_comparison_btn": clear_comparison_btn,
+        "export_session_btn": export_session_btn,
+        "export_status": export_status,
+        "script_editor": script_editor,
+        "synthesize_btn": synthesize_btn,
+        "audio_output": audio_output,
+        "subtitle_output": subtitle_output,
+        "synthesis_log": synthesis_log,
+        "audio_input": audio_input,
+        "subtitle_input": subtitle_input,
+        "background_input": background_input,
+        "bgm_dropdown_manual": bgm_dropdown_manual,
+        "render_btn": render_btn,
+        "video_output_manual": video_output_manual,
+        "video_file_output": video_file_output,
+        "render_log": render_log,
     }
 
 
@@ -2373,6 +2810,7 @@ def create_ui() -> gr.Blocks:
         )
         
         generator_components: dict[str, object] = {}
+        manual_components: dict[str, object] = {}
         dashboard_components: dict[str, gr.components.Component] = {}
         settings_components: dict[str, gr.components.Component] = {}
 
@@ -2396,7 +2834,10 @@ def create_ui() -> gr.Blocks:
                     default_footer_text=default_footer_text,
                 )
             
-        # 手動制作タブは動画生成タブのステップモードに統合されました
+            with gr.TabItem("🛠️ 手動制作", id="manual"):
+                manual_components = create_manual_tab(assets=assets)
+
+        step_components = generator_components["step_components"]
         
         # フッター
         gr.Markdown(
@@ -2678,7 +3119,7 @@ def create_ui() -> gr.Blocks:
         generator_components["script_only_btn"].click(
             fn=generate_script_only,
             inputs=[generator_components["theme_input"], generator_components["research_mode_dropdown"]],
-            outputs=[generator_components["step_script_editor"], generator_components["log_output"]],
+            outputs=[manual_components["script_editor"], generator_components["log_output"]],
             show_progress="full"
         )
         
@@ -2690,106 +3131,178 @@ def create_ui() -> gr.Blocks:
             show_progress="full"
         )
         
-        # ========== ステップモードのイベントハンドラ ==========
-
-        # 台本生成 (Step A)
-        generator_components["step_generate_script_btn"].click(
+        # 台本生成 (Step Aの出力をStep Bのエディタにも反映)
+        manual_components["generate_script_btn"].click(
             fn=generate_script_from_research,
             inputs=[
-                generator_components["step_research_input"],
-                generator_components["step_theme_input"],
-                generator_components["step_llm_model"],
-                generator_components["step_comparison_state"]
+                manual_components["research_input"], 
+                manual_components["theme_input_manual"],
+                manual_components["llm_model_manual"],
+                manual_components["comparison_state"]
             ],
             outputs=[
-                generator_components["step_script_output"],
-                generator_components["step_script_editor"],
-                generator_components["step_comparison_report"],
-                generator_components["step_comparison_state"],
-                generator_components["step_restore_dropdown"]
-            ],
-            show_progress="full"
-        )
-
-        # リサーチデータ読み込み
-        generator_components["step_load_research_btn"].click(
-            fn=load_latest_research,
-            inputs=[],
-            outputs=[
-                generator_components["step_research_input"],
-                generator_components["step_theme_input"]
-            ]
-        )
-
-        # 比較データクリア
-        generator_components["step_clear_comparison_btn"].click(
-            fn=clear_comparison_data,
-            inputs=[],
-            outputs=[
-                generator_components["step_comparison_report"],
-                generator_components["step_comparison_state"]
-            ]
-        )
-
-        # 復元機能
-        generator_components["step_restore_btn"].click(
-            fn=restore_script_from_comparison,
-            inputs=[
-                generator_components["step_restore_dropdown"],
-                generator_components["step_comparison_state"]
-            ],
-            outputs=[
-                generator_components["step_script_output"],
-                generator_components["step_script_editor"]
-            ]
-        )
-
-        # エクスポート機能
-        generator_components["step_export_session_btn"].click(
-            fn=export_comparison_session,
-            inputs=[
-                generator_components["step_comparison_state"],
-                generator_components["step_research_input"],
-                generator_components["step_theme_input"]
-            ],
-            outputs=[
-                generator_components["step_export_status"],
-                generator_components["step_export_status"]
-            ]
-        )
-
-        # 音声合成 (Step B)
-        generator_components["step_synthesize_btn"].click(
-            fn=synthesize_audio_from_script,
-            inputs=[generator_components["step_script_editor"]],
-            outputs=[
-                generator_components["step_audio_output"],
-                generator_components["step_subtitle_output"],
-                generator_components["step_synthesis_log"],
-                generator_components["step_audio_input"],
-                generator_components["step_subtitle_input"],
-            ],
-            show_progress="full"
-        )
-
-        # 動画レンダリング (Step C)
-        generator_components["step_render_btn"].click(
-            fn=render_video_from_assets,
-            inputs=[
-                generator_components["step_audio_input"],
-                generator_components["step_subtitle_input"],
-                generator_components["step_background_input"],
-                generator_components["step_bgm_dropdown"],
-            ],
-            outputs=[
-                generator_components["step_video_output"],
-                generator_components["step_video_file_output"],
-                generator_components["step_render_log"],
+                manual_components["script_output"], 
+                manual_components["script_editor"],
+                manual_components["comparison_report"],
+                manual_components["comparison_state"],
+                manual_components["restore_model_dropdown"]
             ],
             show_progress="full"
         )
         
-        # こだわりステップモード（旧）は削除済み - ステップモードはcreate_generator_tabに統合
+        # リサーチデータ読み込み
+        manual_components["load_research_btn"].click(
+            fn=load_latest_research,
+            inputs=[],
+            outputs=[
+                manual_components["research_input"],
+                manual_components["theme_input_manual"]
+            ]
+        )
+        
+        # 比較データクリア
+        manual_components["clear_comparison_btn"].click(
+            fn=clear_comparison_data,
+            inputs=[],
+            outputs=[
+                manual_components["comparison_report"],
+                manual_components["comparison_state"]
+            ]
+        )
+        
+        # 復元機能（過去の生成結果から台本を復元）
+        manual_components["restore_script_btn"].click(
+            fn=restore_script_from_comparison,
+            inputs=[
+                manual_components["restore_model_dropdown"],
+                manual_components["comparison_state"]
+            ],
+            outputs=[
+                manual_components["script_output"],
+                manual_components["script_editor"]
+            ]
+        )
+        
+        # エクスポート機能（比較セッションを保存）
+        manual_components["export_session_btn"].click(
+            fn=export_comparison_session,
+            inputs=[
+                manual_components["comparison_state"],
+                manual_components["research_input"],
+                manual_components["theme_input_manual"]
+            ],
+            outputs=[
+                manual_components["export_status"],
+                manual_components["export_status"]
+            ]
+        )
+        
+        # 音声合成 (Step B) - Step Cの入力にも反映
+        manual_components["synthesize_btn"].click(
+            fn=synthesize_audio_from_script,
+            inputs=[manual_components["script_editor"]],
+            outputs=[
+                manual_components["audio_output"],
+                manual_components["subtitle_output"],
+                manual_components["synthesis_log"],
+                manual_components["audio_input"],
+                manual_components["subtitle_input"],
+            ],
+            show_progress="full"
+        )
+        
+        # 動画レンダリング (Step C)
+        manual_components["render_btn"].click(
+            fn=render_video_from_assets,
+            inputs=[
+                manual_components["audio_input"],
+                manual_components["subtitle_input"],
+                manual_components["background_input"],
+                manual_components["bgm_dropdown_manual"],
+            ],
+            outputs=[
+                manual_components["video_output_manual"],
+                manual_components["video_file_output"],
+                manual_components["render_log"],
+            ],
+            show_progress="full"
+        )
+        
+        # ========== こだわりステップモードのイベントハンドラ ==========
+        
+        # Step 0: 企画フェーズ
+        step_components["step0_execute_btn"].click(
+            fn=execute_step0_planning,
+            inputs=[
+                step_components["step0_theme"],
+                step_components["step0_mode"]
+            ],
+            outputs=[
+                step_components["step0_query1"],
+                step_components["step0_query2"],
+                step_components["step0_query3"],
+                step_components["step0_angle"]
+            ],
+            show_progress="full"
+        )
+        
+        # Step 0の出力をStep 1の入力に自動コピー
+        step_components["step0_query1"].change(
+            fn=lambda x: x,
+            inputs=[step_components["step0_query1"]],
+            outputs=[step_components["step1_query1"]]
+        )
+        step_components["step0_query2"].change(
+            fn=lambda x: x,
+            inputs=[step_components["step0_query2"]],
+            outputs=[step_components["step1_query2"]]
+        )
+        step_components["step0_query3"].change(
+            fn=lambda x: x,
+            inputs=[step_components["step0_query3"]],
+            outputs=[step_components["step1_query3"]]
+        )
+        
+        # Step 1: リサーチ & 台本フェーズ
+        step_components["step1_execute_btn"].click(
+            fn=execute_step1_scripting,
+            inputs=[
+                step_components["step0_theme"],  # テーマはStep 0から
+                step_components["step0_mode"],   # モードもStep 0から
+                step_components["step1_query1"],
+                step_components["step1_query2"],
+                step_components["step1_query3"],
+                step_components["step1_excluded_topics"]
+            ],
+            outputs=[
+                step_components["step1_title"],
+                step_components["step1_thumbnail"],
+                step_components["step1_description"],
+                step_components["step1_script_json"],
+                step_components["step1_log"]
+            ],
+            show_progress="full"
+        )
+        
+        # Step 2: 制作フェーズ
+        step_components["step2_execute_btn"].click(
+            fn=execute_step2_production,
+            inputs=[
+                step_components["step1_title"],
+                step_components["step1_description"],
+                step_components["step1_script_json"],
+                step_components["step2_background"],
+                step_components["step2_bgm"],
+                step_components["step2_bgm_volume"],
+                step_components["step2_speed"],
+                step_components["step2_spectrum"]
+            ],
+            outputs=[
+                step_components["step2_video"],
+                step_components["step2_log"]
+            ],
+            show_progress="full"
+        )
     
     return app
 
