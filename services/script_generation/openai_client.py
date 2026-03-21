@@ -139,7 +139,16 @@ class OpenAIClient(IScriptGenerator):
         
         model_to_use = model_override if model_override else self.model_name
         
-        console.print(f"[dim]API call settings: max_tokens={self.max_tokens}, model={model_to_use}[/dim]")
+        # Determine token parameter name based on model
+        # gpt-5 series, o1 series, o3 series use max_completion_tokens
+        use_max_completion_tokens = (
+            model_to_use.startswith("gpt-5") or 
+            model_to_use.startswith("o1-") or 
+            model_to_use.startswith("o3-")
+        )
+        
+        token_param_name = "max_completion_tokens" if use_max_completion_tokens else "max_tokens"
+        console.print(f"[dim]API call settings: {token_param_name}={self.max_tokens}, model={model_to_use}[/dim]")
         
         # Retry logic
         max_retries = 2
@@ -147,16 +156,24 @@ class OpenAIClient(IScriptGenerator):
             try:
                 if use_structured_outputs:
                     # Use Structured Outputs (beta feature)
-                    completion = self.client.beta.chat.completions.parse(
-                        model=model_to_use,
-                        messages=[
+                    # Build kwargs dynamically based on model
+                    api_kwargs = {
+                        "model": model_to_use,
+                        "messages": [
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt}
                         ],
-                        response_format=Script,
-                        max_tokens=self.max_tokens,
-                        temperature=self.temperature
-                    )
+                        "response_format": Script,
+                        "temperature": self.temperature
+                    }
+                    
+                    # Add appropriate token parameter
+                    if use_max_completion_tokens:
+                        api_kwargs["max_completion_tokens"] = self.max_tokens
+                    else:
+                        api_kwargs["max_tokens"] = self.max_tokens
+                    
+                    completion = self.client.beta.chat.completions.parse(**api_kwargs)
                     
                     # Extract parsed object
                     parsed_script = completion.choices[0].message.parsed
@@ -168,16 +185,23 @@ class OpenAIClient(IScriptGenerator):
                     
                 else:
                     # Standard completion
-                    completion = self.client.chat.completions.create(
-                        model=model_to_use,
-                        messages=[
+                    api_kwargs = {
+                        "model": model_to_use,
+                        "messages": [
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt}
                         ],
-                        max_tokens=self.max_tokens,
-                        temperature=self.temperature,
-                        response_format={"type": "json_object"}
-                    )
+                        "temperature": self.temperature,
+                        "response_format": {"type": "json_object"}
+                    }
+                    
+                    # Add appropriate token parameter
+                    if use_max_completion_tokens:
+                        api_kwargs["max_completion_tokens"] = self.max_tokens
+                    else:
+                        api_kwargs["max_tokens"] = self.max_tokens
+                    
+                    completion = self.client.chat.completions.create(**api_kwargs)
                     response_text = completion.choices[0].message.content
                 
                 break  # Success

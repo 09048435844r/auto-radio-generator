@@ -1479,13 +1479,143 @@ def render_video_from_assets(
         return None, None, get_logs()
 
 
+def clear_comparison_data() -> tuple[str, list]:
+    """比較データをクリア
+    
+    Returns:
+        (メッセージ, 空のリスト)
+    """
+    return "*比較データをクリアしました。新しいモデルで台本を生成してください。*", []
+
+
+def restore_script_from_comparison(selected_model: str, comparison_state: list) -> tuple[str, str]:
+    """選択したモデルの台本を復元
+    
+    Args:
+        selected_model: 選択されたモデル名（"gemini-2.5-pro (1234ターン)"形式）
+        comparison_state: 比較セッションの状態
+    
+    Returns:
+        (script_output用JSON, script_editor用JSON)
+    """
+    if not selected_model or not comparison_state:
+        return "", ""
+    
+    # モデル名を抽出（"gemini-2.5-pro (1234ターン)" → "gemini-2.5-pro"）
+    model_name = selected_model.split(" (")[0]
+    
+    # comparison_stateから該当モデルのデータを取得
+    for data in comparison_state:
+        if data["model_name"] == model_name:
+            return data["script_json"], data["script_json"]
+    
+    return "", ""
+
+
+def export_comparison_session(
+    comparison_state: list,
+    research_input: str,
+    theme: str
+) -> tuple[str, dict]:
+    """比較セッションを一括エクスポート
+    
+    Args:
+        comparison_state: 比較セッションの状態
+        research_input: リサーチデータ
+        theme: テーマ/タイトル
+    
+    Returns:
+        (ステータスメッセージ, Textbox更新用dict)
+    """
+    from services.comparison_session import save_comparison_session
+    from datetime import datetime
+    
+    if not comparison_state or len(comparison_state) < 2:
+        return (
+            "エラー: 比較データが不足しています（2つ以上のモデルが必要）",
+            gr.Textbox(visible=True)
+        )
+    
+    try:
+        # Type validation
+        if not isinstance(research_input, str):
+            return (
+                f"エラー: research_inputが文字列ではありません（型: {type(research_input).__name__}）",
+                gr.Textbox(visible=True)
+            )
+        
+        if not isinstance(theme, str):
+            return (
+                f"エラー: themeが文字列ではありません（型: {type(theme).__name__}）",
+                gr.Textbox(visible=True)
+            )
+        
+        config = load_config(PROJECT_ROOT)
+        
+        # リサーチデータの構造化
+        research_data = {
+            "theme": theme,
+            "content": research_input,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        # 保存実行
+        save_path = save_comparison_session(
+            comparison_state=comparison_state,
+            research_data=research_data,
+            theme=theme,
+            config=config
+        )
+        
+        return (
+            f"✓ 比較セッションを保存しました\n保存先: {save_path}",
+            gr.Textbox(visible=True)
+        )
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        return (
+            f"エラー: {str(e)}\n\n詳細:\n{error_detail}",
+            gr.Textbox(visible=True)
+        )
+
+
+def load_latest_research() -> tuple[str, str]:
+    """最新のリサーチデータを読み込む
+    
+    Returns:
+        (research_content, theme)
+    """
+    research_dir = PROJECT_ROOT / "data" / "research"
+    
+    if not research_dir.exists():
+        return "", ""
+    
+    # 最新のJSONLファイルを取得
+    jsonl_files = sorted(research_dir.glob("research_*.jsonl"), reverse=True)
+    
+    if not jsonl_files:
+        return "", ""
+    
+    latest_file = jsonl_files[0]
+    
+    try:
+        with open(latest_file, "r", encoding="utf-8") as f:
+            data = json.loads(f.readline())
+        
+        return data["content"], data["theme"]
+    except Exception as e:
+        print(f"[ERROR] Failed to load research data: {e}")
+        return "", ""
+
+
 def generate_script_from_research(
     research_text: str,
     theme: str,
     model_name: str,
     comparison_state: list,
     progress=gr.Progress()
-) -> tuple[str, str, str, list]:
+) -> tuple[str, str, str, list, dict]:
     """リサーチ結果から台本を生成
     
     Args:
@@ -1495,18 +1625,27 @@ def generate_script_from_research(
         comparison_state: 比較用状態
     
     Returns:
-        (台本JSON, 台本JSON, 比較レポート, 更新された状態)
+        (台本JSON, 台本JSON, 比較レポート, 更新された状態, ドロップダウン更新用dict)
     """
     import asyncio
+    
+    # Type validation
+    if not isinstance(research_text, str):
+        error_msg = f"エラー: research_textが文字列ではありません（型: {type(research_text).__name__}）"
+        return error_msg, error_msg, "", comparison_state, gr.Dropdown()
+    
+    if not isinstance(theme, str):
+        error_msg = f"エラー: themeが文字列ではありません（型: {type(theme).__name__}）"
+        return error_msg, error_msg, "", comparison_state, gr.Dropdown()
     
     # 入力検証
     if not research_text or not research_text.strip():
         error_msg = "エラー: リサーチ結果を入力してください。"
-        return error_msg, error_msg, "", comparison_state
+        return error_msg, error_msg, "", comparison_state, gr.Dropdown()
     
     if not theme or not theme.strip():
         error_msg = "エラー: テーマ/タイトルを入力してください。"
-        return error_msg, error_msg, "", comparison_state
+        return error_msg, error_msg, "", comparison_state, gr.Dropdown()
     
     try:
         # ログをクリア
@@ -1528,7 +1667,7 @@ def generate_script_from_research(
         except ValueError as e:
             error_msg = f"エラー: {str(e)}"
             append_log(error_msg)
-            return error_msg, error_msg, "", comparison_state
+            return error_msg, error_msg, "", comparison_state, gr.Dropdown()
         
         script_generator = create_script_generator(config, provider=provider)
         
@@ -1539,7 +1678,7 @@ def generate_script_from_research(
             topic=theme.strip(),
             mode="trivia",  # マニュアル入力はトリビアモードとして扱う
             content=research_text.strip(),
-            sources=["手動入力"]
+            sources=[]  # 手動入力の場合はソースなし
         )
         
         progress(0.6, desc="台本を生成中...")
@@ -1577,7 +1716,7 @@ def generate_script_from_research(
         if hasattr(script_generator, 'last_usage') and script_generator.last_usage:
             usage = script_generator.last_usage
             from services.cost_calculator import CostCalculator
-            calculator = CostCalculator()
+            calculator = CostCalculator(config)
             cost_lines = calculator.format_llm_cost_log(usage)
             for line in cost_lines:
                 append_log(line)
@@ -1589,12 +1728,13 @@ def generate_script_from_research(
         updated_state = comparison_state
         
         if hasattr(script_generator, 'last_usage') and script_generator.last_usage:
-            # 同じモデルのデータは上書き
+            # 同じモデルのデータは上書き（重複排除）
             updated_state = [
                 d for d in comparison_state 
                 if d["model_name"] != model_name
             ]
             
+            # 新しいデータを追加
             updated_state.append({
                 "model_name": model_name,
                 "script_json": script_json,
@@ -1604,20 +1744,28 @@ def generate_script_from_research(
             # 比較レポート生成（2つ以上のデータがある場合）
             if len(updated_state) >= 2:
                 from services.comparison_report import generate_comparison_report
-                comparison_report_md = generate_comparison_report(updated_state)
+                comparison_report_md = generate_comparison_report(updated_state, config)
             else:
-                comparison_report_md = f"*{len(updated_state)}/3 モデルの台本を生成済み。比較には2つ以上必要です。*"
+                # スケーラブルな文言（上限を前提としない）
+                comparison_report_md = f"*現在 {len(updated_state)} 個のモデルで台本を生成済み。比較には2つ以上必要です。*"
         else:
             comparison_report_md = "*使用量情報が取得できませんでした*"
         
-        return script_json, script_json, comparison_report_md, updated_state
+        # ドロップダウン選択肢を生成
+        dropdown_choices = []
+        for data in updated_state:
+            script = json.loads(data["script_json"])
+            turn_count = len(script.get("dialogue", []))
+            dropdown_choices.append(f"{data['model_name']} ({turn_count}ターン)")
+        
+        return script_json, script_json, comparison_report_md, updated_state, gr.Dropdown(choices=dropdown_choices, value=None)
         
     except Exception as e:
         error_msg = f"台本生成中にエラーが発生しました: {str(e)}"
         append_log(f"❌ {error_msg}")
         import traceback
         append_log(f"\n詳細:\n{traceback.format_exc()}")
-        return error_msg, error_msg, "", comparison_state
+        return error_msg, error_msg, "", comparison_state, gr.Dropdown()
 
 
 # Dashboard functions
@@ -2434,6 +2582,15 @@ def create_manual_tab(assets: dict) -> dict[str, object]:
         )
 
     gr.Markdown("### 📝 Step A: リサーチ結果から台本生成")
+    
+    # リサーチデータ読み込みボタン
+    with gr.Row():
+        load_research_btn = gr.Button(
+            "📂 最新のリサーチデータを読み込む",
+            variant="secondary",
+            size="sm"
+        )
+    
     research_input = gr.Textbox(
         label="Perplexity等のリサーチ結果を貼り付け",
         placeholder="ここにリサーチ結果のテキストを貼り付けてください...",
@@ -2481,11 +2638,40 @@ def create_manual_tab(assets: dict) -> dict[str, object]:
             value="*複数のモデルで台本を生成すると、ここに比較レポートが表示されます*",
         )
     
-    # 比較クリアボタン
-    clear_comparison_btn = gr.Button(
-        "🗑️ 比較データをクリア",
-        variant="secondary",
-        size="sm"
+    # 復元UI（過去の生成結果から台本を復元）
+    with gr.Row():
+        with gr.Column(scale=3):
+            restore_model_dropdown = gr.Dropdown(
+                label="📋 過去の生成結果から復元",
+                choices=[],
+                interactive=True,
+                info="比較セッション内の任意のモデルの台本をエディタに復元（APIを再実行せずに過去の台本を採用可能）"
+            )
+        with gr.Column(scale=1):
+            restore_script_btn = gr.Button(
+                "↩️ 復元",
+                variant="secondary",
+                size="sm"
+            )
+    
+    # 比較操作ボタン
+    with gr.Row():
+        clear_comparison_btn = gr.Button(
+            "🗑️ 比較データをクリア",
+            variant="secondary",
+            size="sm"
+        )
+        export_session_btn = gr.Button(
+            "💾 比較セッションを保存",
+            variant="primary",
+            size="sm"
+        )
+    
+    # エクスポートステータス表示
+    export_status = gr.Textbox(
+        label="保存ステータス",
+        interactive=False,
+        visible=False
     )
 
     gr.Markdown("---")
@@ -2566,6 +2752,7 @@ def create_manual_tab(assets: dict) -> dict[str, object]:
 
     return {
         "step_mode": step_mode,
+        "load_research_btn": load_research_btn,
         "research_input": research_input,
         "theme_input_manual": theme_input_manual,
         "llm_model_manual": llm_model_manual,
@@ -2573,7 +2760,11 @@ def create_manual_tab(assets: dict) -> dict[str, object]:
         "script_output": script_output,
         "comparison_state": comparison_state,
         "comparison_report": comparison_report,
+        "restore_model_dropdown": restore_model_dropdown,
+        "restore_script_btn": restore_script_btn,
         "clear_comparison_btn": clear_comparison_btn,
+        "export_session_btn": export_session_btn,
+        "export_status": export_status,
         "script_editor": script_editor,
         "synthesize_btn": synthesize_btn,
         "audio_output": audio_output,
@@ -2953,22 +3144,56 @@ def create_ui() -> gr.Blocks:
                 manual_components["script_output"], 
                 manual_components["script_editor"],
                 manual_components["comparison_report"],
-                manual_components["comparison_state"]
+                manual_components["comparison_state"],
+                manual_components["restore_model_dropdown"]
             ],
             show_progress="full"
         )
         
-        # 比較データクリア
-        def clear_comparison_data():
-            """比較データをクリア"""
-            return "*比較データをクリアしました。新しいテーマで検証を開始できます。*", []
+        # リサーチデータ読み込み
+        manual_components["load_research_btn"].click(
+            fn=load_latest_research,
+            inputs=[],
+            outputs=[
+                manual_components["research_input"],
+                manual_components["theme_input_manual"]
+            ]
+        )
         
+        # 比較データクリア
         manual_components["clear_comparison_btn"].click(
             fn=clear_comparison_data,
             inputs=[],
             outputs=[
                 manual_components["comparison_report"],
                 manual_components["comparison_state"]
+            ]
+        )
+        
+        # 復元機能（過去の生成結果から台本を復元）
+        manual_components["restore_script_btn"].click(
+            fn=restore_script_from_comparison,
+            inputs=[
+                manual_components["restore_model_dropdown"],
+                manual_components["comparison_state"]
+            ],
+            outputs=[
+                manual_components["script_output"],
+                manual_components["script_editor"]
+            ]
+        )
+        
+        # エクスポート機能（比較セッションを保存）
+        manual_components["export_session_btn"].click(
+            fn=export_comparison_session,
+            inputs=[
+                manual_components["comparison_state"],
+                manual_components["research_input"],
+                manual_components["theme_input_manual"]
+            ],
+            outputs=[
+                manual_components["export_status"],
+                manual_components["export_status"]
             ]
         )
         

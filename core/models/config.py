@@ -52,12 +52,19 @@ class ResearcherConfig(BaseModel):
 
 
 # 台本生成設定
+class ModelCost(BaseModel):
+    """モデルのコスト情報（USD per 1M tokens）"""
+    input: float
+    output: float
+
+
 class GeminiConfig(BaseModel):
     """Gemini API設定"""
     model: str = "gemini-3.1-pro-preview"
     fallback_model: str = "gemini-2.5-pro"
     flash_model: str = "gemini-2.5-flash"  # 軽量モデル（サムネイル再作成用）
     max_tokens: int = 8192
+    costs: Dict[str, ModelCost] = Field(default_factory=dict)
 
 
 class OpenAIConfig(BaseModel):
@@ -66,6 +73,7 @@ class OpenAIConfig(BaseModel):
     fallback_model: str = "gpt-4o"
     max_tokens: int = 8192
     temperature: float = 0.85
+    costs: Dict[str, ModelCost] = Field(default_factory=dict)
 
 
 class AnthropicConfig(BaseModel):
@@ -73,6 +81,7 @@ class AnthropicConfig(BaseModel):
     model: str = "claude-sonnet-4-6"
     max_tokens: int = 8192
     temperature: float = 0.85
+    costs: Dict[str, ModelCost] = Field(default_factory=dict)
 
 
 class ScriptStructureConfig(BaseModel):
@@ -82,12 +91,19 @@ class ScriptStructureConfig(BaseModel):
     ending_ratio: int = 10
 
 
+class CurrencyConfig(BaseModel):
+    """通貨換算設定"""
+    usd_to_jpy: float = 150.0
+
+
 class ScriptGeneratorConfig(BaseModel):
     """台本生成エンジン設定"""
+    default_provider: str = "gemini"
     gemini: GeminiConfig = Field(default_factory=GeminiConfig)
     openai: OpenAIConfig = Field(default_factory=OpenAIConfig)
     anthropic: AnthropicConfig = Field(default_factory=AnthropicConfig)
     structure: ScriptStructureConfig = Field(default_factory=ScriptStructureConfig)
+    currency: CurrencyConfig = Field(default_factory=CurrencyConfig)
 
 
 class SpeakersConfig(BaseModel):

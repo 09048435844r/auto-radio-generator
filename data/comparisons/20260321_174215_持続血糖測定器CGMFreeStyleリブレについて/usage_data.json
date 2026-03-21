@@ -1,0 +1,29 @@
+{
+  "gemini-3.1-pro-preview": {
+    "model_name": "gemini-3.1-pro-preview",
+    "provider": "gemini",
+    "input_tokens": 6468,
+    "output_tokens": 5524,
+    "request_count": 1,
+    "cost_usd": 0.07599,
+    "cost_jpy": 11.3985
+  },
+  "gpt-5.4-2026-03-05": {
+    "model_name": "gpt-5.4",
+    "provider": "openai",
+    "input_tokens": 9255,
+    "output_tokens": 5050,
+    "request_count": 1,
+    "cost_usd": 0.09888749999999999,
+    "cost_jpy": 14.833124999999999
+  },
+  "claude-sonnet-4-6": {
+    "model_name": "claude-sonnet-4-6",
+    "provider": "anthropic",
+    "input_tokens": 10290,
+    "output_tokens": 5054,
+    "request_count": 1,
+    "cost_usd": 0.10668,
+    "cost_jpy": 16.002
+  }
+}

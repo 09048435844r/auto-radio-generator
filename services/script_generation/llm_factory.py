@@ -3,8 +3,6 @@
 Factory pattern for creating script generation clients based on provider name.
 """
 from typing import Optional
-from pathlib import Path
-import yaml
 from rich.console import Console
 
 from core.interfaces.script_generator import IScriptGenerator
@@ -102,12 +100,11 @@ def get_available_models(config: AppConfig) -> list[str]:
     Returns:
         list[str]: List of available model names
     """
-    # Load model list from costs.yaml
-    costs_path = Path(__file__).parent.parent.parent / "config" / "costs.yaml"
-    with open(costs_path, "r", encoding="utf-8") as f:
-        costs = yaml.safe_load(f)
+    # Get all models from AppConfig (SSOT)
+    from services.cost_calculator import CostCalculator
     
-    all_models = list(costs["llm_models"].keys())
+    calculator = CostCalculator(config)
+    all_models = calculator.get_all_available_models()
     
     # Return only models for providers with API keys configured
     available_providers = get_available_providers(config)

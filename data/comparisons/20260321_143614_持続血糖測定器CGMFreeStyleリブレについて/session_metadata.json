@@ -1,0 +1,12 @@
+{
+  "session_id": "20260321_143614",
+  "theme": "持続血糖測定器（CGM）FreeStyleリブレについて",
+  "created_at": "2026-03-21T14:36:14.813244",
+  "models_compared": [
+    "gemini-3.1-pro-preview",
+    "gpt-5.4-2026-03-05",
+    "claude-sonnet-4-6"
+  ],
+  "total_cost_usd": 0.2815575,
+  "total_cost_jpy": 42.233625
+}

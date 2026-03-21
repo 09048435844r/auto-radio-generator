@@ -304,7 +304,7 @@ class GeminiClient(IScriptGenerator):
         model_to_use = model_override if model_override else self.model_name
         
         config_params = {
-            "max_output_tokens": 8192,  # 長文台本での途切れ防止のため固定値に設定
+            "max_output_tokens": 16384,  # 長文台本での途切れ防止のため固定値に設定
             "temperature": 0.7 if is_part2 else 0.85,
             "response_mime_type": "application/json",  # JSONモード有効化
             "safety_settings": self.default_safety_settings,  # 医療系ワード等での誤爆防止

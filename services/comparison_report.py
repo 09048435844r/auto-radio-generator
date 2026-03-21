@@ -16,7 +16,7 @@ class ScriptComparison:
     cost_jpy: float
 
 
-def generate_comparison_report(scripts_data: List[dict]) -> str:
+def generate_comparison_report(scripts_data: List[dict], config) -> str:
     """Generate comparison report from multiple script data
     
     Args:
@@ -29,6 +29,7 @@ def generate_comparison_report(scripts_data: List[dict]) -> str:
                 },
                 ...
             ]
+        config: Application configuration (AppConfig)
     
     Returns:
         str: Comparison report in Markdown format
@@ -36,7 +37,7 @@ def generate_comparison_report(scripts_data: List[dict]) -> str:
     from services.cost_calculator import CostCalculator
     
     comparisons = []
-    calculator = CostCalculator()
+    calculator = CostCalculator(config)
     
     for data in scripts_data:
         script = json.loads(data["script_json"])
@@ -64,9 +65,9 @@ def generate_comparison_report(scripts_data: List[dict]) -> str:
             cost_jpy=cost_jpy
         ))
     
-    # Generate report
+    # Generate report (スケーラブルなヘッダー)
     lines = [
-        "# 📊 台本比較レポート",
+        f"# 📊 台本比較レポート（{len(comparisons)} モデル）",
         "",
         "## 基本情報",
         "",

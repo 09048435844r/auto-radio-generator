@@ -1,8 +1,6 @@
-"""APIコスト計算サービス"""
-from pathlib import Path
+"""APIコスト計算サービス（SSOT対応版）"""
 from typing import Optional
-import yaml
-
+from core.models.config import AppConfig
 from core.models.usage import (
     TotalUsage,
     CostBreakdown,
@@ -15,18 +13,20 @@ GeminiUsage = LLMUsage
 
 
 class CostCalculator:
-    """API cost calculator with model-specific rate support
+    """API cost calculator using AppConfig as SSOT
     
-    Loads cost rates from config/costs.yaml for accurate per-model
-    cost calculation across multiple LLM providers.
+    Retrieves cost rates directly from config.yaml (via AppConfig)
+    instead of external costs.yaml file.
     """
     
-    def __init__(self, config_path: Optional[Path] = None):
-        if config_path is None:
-            config_path = Path(__file__).parent.parent / "config" / "costs.yaml"
+    def __init__(self, config: AppConfig):
+        """Initialize with AppConfig
         
-        with open(config_path, "r", encoding="utf-8") as f:
-            self.rates = yaml.safe_load(f)
+        Args:
+            config: Application configuration (SSOT)
+        """
+        self.config = config
+        self.usd_to_jpy = config.yaml.script_generator.currency.usd_to_jpy
     
     def get_llm_rate(self, model_name: str) -> tuple[float, float]:
         """Get input/output rates for a specific model
@@ -37,11 +37,62 @@ class CostCalculator:
         Returns:
             tuple[float, float]: (input_rate, output_rate) per 1M tokens
         """
-        model_rates = self.rates["llm_models"].get(model_name)
-        if model_rates is None:
-            # Fallback to gemini-1.5-pro rates for unknown models
-            model_rates = self.rates["llm_models"]["gemini-1.5-pro"]
-        return model_rates["input"], model_rates["output"]
+        # Determine provider from model name
+        provider = self._get_provider_from_model_name(model_name)
+        
+        # Get cost data from config
+        if provider == "gemini":
+            costs = self.config.yaml.script_generator.gemini.costs
+        elif provider == "openai":
+            costs = self.config.yaml.script_generator.openai.costs
+        elif provider == "anthropic":
+            costs = self.config.yaml.script_generator.anthropic.costs
+        else:
+            # Fallback to gemini costs
+            costs = self.config.yaml.script_generator.gemini.costs
+        
+        # Get model cost
+        model_cost = costs.get(model_name)
+        if model_cost is None:
+            # Fallback to first available model in provider
+            if costs:
+                model_cost = next(iter(costs.values()))
+            else:
+                # Ultimate fallback (gemini-2.5-flash rates)
+                from core.models.config import ModelCost
+                model_cost = ModelCost(input=0.30, output=2.50)
+        
+        return model_cost.input, model_cost.output
+    
+    def _get_provider_from_model_name(self, model_name: str) -> str:
+        """Infer provider from model name
+        
+        Args:
+            model_name: Model name
+        
+        Returns:
+            str: Provider name ("gemini" | "openai" | "anthropic")
+        """
+        if model_name.startswith("gemini-"):
+            return "gemini"
+        elif model_name.startswith(("gpt-", "o1-", "o3-")):
+            return "openai"
+        elif model_name.startswith("claude-"):
+            return "anthropic"
+        else:
+            return "gemini"  # Default
+    
+    def get_all_available_models(self) -> list[str]:
+        """Get all available models from config
+        
+        Returns:
+            list[str]: List of all model names with cost data
+        """
+        models = []
+        models.extend(self.config.yaml.script_generator.gemini.costs.keys())
+        models.extend(self.config.yaml.script_generator.openai.costs.keys())
+        models.extend(self.config.yaml.script_generator.anthropic.costs.keys())
+        return models
     
     def calculate(self, usage: TotalUsage) -> CostBreakdown:
         """Calculate costs from usage with per-provider, per-model rates
@@ -71,7 +122,7 @@ class CostCalculator:
         
         # Total
         total_usd = perplexity_usd + total_llm_input_usd + total_llm_output_usd + voicevox_usd
-        total_jpy = total_usd * self.rates["currency"]["usd_to_jpy"]
+        total_jpy = total_usd * self.usd_to_jpy
         
         # Free tier check (simplified)
         is_free_tier = self._check_free_tier(usage)
@@ -113,7 +164,7 @@ class CostCalculator:
             (usage.input_tokens / 1_000_000) * input_rate +
             (usage.output_tokens / 1_000_000) * output_rate
         )
-        cost_jpy = cost_usd * self.rates["currency"]["usd_to_jpy"]
+        cost_jpy = cost_usd * self.usd_to_jpy
         
         return [
             "",
