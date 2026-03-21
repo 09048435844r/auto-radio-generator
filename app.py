@@ -2372,15 +2372,15 @@ def create_ui() -> gr.Blocks:
             """
         )
         
+        # サムネイル再作成用State
+        thumbnail_state = gr.State(value=None)
+        
         generator_components: dict[str, object] = {}
         dashboard_components: dict[str, gr.components.Component] = {}
         settings_components: dict[str, gr.components.Component] = {}
 
         # タブ切り替え
         with gr.Tabs():
-            # サムネイル再作成用State
-            thumbnail_state = gr.State(value=None)
-            
             with gr.TabItem("🎬 動画生成", id="generator"):
                 generator_components = create_generator_tab(saved_settings=saved_settings, assets=assets)
 
