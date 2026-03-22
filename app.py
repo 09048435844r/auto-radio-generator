@@ -758,6 +758,34 @@ def research_only(
         return "", get_logs(), ""
 
 
+def load_research_json_file(filepath: str | None) -> str:
+    """既存のリサーチJSONファイルを読み込んで整形表示
+    
+    Args:
+        filepath: JSONLファイルのパス
+    
+    Returns:
+        フォーマット済みJSON文字列
+    """
+    if not filepath:
+        return ""
+    
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            content = f.read().strip()
+            
+        # JSONL形式（1行JSON）をパース
+        data = json.loads(content)
+        
+        # 整形して返す
+        return json.dumps(data, indent=2, ensure_ascii=False)
+    
+    except json.JSONDecodeError as e:
+        return f"❌ JSON解析エラー: {str(e)}"
+    except Exception as e:
+        return f"❌ ファイル読み込みエラー: {str(e)}"
+
+
 def synthesize_audio_from_script(
     script_json: str,
     progress=gr.Progress()
@@ -2054,6 +2082,13 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
                     )
                     
                     with gr.Accordion("🔍 リサーチ結果生データ (JSON)", open=False):
+                        with gr.Row():
+                            research_json_file = gr.File(
+                                label="既存のリサーチJSONファイルを読み込む (.jsonl)",
+                                file_types=[".jsonl", ".json"],
+                                type="filepath"
+                            )
+                            load_research_json_btn = gr.Button("📂 JSONを読み込む", size="sm")
                         research_json_output = gr.Code(
                             language="json",
                             interactive=False,
@@ -2318,6 +2353,8 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
         "script_only_btn": script_only_btn,
         "research_only_btn": research_only_btn,
         "research_output": research_output,
+        "research_json_file": research_json_file,
+        "load_research_json_btn": load_research_json_btn,
         "research_json_output": research_json_output,
         "video_output": video_output,
         "youtube_url_output": youtube_url_output,
@@ -2712,6 +2749,13 @@ def create_ui() -> gr.Blocks:
                 generator_components["research_json_output"]
             ],
             show_progress="full"
+        )
+        
+        # 既存のリサーチJSONファイルを読み込む
+        generator_components["load_research_json_btn"].click(
+            fn=load_research_json_file,
+            inputs=[generator_components["research_json_file"]],
+            outputs=[generator_components["research_json_output"]]
         )
         
         # ========== ステップモードのイベントハンドラ ==========
