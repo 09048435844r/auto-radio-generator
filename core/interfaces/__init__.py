@@ -1,5 +1,6 @@
 from .researcher import IResearcher, ResearchResult, ResearchMode
 from .script_generator import IScriptGenerator
+from .script_orchestrator import IScriptOrchestrator
 from .audio_synthesizer import IAudioSynthesizer, SynthesisResult, ChapterMarker
 from .video_renderer import IVideoRenderer, RenderResult
 
@@ -8,6 +9,7 @@ __all__ = [
     "ResearchResult",
     "ResearchMode",
     "IScriptGenerator",
+    "IScriptOrchestrator",
     "IAudioSynthesizer",
     "SynthesisResult",
     "ChapterMarker",

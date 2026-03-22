@@ -96,6 +96,38 @@ class CurrencyConfig(BaseModel):
     usd_to_jpy: float = 150.0
 
 
+class OrchestratorSegmentConfig(BaseModel):
+    """オーケストレーターのセグメント設定"""
+    min_turns: int = 10
+    max_turns: int = 20
+
+
+class OrchestratorConfig(BaseModel):
+    """Hierarchical Agentic Workflow オーケストレーター設定"""
+    enabled: bool = Field(default=False, description="Trueにすると新アーキテクチャを使用")
+    curator_model: str = Field(
+        default="gemini-2.5-flash",
+        description="キュレーション・要約用軽量モデル"
+    )
+    segment_model: str = Field(
+        default="",
+        description="セグメント生成用モデル（空の場合は script_generator.gemini.model を使用）"
+    )
+    max_topics: int = Field(default=3, description="キュレーションで選定する最大トピック数")
+    context_summary_max_length: int = Field(
+        default=300, description="文脈要約の最大文字数"
+    )
+    intro: OrchestratorSegmentConfig = Field(
+        default_factory=lambda: OrchestratorSegmentConfig(min_turns=10, max_turns=20)
+    )
+    deep_dive: OrchestratorSegmentConfig = Field(
+        default_factory=lambda: OrchestratorSegmentConfig(min_turns=25, max_turns=45)
+    )
+    conclusion: OrchestratorSegmentConfig = Field(
+        default_factory=lambda: OrchestratorSegmentConfig(min_turns=10, max_turns=20)
+    )
+
+
 class ScriptGeneratorConfig(BaseModel):
     """台本生成エンジン設定"""
     default_provider: str = "gemini"
@@ -104,6 +136,7 @@ class ScriptGeneratorConfig(BaseModel):
     anthropic: AnthropicConfig = Field(default_factory=AnthropicConfig)
     structure: ScriptStructureConfig = Field(default_factory=ScriptStructureConfig)
     currency: CurrencyConfig = Field(default_factory=CurrencyConfig)
+    orchestrator: OrchestratorConfig = Field(default_factory=OrchestratorConfig)
 
 
 class SpeakersConfig(BaseModel):

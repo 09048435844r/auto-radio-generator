@@ -26,6 +26,7 @@ from core.models import (
 from core.models.script import DialogueTurn  # 追加インポート
 from core.interfaces import ResearchMode, ChapterMarker, ResearchResult
 from services.script_generation import GeminiClient
+from services.script_generation.orchestrator import ScriptOrchestrator
 from services.research import PerplexityResearcher
 from services.audio_synthesis import VoicevoxClient
 from services.video_rendering import FfmpegRenderer
@@ -707,12 +708,29 @@ async def execute_scripting_phase(
     # Step 2: 台本生成
     cb.log(f"\n== Phase 2-2: 台本生成 ==")
     cb.log(f"テーマ: {theme}")
-    cb.log(f"使用エンジン: {provider}")
-    cb.progress(0.50, f"📝 台本を執筆中 ({provider})...")
+    use_orchestrator = config.yaml.script_generator.orchestrator.enabled
+    cb.log(f"使用エンジン: {'ScriptOrchestrator (Agentic)' if use_orchestrator else provider}")
+    cb.progress(0.50, f"📝 台本を執筆中 ({'Orchestrator' if use_orchestrator else provider})...")
     
     script_start = time.time()
-    script_generator = create_script_generator(config, provider=provider)
-    script = await script_generator.generate(theme, research_data, avoid_topics=avoid_topics, excluded_topics=excluded_topics)
+
+    if use_orchestrator and research_data is not None:
+        # --- 新アーキテクチャ: Hierarchical Agentic Workflow ---
+        cb.log("[cyan][Orchestrator] 長尺台本生成モード（TopicCuration → SegmentGeneration）[/cyan]")
+        orchestrator = ScriptOrchestrator(config)
+        script = await orchestrator.generate_script(
+            theme=theme,
+            research_data=research_data,
+            avoid_topics=avoid_topics,
+            excluded_topics=excluded_topics,
+            progress_callback=cb,
+        )
+        gemini_usage = orchestrator.get_total_usage()
+    else:
+        # --- 旧アーキテクチャ: 単一API呼び出し（フォールバック） ---
+        script_generator = create_script_generator(config, provider=provider)
+        script = await script_generator.generate(theme, research_data, avoid_topics=avoid_topics, excluded_topics=excluded_topics)
+        gemini_usage = script_generator.last_usage
 
     phase_label = "Part 2" if excluded_topics and excluded_topics.strip() else "Part 1/Single"
     diagnostics, suspected_swap = _build_speaker_diagnostics(script, label=phase_label)
@@ -725,7 +743,6 @@ async def execute_scripting_phase(
         for msg in fixed_diagnostics:
             cb.log(msg)
     
-    gemini_usage = script_generator.last_usage
     script_duration = time.time() - script_start
     
     cb.log(f"✓ 台本生成完了: {len(script.sections)}フレーズ ({script_duration:.1f}秒)")

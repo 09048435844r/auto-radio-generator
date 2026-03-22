@@ -11,6 +11,7 @@ from .usage import (
 from .research import ResearchPlan
 from .execution_log import ExecutionLogEntry, PromptRecord, ConfigSnapshot
 from .cost_log import CostLogEntry
+from .curation import CuratedTopic, ScriptSegment, CurationResult
 
 __all__ = [
     "AppConfig",
@@ -28,4 +29,7 @@ __all__ = [
     "PromptRecord",
     "ConfigSnapshot",
     "CostLogEntry",
+    "CuratedTopic",
+    "ScriptSegment",
+    "CurationResult",
 ]

@@ -364,6 +364,28 @@ script_generator:
   currency:
     usd_to_jpy: 150.0         # USD → JPY 換算レート
 
+  # ---------------------------------------------------------------------------
+  # Hierarchical Agentic Workflow オーケストレーター設定
+  # ---------------------------------------------------------------------------
+  # enabled: true にすると新アーキテクチャ（TopicCuration → SegmentGeneration）を使用
+  # enabled: false にすると旧アーキテクチャ（単一API呼び出し）を使用（デフォルト）
+  orchestrator:
+    enabled: false               # true: 新アーキテクチャ / false: 旧アーキテクチャ（安全なデフォルト）
+    curator_model: "gemini-2.5-flash"  # キュレーション・要約用軽量モデル（コスト削減）
+    segment_model: ""            # セグメント生成用モデル（空=script_generator.gemini.modelを使用）
+    max_topics: 3                # キュレーションで選定する最大トピック数
+    context_summary_max_length: 300  # 文脈要約の最大文字数
+    # セグメント別ターン数設定
+    intro:
+      min_turns: 10
+      max_turns: 20
+    deep_dive:
+      min_turns: 25
+      max_turns: 45
+    conclusion:
+      min_turns: 10
+      max_turns: 20
+
 # -----------------------------------------------------------------------------
 # 音声合成設定（VOICEVOX）
 # -----------------------------------------------------------------------------
