@@ -1317,7 +1317,7 @@ async def generate_video_workflow(
         total_usage.total_duration_sec = time.time() - workflow_start
         
         # コスト計算
-        cost_calculator = CostCalculator()
+        cost_calculator = CostCalculator(config)
         cost = cost_calculator.calculate(total_usage)
         cost_report = cost_calculator.format_cost_report(total_usage, cost)
         
@@ -1725,7 +1725,7 @@ def run_workflow_sync(
             total_usage.total_duration_sec = time.time() - workflow_start
             
             # コスト計算
-            cost_calculator = CostCalculator()
+            cost_calculator = CostCalculator(config)
             cost = cost_calculator.calculate(total_usage)
             cost_report = cost_calculator.format_cost_report(total_usage, cost)
 

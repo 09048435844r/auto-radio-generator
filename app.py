@@ -642,7 +642,7 @@ def research_only(
     research_mode: str,
     avoid_topics: str = "",
     progress=gr.Progress()
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
     """リサーチのみを実行してJSONLファイルに保存
     
     Args:
@@ -652,7 +652,7 @@ def research_only(
         progress: Gradio進捗バー
     
     Returns:
-        (保存パス, ログ出力)
+        (保存パス, ログ出力, フォーマット済みJSON)
     """
     import asyncio
     from services.research import PerplexityResearcher
@@ -665,14 +665,14 @@ def research_only(
     append_log("リサーチ結果を保存します")
     
     if not theme or not theme.strip():
-        return "", "エラー: テーマを入力してください。"
+        return "", "エラー: テーマを入力してください。", ""
     
     try:
         config = load_config(PROJECT_ROOT)
         mode = RESEARCH_MODE_MAP.get(research_mode)
         
         if not mode:
-            return "", "エラー: リサーチモードを選択してください。"
+            return "", "エラー: リサーチモードを選択してください。", ""
         
         async def execute_research():
             progress(0.1, desc="Step 0: AIが検索計画を作成中...")
@@ -745,14 +745,17 @@ def research_only(
         append_log("✓ リサーチのみモード完了")
         append_log("保存されたリサーチ結果は手動モードで利用できます")
         
-        return str(filepath), get_logs()
+        # JSON整形（デバッグ表示用）
+        formatted_json = json.dumps(research_data, indent=2, ensure_ascii=False)
+        
+        return str(filepath), get_logs(), formatted_json
         
     except Exception as e:
         error_msg = f"リサーチ中にエラーが発生しました: {str(e)}"
         append_log(f"\n❌ {error_msg}")
         import traceback
         append_log(f"\n詳細:\n{traceback.format_exc()}")
-        return "", get_logs()
+        return "", get_logs(), ""
 
 
 def synthesize_audio_from_script(
@@ -2049,6 +2052,13 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
                         interactive=False,
                         visible=False
                     )
+                    
+                    with gr.Accordion("🔍 リサーチ結果生データ (JSON)", open=False):
+                        research_json_output = gr.Code(
+                            language="json",
+                            interactive=False,
+                            label="Formatted JSON"
+                        )
 
                     gr.Markdown(
                         """
@@ -2308,6 +2318,7 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
         "script_only_btn": script_only_btn,
         "research_only_btn": research_only_btn,
         "research_output": research_output,
+        "research_json_output": research_json_output,
         "video_output": video_output,
         "youtube_url_output": youtube_url_output,
         "log_output": log_output,
@@ -2695,7 +2706,11 @@ def create_ui() -> gr.Blocks:
                 generator_components["research_mode_dropdown"],
                 generator_components["avoid_topics_input"],
             ],
-            outputs=[generator_components["research_output"], generator_components["log_output"]],
+            outputs=[
+                generator_components["research_output"],
+                generator_components["log_output"],
+                generator_components["research_json_output"]
+            ],
             show_progress="full"
         )
         
