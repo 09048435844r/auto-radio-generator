@@ -2080,20 +2080,6 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
                         interactive=False,
                         visible=False
                     )
-                    
-                    with gr.Accordion("🔍 リサーチ結果生データ (JSON)", open=False):
-                        with gr.Row():
-                            research_json_file = gr.File(
-                                label="既存のリサーチJSONファイルを読み込む (.jsonl)",
-                                file_types=[".jsonl", ".json"],
-                                type="filepath"
-                            )
-                            load_research_json_btn = gr.Button("📂 JSONを読み込む", size="sm")
-                        research_json_output = gr.Code(
-                            language="json",
-                            interactive=False,
-                            label="Formatted JSON"
-                        )
 
                     gr.Markdown(
                         """
@@ -2144,6 +2130,22 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
                             regenerated_title = gr.Textbox(label="生成されたタイトル", interactive=False, lines=2)
                             regenerated_thumbnail_title = gr.Textbox(label="サムネイル文字", interactive=False)
                             regenerate_status = gr.Textbox(label="処理ログ", lines=5, interactive=False)
+        
+        # リサーチJSON表示（横いっぱいに表示）
+        with gr.Accordion("🔍 リサーチ結果生データ (JSON)", open=False):
+            with gr.Row():
+                research_json_file = gr.File(
+                    label="既存のリサーチJSONファイルを読み込む (.jsonl)",
+                    file_types=[".jsonl", ".json"],
+                    type="filepath"
+                )
+                load_research_json_btn = gr.Button("📂 JSONを読み込む", size="sm")
+            research_json_output = gr.Code(
+                language="json",
+                interactive=False,
+                label="Formatted JSON",
+                lines=30
+            )
 
     # ========== ステップモードUI（手動制作タブから統合） ==========
     with gr.Column(visible=False) as step_mode_column:
