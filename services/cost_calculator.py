@@ -103,10 +103,9 @@ class CostCalculator:
         Returns:
             CostBreakdown: Cost breakdown
         """
-        # Perplexity cost
-        perplexity_usd = (
-            usage.perplexity.request_count * self.rates["perplexity"]["per_request"]
-        )
+        # Perplexity cost (fixed rate: $0.005 per request)
+        perplexity_per_request = 0.005
+        perplexity_usd = usage.perplexity.request_count * perplexity_per_request
         
         # LLM costs (per-provider aggregation)
         total_llm_input_usd = 0.0
