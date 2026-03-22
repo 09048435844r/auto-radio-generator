@@ -5,6 +5,7 @@ from .llm_factory import create_script_generator
 from .topic_curator import TopicCurator
 from .segment_generator import SegmentGenerator
 from .orchestrator import ScriptOrchestrator
+from .metadata_generator import MetadataGenerator
 
 __all__ = [
     "GeminiClient",
@@ -14,4 +15,5 @@ __all__ = [
     "TopicCurator",
     "SegmentGenerator",
     "ScriptOrchestrator",
+    "MetadataGenerator",
 ]

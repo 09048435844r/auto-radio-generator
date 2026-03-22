@@ -19,6 +19,7 @@ from core.models.curation import CurationResult, ScriptSegment
 from core.models.script import DialogueTurn, TurnType
 from services.script_generation.topic_curator import TopicCurator
 from services.script_generation.segment_generator import SegmentGenerator
+from services.script_generation.metadata_generator import MetadataGenerator
 
 if TYPE_CHECKING:
     from core.interfaces.researcher import ResearchResult
@@ -40,6 +41,7 @@ class ScriptOrchestrator(IScriptOrchestrator):
         super().__init__(config)
         self.curator = TopicCurator(config)
         self.generator = SegmentGenerator(config)
+        self.metadata_gen = MetadataGenerator(config)
         self.orch_cfg = config.yaml.script_generator.orchestrator
 
         # 累積 LLM 使用量
@@ -165,17 +167,38 @@ class ScriptOrchestrator(IScriptOrchestrator):
         # --------------------------------------------------------
         # Step 3: 統合
         # --------------------------------------------------------
-        log(f"\n[cyan]--- Step 3/3: セグメント統合 ---[/cyan]")
+        log(f"\n[cyan]--- Step 3/4: セグメント統合 ---[/cyan]")
         script = self._integrate_segments(theme, all_segments)
 
-        elapsed = time.time() - start_time
         total_turns = len(script.sections)
+        log(f"[green]✓ セグメント統合完了: {total_turns}ターン[/green]")
+
+        # --------------------------------------------------------
+        # Step 4: メタデータ生成（後処理）
+        # --------------------------------------------------------
+        log(f"\n[cyan]--- Step 4/4: メタデータ生成 ---[/cyan]")
+        if progress_callback:
+            progress_callback.progress(0.65, "📝 メタデータ（タイトル・概要欄）を生成中...")
+
+        try:
+            script = await self.metadata_gen.generate(
+                theme=theme,
+                script=script,
+                research_data=research_data,
+                progress_log=log,
+            )
+            self._accumulate_usage(self.metadata_gen.last_usage)
+        except Exception as e:
+            logger.warning(f"MetadataGenerator failed (non-fatal): {e}")
+            log(f"[yellow]⚠ メタデータ生成エラー（スキップ）: {e}[/yellow]")
+
+        elapsed = time.time() - start_time
         log(f"[bold green]✓ ScriptOrchestrator 完了: {total_turns}ターン ({elapsed:.1f}秒)[/bold green]")
         log(f"  API呼び出し: {self._total_requests}回 / "
             f"トークン合計: 入力{self._total_input_tokens:,} / 出力{self._total_output_tokens:,}")
 
         if progress_callback:
-            progress_callback.progress(0.65, f"✅ 台本生成完了（{total_turns}ターン）")
+            progress_callback.progress(0.68, f"✅ 台本・メタデータ生成完了（{total_turns}ターン）")
 
         return script
 
