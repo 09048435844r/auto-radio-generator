@@ -748,6 +748,9 @@ def research_only(
         # JSON整形（デバッグ表示用）
         formatted_json = json.dumps(research_data, indent=2, ensure_ascii=False)
         
+        # \nエスケープシーケンスを実際の改行に変換（表示用）
+        formatted_json = formatted_json.replace('\\n', '\n')
+        
         return str(filepath), get_logs(), formatted_json
         
     except Exception as e:
@@ -777,8 +780,14 @@ def load_research_json_file(filepath: str | None) -> str:
         # JSONL形式（1行JSON）をパース
         data = json.loads(content)
         
-        # 整形して返す
-        return json.dumps(data, indent=2, ensure_ascii=False)
+        # 整形してJSON文字列化
+        formatted = json.dumps(data, indent=2, ensure_ascii=False)
+        
+        # \nエスケープシーケンスを実際の改行に変換（表示用）
+        # JSON文字列内の\"\\n\"を実際の改行文字に置換
+        formatted = formatted.replace('\\n', '\n')
+        
+        return formatted
     
     except json.JSONDecodeError as e:
         return f"❌ JSON解析エラー: {str(e)}"
