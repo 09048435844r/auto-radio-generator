@@ -185,12 +185,18 @@ class PerplexityResearcher(IResearcher):
 
         return ("unknown", f"Perplexity APIエラー: {error_text}")
     
-    async def research_multi(self, queries: list[str], mode: ResearchMode) -> ResearchResult:
+    async def research_multi(
+        self,
+        queries: list[str],
+        mode: ResearchMode,
+        avoid_topics: str | None = None
+    ) -> ResearchResult:
         """複数のクエリを並列に実行して情報を収集
         
         Args:
             queries: 検索クエリのリスト
             mode: リサーチモード
+            avoid_topics: 避けてほしい話題（除外要件、オプション）
         
         Returns:
             ResearchResult: 結合されたリサーチ結果
@@ -241,8 +247,38 @@ class PerplexityResearcher(IResearcher):
         async def fetch_single(query: str, index: int) -> tuple[int, str, list[ResearchSource], str | None, str | None]:
             console.print(f"  [{index+1}/{len(normalized_queries)}] {query}")
             try:
-                # クエリに詳細要求を追加
-                detailed_query = f"{query}\n\n上記について、背景・数字・事例・影響を含めて可能な限り詳細に、長文で解説してください。最低でも500文字以上の詳しい説明をお願いします。"
+                # クエリに高密度ファクトシートの要求を追加
+                detailed_query = f"""{query}
+
+上記について、以下の要素を**すべて含めた**詳細なファクトシートをMarkdown形式で作成してください：
+
+## 必須要素
+1. **背景・文脈**: 歴史的経緯、技術的前提、社会的背景
+2. **具体的な数字・統計**: 市場規模、成長率、ユーザー数、技術指標など
+3. **実例・事例**: 具体的な企業名、製品名、プロジェクト名、成功/失敗事例
+4. **影響・インパクト**: 業界への影響、社会的影響、経済的影響、技術的影響
+5. **専門家の見解**: 研究者、業界関係者、アナリストの具体的な発言や評価（引用）
+6. **最新動向**: 直近6ヶ月以内のニュース、発表、トレンド
+7. **議論のポイント**: 賛否両論、未解決の課題、今後の展望
+
+## 出力要件
+- **最低文字数**: 2500文字以上
+- **推奨文字数**: 3000-4000文字
+- **形式**: Markdown（見出し・箇条書き・段落を適切に使用）
+- **禁止事項**: 挨拶、前置き、締めの言葉は不要（事実のみを記述）
+
+可能な限り詳細に、マニアックに、深く掘り下げてください。表層的な情報ではなく、専門家レベルの深い洞察を求めています。"""
+
+                # avoid_topicsが指定されている場合は除外要件を追加
+                if avoid_topics and avoid_topics.strip():
+                    detailed_query += f"""
+
+## 除外要件（最重要）
+以下の話題は既に取り上げたため、**絶対に含めないでください**：
+{avoid_topics.strip()}
+
+上記以外の新しい情報・視点・切り口を提供してください。"""
+                    console.print(f"  [dim]除外要件を適用: {avoid_topics.strip()[:50]}...[/dim]")
                 
                 response = self.client.chat.completions.create(
                     model=self.model,

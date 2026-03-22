@@ -640,6 +640,7 @@ def generate_script_only(
 def research_only(
     theme: str,
     research_mode: str,
+    avoid_topics: str = "",
     progress=gr.Progress()
 ) -> tuple[str, str]:
     """リサーチのみを実行してJSONLファイルに保存
@@ -647,6 +648,7 @@ def research_only(
     Args:
         theme: 動画のテーマ
         research_mode: リサーチモード
+        avoid_topics: 避けてほしい話題（除外要件、オプション）
         progress: Gradio進捗バー
     
     Returns:
@@ -690,7 +692,10 @@ def research_only(
             append_log(f"\n== Step 1: 並列リサーチ ({research_mode}) ==")
             
             researcher = PerplexityResearcher(config)
-            research_result = await researcher.research_multi(plan.queries, mode)
+            avoid = avoid_topics.strip() if avoid_topics and avoid_topics.strip() else None
+            if avoid:
+                append_log(f"除外要件: {avoid}")
+            research_result = await researcher.research_multi(plan.queries, mode, avoid_topics=avoid)
             
             append_log(f"\n✓ 並列リサーチ完了")
             append_log(f"収集した情報: {len(research_result.content)}文字")
@@ -2685,7 +2690,11 @@ def create_ui() -> gr.Blocks:
         # リサーチのみ実行
         generator_components["research_only_btn"].click(
             fn=research_only,
-            inputs=[generator_components["theme_input"], generator_components["research_mode_dropdown"]],
+            inputs=[
+                generator_components["theme_input"],
+                generator_components["research_mode_dropdown"],
+                generator_components["avoid_topics_input"],
+            ],
             outputs=[generator_components["research_output"], generator_components["log_output"]],
             show_progress="full"
         )

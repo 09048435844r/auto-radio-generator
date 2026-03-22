@@ -682,7 +682,7 @@ async def execute_scripting_phase(
         
         try:
             researcher = create_researcher(config)
-            research_data = await researcher.research_multi(queries, mode)
+            research_data = await researcher.research_multi(queries, mode, avoid_topics=avoid_topics)
             
             cb.log(f"✓ リサーチ完了")
             cb.log(f"収集した情報: {len(research_data.content)}文字")
