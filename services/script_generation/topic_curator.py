@@ -133,7 +133,7 @@ class TopicCurator:
         import time
 
         config_params = {
-            "max_output_tokens": 4096,
+            "max_output_tokens": 8192,  # JSON途中切断を防ぐため増量
             "temperature": 0.3,  # キュレーションは低温度で安定性を確保
             "response_mime_type": "application/json",
             "safety_settings": self.safety_settings,
@@ -162,6 +162,16 @@ class TopicCurator:
                     time.sleep(wait_time)
                     continue
                 raise
+
+        # finish_reasonをチェック（MAX_TOKENSの場合は警告）
+        if hasattr(response, "candidates") and response.candidates:
+            candidate = response.candidates[0]
+            finish_reason = getattr(candidate, "finish_reason", None)
+            if finish_reason and str(finish_reason) == "MAX_TOKENS":
+                logger.warning(
+                    f"⚠️ TopicCurator output was truncated (finish_reason=MAX_TOKENS). "
+                    f"Consider increasing max_output_tokens."
+                )
 
         usage = LLMUsage(
             provider="gemini",
