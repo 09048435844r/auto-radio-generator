@@ -1,8 +1,8 @@
 # Auto Radio Generator - Development Roadmap
 
 > **Created:** 2026-02-07  
-> **Base Version:** v3.4.0 (Multi-LLM Provider Support)  
-> **Last Updated:** 2026-03-17  
+> **Base Version:** v3.5.0 (Hierarchical Agentic Workflow)  
+> **Last Updated:** 2026-03-22  
 > **Author:** AI Tech Lead (Cascade)
 
 ---
@@ -24,7 +24,7 @@
 
 ---
 
-## 📊 Current Status (v3.4.0)
+## 📊 Current Status (v3.5.0)
 
 ### Core Pipeline
 - [x] **Research Phase** — Perplexity API による5モード対応リサーチ（debate / voices / trivia / weekly_digest / lecture）
@@ -44,7 +44,19 @@
 - [x] **Output Tail Trimming** — 概要欄末尾の不要空行をトリムし、投稿フォーマットを安定化
 - [x] **Regression Tests Added** — `tests/test_text_sanitizer.py` / `tests/test_metadata_description_format.py` を追加し、改行保持と書式を自動検証
 
-### v3.4.0 New Features（Multi-LLM Provider Support）
+### v3.5.0 New Features（Hierarchical Agentic Workflow）
+- [x] **TopicCurator** — リサーチデータから意外性・具体性・議論性の3軸で2〜3トピックを厳選
+- [x] **SegmentGenerator** — intro / deep_dive / conclusion を独立したAPI呼び出しで生成
+- [x] **ScriptOrchestrator** — 全体統括・文脈管理・セグメント統合を担当
+- [x] **Context Continuity** — 各セグメントの context_summary を次セグメントに引き継ぎ
+- [x] **Infinite Scalability** — セグメント単位で生成するため max_output_tokens の壁を回避
+- [x] **Feature Flag** — config.yaml > orchestrator.enabled で新旧を切り替え可能（デフォルト: false）
+- [x] **Cost Optimization** — キュレーションは軽量モデル（gemini-2.5-flash）を使用
+- [x] **Progress Feedback** — 各セグメント生成の進捗をリアルタイム表示
+- [x] **Retry Logic** — セグメント単位で最大2回リトライ、部分失敗にも対応
+- [x] **Documentation** — docs/script_orchestrator_architecture.md に詳細設計書を作成
+
+### v3.4.0 Features（Multi-LLM Provider Support）
 - [x] **LLM Provider Factory** — プロバイダー名から適切なクライアントを生成するファクトリーパターン実装
 - [x] **OpenAI Integration** — Structured Outputs (`client.beta.chat.completions.parse`) による確実なJSON出力
 - [x] **Anthropic Integration** — Tool Calling による構造化出力の強制
@@ -254,7 +266,7 @@
 ### 音声スペクトラム機能の削除
 
 **現状:**
-- v3.4.0時点で、動画レンダリング時の音声スペクトラム（波形）表示機能が実装されているが、実際には使用されていない
+- v3.5.0時点で、動画レンダリング時の音声スペクトラム（波形）表示機能が実装されているが、実際には使用されていない
 - UIからは非表示化されているが、コード全体に機能が残存している
 
 **影響範囲:**

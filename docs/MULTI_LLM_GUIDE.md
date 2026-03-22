@@ -1,14 +1,14 @@
 # 複数LLMプロバイダー使い分けガイド
 
-> **Auto Radio Generator v3.4.0**  
-> **作成日**: 2026-03-17  
+> **Auto Radio Generator v3.5.0**  
+> **作成日**: 2026-03-22  
 > **対象**: Gemini / OpenAI / Anthropic
 
 ---
 
 ## 📋 概要
 
-Auto Radio Generator v3.4.0では、台本生成に3つのLLMプロバイダーを選択できます。
+Auto Radio Generator v3.5.0では、台本生成に3つのLLMプロバイダーを選択できます。
 それぞれの特徴を理解し、用途に応じて使い分けることで、最適な台本生成が可能になります。
 
 ---
@@ -260,4 +260,4 @@ script_generator:
 
 ---
 
-**Auto Radio Generator v3.4.0** | "Input Minimal, Data Maximal"
+**Auto Radio Generator v3.5.0** | "Input Minimal, Data Maximal"

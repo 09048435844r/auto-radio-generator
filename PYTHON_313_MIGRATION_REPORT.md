@@ -1,6 +1,6 @@
 # Python 3.13 移行完了レポート
 
-**プロジェクト**: Auto Radio Generator v3.4.0  
+**プロジェクト**: Auto Radio Generator v3.5.0  
 **移行日**: 2026-03-18  
 **移行元**: Python 3.10.6  
 **移行先**: Python 3.13.3  
