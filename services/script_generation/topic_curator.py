@@ -108,19 +108,22 @@ class TopicCurator:
             f"上記のリサーチデータから、最も面白い**{target_count}個**のトピックを選定してください。\n"
             f"評価軸（意外性・具体性・議論性）で採点し、上位{target_count}個を選ぶこと。\n\n"
             f"## 出力形式（JSON）\n"
-            f"純粋なJSONのみ出力。コードブロック不要。\n"
+            f"**重要**: 以下の形式で有効なJSONのみを出力してください。\n"
+            f"- コードブロック（```json）は使用しないこと\n"
+            f"- 文字列内の改行は使用せず、すべて1行で記述すること\n"
+            f"- ダブルクォートは必ずエスケープすること\n\n"
             f"{{\n"
             f'  "topics": [\n'
             f'    {{\n'
             f'      "title": "トピックタイトル",\n'
-            f'      "content": "詳細情報（500〜800文字）",\n'
+            f'      "content": "詳細情報（500〜800文字、改行なし）",\n'
             f'      "priority": 1,\n'
             f'      "estimated_turns": 30,\n'
             f'      "tone": "驚き",\n'
             f'      "key_facts": ["ファクト1", "ファクト2", "ファクト3"]\n'
             f'    }}\n'
             f'  ],\n'
-            f'  "curator_reasoning": "選定理由（デバッグ用）"\n'
+            f'  "curator_reasoning": "選定理由（デバッグ用、改行なし）"\n'
             f"}}\n"
         )
         return prompt
@@ -182,13 +185,21 @@ class TopicCurator:
         """APIレスポンスを CurationResult に変換"""
         try:
             data = json.loads(response_text.strip(), strict=False)
-        except json.JSONDecodeError:
-            # コードブロックが混入している場合のサニタイズ
-            cleaned = response_text.strip()
-            if cleaned.startswith("```"):
-                lines = cleaned.split("\n")
-                cleaned = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-            data = json.loads(cleaned, strict=False)
+        except json.JSONDecodeError as e:
+            # JSONパースエラー時の詳細ログ
+            logger.error(f"JSON parse error: {e}")
+            logger.error(f"Response text (first 500 chars): {response_text[:500]}")
+            
+            # 強力なサニタイズ処理
+            cleaned = self._sanitize_json_response(response_text)
+            logger.debug(f"Sanitized text (first 500 chars): {cleaned[:500]}")
+            
+            try:
+                data = json.loads(cleaned, strict=False)
+            except json.JSONDecodeError as e2:
+                logger.error(f"JSON parse failed after sanitization: {e2}")
+                logger.error(f"Full response text:\n{response_text}")
+                raise
 
         topics_data = data.get("topics", [])
         topics = []
@@ -209,3 +220,22 @@ class TopicCurator:
             topics=topics,
             curator_reasoning=data.get("curator_reasoning", ""),
         )
+
+    @staticmethod
+    def _sanitize_json_response(text: str) -> str:
+        """JSONレスポンスをサニタイズ（コードブロック除去・改行処理）"""
+        text = text.strip()
+        
+        # コードブロック除去
+        if text.startswith("```"):
+            lines = text.split("\n")
+            # 最初の ```json または ``` 行を除去
+            start = 1
+            # 最後の ``` 行を除去
+            end = len(lines) - 1 if lines and lines[-1].strip() == "```" else len(lines)
+            text = "\n".join(lines[start:end])
+        
+        # 先頭・末尾の余分な空白を除去
+        text = text.strip()
+        
+        return text
