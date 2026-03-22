@@ -2149,11 +2149,11 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
                     type="filepath"
                 )
                 load_research_json_btn = gr.Button("📂 JSONを読み込む", size="sm")
-            research_json_output = gr.Code(
-                language="json",
-                interactive=False,
+            research_json_output = gr.Textbox(
                 label="Formatted JSON",
-                lines=30
+                lines=30,
+                max_lines=50,
+                interactive=False
             )
 
     # ========== ステップモードUI（手動制作タブから統合） ==========
