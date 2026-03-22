@@ -2622,7 +2622,7 @@ def create_ui() -> gr.Blocks:
                 generator_components["speed_slider"],
                 generator_components["spectrum_checkbox"],
                 generator_components["avoid_topics_input"],
-                settings_components["upload_to_youtube_checkbox"],
+                generator_components["youtube_upload_checkbox"],  # 動画生成タブのチェックボックスを使用
                 settings_components["footer_text_input"],
                 gr.Checkbox(value=False, visible=False),  # use_mock placeholder
                 generator_components["second_mode_dropdown"],
