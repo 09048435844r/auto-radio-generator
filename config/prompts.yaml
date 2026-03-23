@@ -811,6 +811,12 @@ orchestrator:
     - 詳しい説明は不要（深掘りセグメントに委ねる）
     - 各セリフは1〜3文程度
 
+    ## チャプタータイトル生成ルール（重要）
+    - chapter_title: YouTubeの目次に表示される見出し（15文字以内推奨）
+    - ❌ 禁止: "intro", "deep_dive", "conclusion", "導入", "深掘り1" などのシステム名・番号
+    - ✅ 良い例: "衝撃の真実", "〇〇の罠", "知られざる事実", "驚きの結末"
+    - 視聴者がクリックしたくなる、自然で魅力的な見出しを出力すること
+
     ## 出力形式（JSON）
     純粋なJSONのみ出力。コードブロック不要。
     {{
@@ -818,7 +824,7 @@ orchestrator:
       "segment_type": "intro",
       "topic_title": null,
       "turns": [
-        {{"speaker": "A", "text": "セリフ", "section": "intro", "chapter_title": "〇〇の真実"}},
+        {{"speaker": "A", "text": "セリフ", "section": "intro", "chapter_title": "衝撃の真実"}},
         {{"speaker": "B", "text": "セリフ"}}
       ],
       "context_summary": "このセグメント終了後の状況を200〜300文字で要約（次エージェントへの引き継ぎメモ）"
@@ -846,6 +852,13 @@ orchestrator:
     - このトピックのみ扱う（次トピックへの移行は行わない）
     - 各セリフは1〜3文程度
 
+    ## チャプタータイトル生成ルール（重要）
+    - chapter_title: YouTubeの目次に表示される見出し（15文字以内推奨）
+    - ❌ 禁止: "intro", "deep_dive", "conclusion", "導入", "深掘り1", "深掘り2" などのシステム名・番号
+    - ❌ 禁止: "{{topic_title}}" をそのまま使用すること（長すぎる場合が多い）
+    - ✅ 良い例: "独占崩壊の真実", "〇〇の罠", "驚きの実態", "知られざる裏側"
+    - トピックの核心を15文字以内で表現し、視聴者がクリックしたくなる魅力的な見出しを出力すること
+
     ## 出力形式（JSON）
     純粋なJSONのみ出力。コードブロック不要。
     {{
@@ -853,7 +866,7 @@ orchestrator:
       "segment_type": "deep_dive",
       "topic_title": "{{topic_title}}",
       "turns": [
-        {{"speaker": "A", "text": "セリフ", "section": "{{section_marker}}", "chapter_title": "〇〇の衝撃の真実"}},
+        {{"speaker": "A", "text": "セリフ", "section": "{{section_marker}}", "chapter_title": "独占崩壊の真実"}},
         {{"speaker": "B", "text": "セリフ"}}
       ],
       "context_summary": "このセグメント終了後の状況を200〜300文字で要約（次エージェントへの引き継ぎメモ）"
@@ -881,6 +894,12 @@ orchestrator:
     - 新しい情報は追加しない
     - テンション: 温かく、余韻を残す。最後は笑いで終わる
 
+    ## チャプタータイトル生成ルール（重要）
+    - chapter_title: YouTubeの目次に表示される見出し（15文字以内推奨）
+    - ❌ 禁止: "conclusion", "ending", "まとめ", "エンディング" などの平凡な表現
+    - ✅ 良い例: "今日の学び", "驚きの結論", "視聴者へメッセージ", "次回予告"
+    - 視聴者が最後まで見たくなる、魅力的な見出しを出力すること
+
     ## 出力形式（JSON）
     純粋なJSONのみ出力。コードブロック不要。
     {{
@@ -888,7 +907,7 @@ orchestrator:
       "segment_type": "conclusion",
       "topic_title": null,
       "turns": [
-        {{"speaker": "A", "text": "セリフ", "section": "ending", "chapter_title": "今日の学びまとめ"}},
+        {{"speaker": "A", "text": "セリフ", "section": "ending", "chapter_title": "今日の学び"}},
         {{"speaker": "B", "text": "セリフ"}}
       ],
       "context_summary": ""
