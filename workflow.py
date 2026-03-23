@@ -158,14 +158,27 @@ def _to_json_safe(value: Any) -> Any:
 
 
 def _format_chapter_lines(chapters: list[ChapterMarker]) -> list[str]:
-    """チャプター情報を `MM:SS タイトル` 形式に整形する。"""
+    """チャプター情報を `MM:SS タイトル` 形式に整形する。
+    
+    重複防止: 同じチャプタータイトルが連続する場合は最初の1回のみ出力する。
+    """
     chapter_lines: list[str] = []
+    last_chapter_title = ""
+    
     for chapter in chapters or []:
+        # 前回と同じタイトルの場合はスキップ（重複防止）
+        if chapter.title == last_chapter_title:
+            continue
+        
         total_seconds = int(chapter.start_time_sec)
         minutes = total_seconds // 60
         seconds = total_seconds % 60
         timestamp_str = f"{minutes:02d}:{seconds:02d}"
         chapter_lines.append(f"{timestamp_str} {chapter.title}")
+        
+        # 現在のタイトルを記録
+        last_chapter_title = chapter.title
+    
     return chapter_lines
 
 
