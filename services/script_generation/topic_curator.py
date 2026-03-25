@@ -135,7 +135,8 @@ class TopicCurator:
         config_params = {
             "max_output_tokens": 8192,  # JSON途中切断を防ぐため増量
             "temperature": 0.3,  # キュレーションは低温度で安定性を確保
-            "response_mime_type": "application/json",
+            # response_mime_type を削除: application/json モードでJSON切断が発生するため
+            # 通常のテキスト生成モードでJSONを返させる
             "safety_settings": self.safety_settings,
         }
 
@@ -196,19 +197,26 @@ class TopicCurator:
         try:
             data = json.loads(response_text.strip(), strict=False)
         except json.JSONDecodeError as e:
-            # JSONパースエラー時の詳細ログ
-            logger.error(f"JSON parse error: {e}")
-            logger.error(f"Response text (first 500 chars): {response_text[:500]}")
+            # JSONパースエラー時の詳細ログ（デバッグ用）
+            logger.error(f"[TopicCurator] JSON parse error: {e}")
+            logger.error(f"[TopicCurator] Error position: line {e.lineno}, column {e.colno}, char {e.pos}")
             
-            # 強力なサニタイズ処理
+            # 完全な生のレスポンステキストを出力（重要：人間がエラー箇所を特定できるように）
+            logger.error(f"[TopicCurator] Full raw response text ({len(response_text)} chars):\n{'='*80}\n{response_text}\n{'='*80}")
+            
+            # 強力なサニタイズ処理を試行
+            console.print(f"[yellow]⚠️ JSONパースエラー。サニタイズ処理を試行中...[/yellow]")
             cleaned = self._sanitize_json_response(response_text)
-            logger.debug(f"Sanitized text (first 500 chars): {cleaned[:500]}")
+            logger.debug(f"[TopicCurator] Sanitized text ({len(cleaned)} chars):\n{cleaned[:1000]}...")
             
             try:
                 data = json.loads(cleaned, strict=False)
+                console.print(f"[green]✓ サニタイズ後のパースに成功[/green]")
             except json.JSONDecodeError as e2:
-                logger.error(f"JSON parse failed after sanitization: {e2}")
-                logger.error(f"Full response text:\n{response_text}")
+                logger.error(f"[TopicCurator] JSON parse failed after sanitization: {e2}")
+                logger.error(f"[TopicCurator] Sanitized text:\n{'='*80}\n{cleaned}\n{'='*80}")
+                console.print(f"[red]✗ サニタイズ後もJSONパースに失敗しました[/red]")
+                console.print(f"[red]生のレスポンステキストをログファイルで確認してください[/red]")
                 raise
 
         topics_data = data.get("topics", [])
@@ -233,10 +241,13 @@ class TopicCurator:
 
     @staticmethod
     def _sanitize_json_response(text: str) -> str:
-        """JSONレスポンスをサニタイズ（コードブロック除去・改行処理）"""
+        """JSONレスポンスをサニタイズ（コードブロック除去・特殊文字処理）"""
+        import re
+        
+        original_text = text
         text = text.strip()
         
-        # コードブロック除去
+        # Step 1: Markdownコードブロック除去
         if text.startswith("```"):
             lines = text.split("\n")
             # 最初の ```json または ``` 行を除去
@@ -244,8 +255,22 @@ class TopicCurator:
             # 最後の ``` 行を除去
             end = len(lines) - 1 if lines and lines[-1].strip() == "```" else len(lines)
             text = "\n".join(lines[start:end])
+            text = text.strip()
         
-        # 先頭・末尾の余分な空白を除去
+        # Step 2: JSON外の余分なテキストを除去（JSONの前後に説明文がある場合）
+        # 最初の { から最後の } までを抽出
+        first_brace = text.find("{")
+        last_brace = text.rfind("}")
+        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+            text = text[first_brace:last_brace + 1]
+        
+        # Step 3: 制御文字を除去（タブ・改行以外）
+        # JSON内の改行は保持するが、不正な制御文字は除去
+        text = re.sub(r'[\x00-\x08\x0b-\x0c\x0e-\x1f]', '', text)
+        
+        # Step 4: 先頭・末尾の余分な空白を除去
         text = text.strip()
+        
+        logger.debug(f"[TopicCurator] Sanitization: {len(original_text)} chars -> {len(text)} chars")
         
         return text
