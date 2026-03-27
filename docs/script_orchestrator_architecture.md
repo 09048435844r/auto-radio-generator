@@ -191,6 +191,13 @@ orchestrator:
 - セグメント単位で最大2回リトライ
 - 接続エラー時は指数バックオフ（1秒 → 2秒）
 - 部分失敗時も可能な限り統合を試みる
+- **JSONパースエラー対策**（v3.5.0で強化）:
+  - `max_output_tokens` を十分に確保（TopicCurator: 8192, MetadataGenerator: 4096）
+  - `response_mime_type: "application/json"` を使用しない（JSON切断の原因となるため）
+  - `finish_reason=MAX_TOKENS` を検出して警告
+  - 4段階のサニタイズ処理（コードブロック除去、JSON抽出、制御文字除去、空白除去）
+  - エラー時は完全な生レスポンステキストをログ出力（デバッグ用）
+  - MetadataGeneratorはnon-fatalでフォールバック動作
 
 **進捗フィードバック**:
 ```python

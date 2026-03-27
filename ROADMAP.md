@@ -54,6 +54,13 @@
 - [x] **Cost Optimization** — キュレーションは軽量モデル（gemini-2.5-flash）を使用
 - [x] **Progress Feedback** — 各セグメント生成の進捗をリアルタイム表示
 - [x] **Retry Logic** — セグメント単位で最大2回リトライ、部分失敗にも対応
+- [x] **JSON Robustness** — Unterminated string エラーを防止する堅牢化
+  - max_output_tokens を十分に確保（TopicCurator: 8192, MetadataGenerator: 4096）
+  - response_mime_type: "application/json" を使用しない（切断の原因となるため）
+  - finish_reason=MAX_TOKENS を検出して警告
+  - 4段階のサニタイズ処理（コードブロック除去、JSON抽出、制御文字除去、空白除去）
+  - エラー時は完全な生レスポンステキストをログ出力（デバッグ用）
+  - MetadataGeneratorはnon-fatalでフォールバック動作
 - [x] **Documentation** — docs/script_orchestrator_architecture.md に詳細設計書を作成
 
 ### v3.4.0 Features（Multi-LLM Provider Support）
