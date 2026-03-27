@@ -171,8 +171,9 @@ class MetadataGenerator:
     def _call_api(self, prompt: str) -> tuple[str, LLMUsage]:
         """Gemini APIを呼び出してメタデータを取得"""
         config_params = {
-            "max_output_tokens": 2048,
+            "max_output_tokens": 4096,  # JSON途中切断を防ぐため増量（2048→4096）
             "temperature": 0.5,
+            # response_mime_type は使用しない（JSON切断の原因となるため）
             "safety_settings": self.safety_settings,
         }
 
@@ -201,6 +202,16 @@ class MetadataGenerator:
                     continue
                 raise
 
+        # finish_reasonをチェック（MAX_TOKENSの場合は警告）
+        if hasattr(response, "candidates") and response.candidates:
+            candidate = response.candidates[0]
+            finish_reason = getattr(candidate, "finish_reason", None)
+            if finish_reason and str(finish_reason) == "MAX_TOKENS":
+                logger.warning(
+                    f"⚠️ MetadataGenerator output was truncated (finish_reason=MAX_TOKENS). "
+                    f"Consider increasing max_output_tokens."
+                )
+
         usage = LLMUsage(
             provider="gemini",
             model_name=self.model,
@@ -220,19 +231,27 @@ class MetadataGenerator:
         try:
             data = json.loads(response_text.strip(), strict=False)
         except json.JSONDecodeError as e:
-            logger.error(f"MetadataGenerator JSON parse error: {e}")
-            logger.error(f"Response (first 500 chars): {response_text[:500]}")
-            # コードブロック除去を試みる
-            cleaned = response_text.strip()
-            if cleaned.startswith("```"):
-                lines = cleaned.split("\n")
-                end = len(lines) - 1 if lines and lines[-1].strip() == "```" else len(lines)
-                cleaned = "\n".join(lines[1:end])
+            # JSONパースエラー時の詳細ログ（デバッグ用）
+            logger.error(f"[MetadataGenerator] JSON parse error: {e}")
+            logger.error(f"[MetadataGenerator] Error position: line {e.lineno}, column {e.colno}, char {e.pos}")
+            
+            # 完全な生のレスポンステキストを出力（重要：人間がエラー箇所を特定できるように）
+            logger.error(f"[MetadataGenerator] Full raw response text ({len(response_text)} chars):\n{'='*80}\n{response_text}\n{'='*80}")
+            
+            # 強力なサニタイズ処理を試行
+            console.print(f"[yellow]⚠️ MetadataGenerator JSONパースエラー。サニタイズ処理を試行中...[/yellow]")
+            cleaned = self._sanitize_json_response(response_text)
+            logger.debug(f"[MetadataGenerator] Sanitized text ({len(cleaned)} chars):\n{cleaned[:1000]}...")
+            
             try:
                 data = json.loads(cleaned.strip(), strict=False)
+                console.print(f"[green]✓ サニタイズ後のパースに成功[/green]")
             except json.JSONDecodeError as e2:
-                logger.error(f"MetadataGenerator JSON parse failed after sanitization: {e2}")
-                # フォールバック: 空のメタデータを返す
+                logger.error(f"[MetadataGenerator] JSON parse failed after sanitization: {e2}")
+                logger.error(f"[MetadataGenerator] Sanitized text:\n{'='*80}\n{cleaned}\n{'='*80}")
+                console.print(f"[yellow]⚠️ サニタイズ後もJSONパースに失敗。フォールバックメタデータを使用します[/yellow]")
+                console.print(f"[yellow]生のレスポンステキストをログファイルで確認してください[/yellow]")
+                # フォールバック: 空のメタデータを返す（non-fatalで継続）
                 return _MetadataSchema(
                     title="",
                     thumbnail_title="",
@@ -268,6 +287,42 @@ class MetadataGenerator:
                 unique_urls.append(url)
 
         return unique_urls[:10]  # 最大10件
+
+    @staticmethod
+    def _sanitize_json_response(text: str) -> str:
+        """JSONレスポンスをサニタイズ（コードブロック除去・特殊文字処理）"""
+        import re
+        
+        original_text = text
+        text = text.strip()
+        
+        # Step 1: Markdownコードブロック除去
+        if text.startswith("```"):
+            lines = text.split("\n")
+            # 最初の ```json または ``` 行を除去
+            start = 1
+            # 最後の ``` 行を除去
+            end = len(lines) - 1 if lines and lines[-1].strip() == "```" else len(lines)
+            text = "\n".join(lines[start:end])
+            text = text.strip()
+        
+        # Step 2: JSON外の余分なテキストを除去（JSONの前後に説明文がある場合）
+        # 最初の { から最後の } までを抽出
+        first_brace = text.find("{")
+        last_brace = text.rfind("}")
+        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+            text = text[first_brace:last_brace + 1]
+        
+        # Step 3: 制御文字を除去（タブ・改行以外）
+        # JSON内の改行は保持するが、不正な制御文字は除去
+        text = re.sub(r'[\x00-\x08\x0b-\x0c\x0e-\x1f]', '', text)
+        
+        # Step 4: 先頭・末尾の余分な空白を除去
+        text = text.strip()
+        
+        logger.debug(f"[MetadataGenerator] Sanitization: {len(original_text)} chars -> {len(text)} chars")
+        
+        return text
 
     @staticmethod
     def _format_references_for_description(references: list[str]) -> str:
