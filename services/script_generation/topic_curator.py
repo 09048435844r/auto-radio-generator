@@ -9,8 +9,10 @@ import logging
 from typing import Optional, TYPE_CHECKING
 
 from rich.console import Console
+from pydantic import BaseModel, Field
 
 from core.models import AppConfig, LLMUsage
+from core.utils import sanitize_json_response
 from core.models.curation import CuratedTopic, CurationResult
 from core.prompt_manager import PromptManager
 
@@ -206,7 +208,7 @@ class TopicCurator:
             
             # 強力なサニタイズ処理を試行
             console.print(f"[yellow]⚠️ JSONパースエラー。サニタイズ処理を試行中...[/yellow]")
-            cleaned = self._sanitize_json_response(response_text)
+            cleaned = sanitize_json_response(response_text, "TopicCurator")
             logger.debug(f"[TopicCurator] Sanitized text ({len(cleaned)} chars):\n{cleaned[:1000]}...")
             
             try:
@@ -239,38 +241,3 @@ class TopicCurator:
             curator_reasoning=data.get("curator_reasoning", ""),
         )
 
-    @staticmethod
-    def _sanitize_json_response(text: str) -> str:
-        """JSONレスポンスをサニタイズ（コードブロック除去・特殊文字処理）"""
-        import re
-        
-        original_text = text
-        text = text.strip()
-        
-        # Step 1: Markdownコードブロック除去
-        if text.startswith("```"):
-            lines = text.split("\n")
-            # 最初の ```json または ``` 行を除去
-            start = 1
-            # 最後の ``` 行を除去
-            end = len(lines) - 1 if lines and lines[-1].strip() == "```" else len(lines)
-            text = "\n".join(lines[start:end])
-            text = text.strip()
-        
-        # Step 2: JSON外の余分なテキストを除去（JSONの前後に説明文がある場合）
-        # 最初の { から最後の } までを抽出
-        first_brace = text.find("{")
-        last_brace = text.rfind("}")
-        if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-            text = text[first_brace:last_brace + 1]
-        
-        # Step 3: 制御文字を除去（タブ・改行以外）
-        # JSON内の改行は保持するが、不正な制御文字は除去
-        text = re.sub(r'[\x00-\x08\x0b-\x0c\x0e-\x1f]', '', text)
-        
-        # Step 4: 先頭・末尾の余分な空白を除去
-        text = text.strip()
-        
-        logger.debug(f"[TopicCurator] Sanitization: {len(original_text)} chars -> {len(text)} chars")
-        
-        return text

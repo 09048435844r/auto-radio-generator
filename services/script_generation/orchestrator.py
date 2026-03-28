@@ -44,10 +44,11 @@ class ScriptOrchestrator(IScriptOrchestrator):
         self.metadata_gen = MetadataGenerator(config)
         self.orch_cfg = config.yaml.script_generator.orchestrator
 
-        # 累積 LLM 使用量
-        self._total_input_tokens = 0
-        self._total_output_tokens = 0
-        self._total_requests = 0
+        # 累積 LLM 使用量（プロバイダー別 + 全体集計）
+        self._usage_by_provider: dict[str, LLMUsage] = {}  # プロバイダー別の詳細
+        self._total_input_tokens = 0   # 全プロバイダー合計（後方互換性のため保持）
+        self._total_output_tokens = 0  # 全プロバイダー合計（後方互換性のため保持）
+        self._total_requests = 0       # 全プロバイダー合計（後方互換性のため保持）
 
     async def generate_script(
         self,
@@ -277,26 +278,81 @@ class ScriptOrchestrator(IScriptOrchestrator):
         raise last_exc
 
     def _accumulate_usage(self, usage: Optional[LLMUsage]) -> None:
-        """API使用量を累積"""
-        if usage:
-            self._total_input_tokens += usage.input_tokens
-            self._total_output_tokens += usage.output_tokens
-            self._total_requests += usage.request_count
+        """API使用量を累積（プロバイダー別に安全に集計）
+        
+        異なるプロバイダーのLLMUsageを直接加算するとValueErrorが発生するため、
+        プロバイダーごとに分離して累積する。
+        
+        Args:
+            usage: 追加するLLM使用量（Noneの場合はスキップ）
+        """
+        if not usage:
+            return
+        
+        provider = usage.provider
+        
+        # プロバイダー別の累積
+        if provider not in self._usage_by_provider:
+            # 新しいプロバイダーの場合は初期化
+            self._usage_by_provider[provider] = LLMUsage(
+                provider=provider,
+                model_name=usage.model_name,
+                input_tokens=0,
+                output_tokens=0,
+                request_count=0,
+            )
+        
+        # 同一プロバイダー内での加算（LLMUsage.__add__が安全に動作）
+        self._usage_by_provider[provider] = self._usage_by_provider[provider] + usage
+        
+        # 全体集計の更新（後方互換性のため）
+        self._total_input_tokens += usage.input_tokens
+        self._total_output_tokens += usage.output_tokens
+        self._total_requests += usage.request_count
+        
+        logger.debug(
+            f"[Orchestrator] Accumulated usage: {provider} "
+            f"(+{usage.input_tokens} in, +{usage.output_tokens} out, +{usage.request_count} req)"
+        )
 
     def _reset_usage(self) -> None:
+        """使用量カウンターをリセット"""
+        self._usage_by_provider.clear()
         self._total_input_tokens = 0
         self._total_output_tokens = 0
         self._total_requests = 0
 
     def get_total_usage(self) -> LLMUsage:
-        """累積 LLM 使用量を返す"""
+        """累積 LLM 使用量を返す（後方互換性のため単一LLMUsageを返す）
+        
+        注意: マルチプロバイダー使用時は情報が失われます。
+        詳細な内訳が必要な場合は get_usage_by_provider() を使用してください。
+        
+        Returns:
+            LLMUsage: 全プロバイダーの合計使用量（providerは最初に使用されたもの）
+        """
+        # プロバイダーが1つだけの場合はそれを返す
+        if len(self._usage_by_provider) == 1:
+            return list(self._usage_by_provider.values())[0]
+        
+        # 複数プロバイダーの場合は合計値を返す（providerは最初のもの）
+        first_provider = list(self._usage_by_provider.keys())[0] if self._usage_by_provider else "gemini"
+        
         return LLMUsage(
-            provider="gemini",
+            provider=first_provider,
             model_name="orchestrator",
             input_tokens=self._total_input_tokens,
             output_tokens=self._total_output_tokens,
             request_count=self._total_requests,
         )
+
+    def get_usage_by_provider(self) -> dict[str, LLMUsage]:
+        """プロバイダー別のLLM使用量を返す（詳細版）
+        
+        Returns:
+            dict[str, LLMUsage]: プロバイダー名をキーとした使用量の辞書
+        """
+        return self._usage_by_provider.copy()
 
     @staticmethod
     def _make_log(progress_callback) -> Callable:

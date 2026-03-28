@@ -8,11 +8,11 @@ from google import genai
 from google.genai import types
 from rich.console import Console
 
-from core.interfaces import IScriptGenerator, ResearchResult
-from core.models import Script, AppConfig, LLMUsage, ResearchPlan
+from core.interfaces.script_generator import IScriptGenerator
+from core.models import AppConfig, Script, LLMUsage
+from core.models.script import DialogueTurn, TurnType
+from core.utils import sanitize_json_lightweight
 
-# Backward compatibility alias
-GeminiUsage = LLMUsage
 from core.prompt_manager import PromptManager
 from .time_expressions import get_time_expression
 import logging
@@ -486,7 +486,7 @@ class GeminiClient(IScriptGenerator):
             
         except json.JSONDecodeError as e:
             console.print(f"[yellow]⚠ JSON解析エラー、サニタイズ再試行: {e}[/yellow]")
-            sanitized_text = self._sanitize_json_response(response_text)
+            sanitized_text = sanitize_json_lightweight(response_text)
 
             try:
                 json_data = json.loads(sanitized_text, strict=False)
@@ -505,11 +505,6 @@ class GeminiClient(IScriptGenerator):
             console.print(f"[dim]JSON: {response_text[:200]}...[/dim]")
             raise
 
-    def _sanitize_json_response(self, text: str) -> str:
-        """軽微なJSONサニタイズ（Markdown code fence除去のみ）"""
-        sanitized = re.sub(r'^\s*```json\s*', '', text, flags=re.IGNORECASE)
-        sanitized = re.sub(r'\s*```\s*$', '', sanitized)
-        return sanitized.strip()
     
     def _build_research_plan_prompt(self, mode: str) -> str:
         """検索計画作成用のシステムプロンプトを構築

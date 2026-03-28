@@ -14,6 +14,7 @@ from rich.console import Console
 from core.models import AppConfig, LLMUsage
 from core.models.curation import CuratedTopic, ScriptSegment
 from core.prompt_manager import PromptManager
+from core.utils import sanitize_json_response
 
 if TYPE_CHECKING:
     pass
@@ -219,7 +220,8 @@ class SegmentGenerator:
         config_params = {
             "max_output_tokens": 8192,  # 1セグメント分は 8K で十分
             "temperature": 0.85,
-            "response_mime_type": "application/json",
+            # response_mime_type を削除: application/json モードでJSON切断が発生するため
+            # 通常のテキスト生成モードでJSONを返させる（TopicCurator/MetadataGeneratorと同じ方針）
             "safety_settings": self.safety_settings,
         }
 
@@ -292,9 +294,22 @@ class SegmentGenerator:
         """APIレスポンスを ScriptSegment に変換"""
         try:
             data = json.loads(response_text.strip(), strict=False)
-        except json.JSONDecodeError:
-            cleaned = self._sanitize_json(response_text)
-            data = json.loads(cleaned, strict=False)
+        except json.JSONDecodeError as e:
+            logger.error(f"[SegmentGenerator] JSON parse error: {e}")
+            logger.error(f"[SegmentGenerator] Error position: line {e.lineno}, column {e.colno}")
+            logger.debug(f"[SegmentGenerator] Raw response ({len(response_text)} chars):\n{response_text[:1000]}...")
+            
+            console.print(f"[yellow]⚠️ JSONパースエラー。サニタイズ処理を試行中...[/yellow]")
+            cleaned = sanitize_json_response(response_text, "SegmentGenerator")
+            
+            try:
+                data = json.loads(cleaned, strict=False)
+                console.print(f"[green]✓ サニタイズ後のパースに成功[/green]")
+            except json.JSONDecodeError as e2:
+                logger.error(f"[SegmentGenerator] JSON parse failed after sanitization: {e2}")
+                logger.error(f"[SegmentGenerator] Sanitized text:\n{'='*80}\n{cleaned}\n{'='*80}")
+                console.print(f"[red]✗ サニタイズ後もJSONパースに失敗しました[/red]")
+                raise
 
         turns_raw = data.get("turns", [])
 
@@ -315,14 +330,3 @@ class SegmentGenerator:
             token_count=0,
         )
 
-    @staticmethod
-    def _sanitize_json(text: str) -> str:
-        """コードブロック等を除去してJSONを抽出"""
-        text = text.strip()
-        if text.startswith("```"):
-            lines = text.split("\n")
-            # 最初の ```... 行と最後の ``` 行を除去
-            start = 1
-            end = len(lines) - 1 if lines[-1].strip() == "```" else len(lines)
-            text = "\n".join(lines[start:end])
-        return text
