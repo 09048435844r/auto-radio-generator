@@ -14,6 +14,8 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from core.interfaces import IAudioSynthesizer, SynthesisResult, ChapterMarker
 from core.models import Script, AppConfig
+from services.media_processing import JingleProvider
+from .voicevox_segment_timing import calculate_segment_timings
 
 console = Console()
 
@@ -29,6 +31,12 @@ class VoicevoxClient(IAudioSynthesizer):
         self.base_url = config.env.voicevox_base_url
         self.speakers = config.yaml.audio_synthesizer.speakers
         self.audio_config = config.yaml.audio_synthesizer
+        
+        # Jingle provider for dynamic pause calculation
+        self.jingle_provider = JingleProvider()
+        video_config = getattr(config.yaml, "video_renderer", None)
+        self.enable_jingles = getattr(video_config, "enable_jingles", True) if video_config else True
+        self.jingle_overlap_sec = getattr(video_config, "jingle_overlap_sec", 1.0) if video_config else 1.0
     
     async def check_engine_status(self) -> bool:
         """VOICEVOXエンジンの状態を確認"""
@@ -44,13 +52,20 @@ class VoicevoxClient(IAudioSynthesizer):
             console.print(f"[yellow]  → {self.base_url} でエンジンが起動しているか確認してください[/yellow]")
         return False
     
-    async def synthesize(self, script: Script, output_dir: Path, speed_scale_override: Optional[float] = None) -> SynthesisResult:
+    async def synthesize(
+        self,
+        script: Script,
+        output_dir: Path,
+        speed_scale_override: Optional[float] = None,
+        segments: Optional[list] = None
+    ) -> SynthesisResult:
         """台本から音声を合成
         
         Args:
             script: 台本データ
             output_dir: 出力ディレクトリ
             speed_scale_override: UIからの話速指定（優先される）
+            segments: スクリプトセグメント（セグメント単位のタイミング計算用）
         """
         output_dir.mkdir(parents=True, exist_ok=True)
         
@@ -155,9 +170,14 @@ class VoicevoxClient(IAudioSynthesizer):
                     current_time_ms = end_time + pause_ms
                     progress.update(task, advance=1, description=f"合成中... {i+1}/{len(script.get_dialogue_only())}")
         
-        # 音声を結合
+        # セグメント間ポーズを計算
+        segment_pauses = self._calculate_segment_pauses(segments)
+        
+        # 音声を結合（セグメント間にポーズを挿入し、タイムスタンプを調整）
         console.print("[cyan]音声ファイルを結合中...[/cyan]")
-        combined_audio = self._combine_audio(phrase_data, pause_ms)
+        combined_audio, adjusted_phrase_data = self._combine_audio_with_pauses(
+            phrase_data, pause_ms, segment_pauses, segments
+        )
         
         # 冒頭と末尾に無音を追加（演出強化）
         console.print("[cyan]冒頭・末尾に無音を追加中...[/cyan]")
@@ -169,24 +189,29 @@ class VoicevoxClient(IAudioSynthesizer):
         audio_path = output_dir / "combined_audio.wav"
         combined_audio.export(str(audio_path), format="wav")
         
-        # ASS字幕を生成（話者ごとに色分け）
+        # ASS字幕を生成（調整済みタイムスタンプを使用）
         subtitle_path = output_dir / "subtitles.ass"
-        self._generate_ass(phrase_data, subtitle_path)
+        self._generate_ass(adjusted_phrase_data, subtitle_path)
+        
+        # チャプターマーカーを生成（調整済みタイムスタンプを使用）
+        chapters = self._build_chapters(adjusted_phrase_data, script)
+        
+        # セグメント単位のタイミング情報を計算（調整済みタイムスタンプを使用）
+        segment_timings = calculate_segment_timings(script, segments, adjusted_phrase_data) if segments else []
         
         total_duration_sec = len(combined_audio) / 1000.0
         
-        console.print(f"[green]✓ 音声合成完了[/green] 総時間: {total_duration_sec:.1f}秒")
-        
-        # 一時ファイルを削除
-        for f in temp_dir.glob("*.wav"):
-            f.unlink()
-        temp_dir.rmdir()
+        console.print(f"[green]✓ 音声合成完了[/green] {audio_path.name}")
+        console.print(f"  → 長さ: {total_duration_sec:.1f}秒, フレーズ数: {len(phrase_data)}")
+        if segment_timings:
+            console.print(f"  → セグメント数: {len(segment_timings)}")
         
         return SynthesisResult(
             audio_path=audio_path,
             subtitle_path=subtitle_path,
             total_duration_sec=total_duration_sec,
-            chapters=chapters
+            chapters=chapters,
+            segment_timings=segment_timings
         )
     
     async def _synthesize_phrase(
@@ -221,22 +246,130 @@ class VoicevoxClient(IAudioSynthesizer):
         
         return synthesis_response.content
     
+    def _calculate_segment_pauses(self, segments: Optional[list]) -> dict[str, tuple[float, Optional[Path]]]:
+        """Calculate pause duration after each segment based on jingle length
+        
+        Args:
+            segments: List of ScriptSegment objects
+        
+        Returns:
+            dict[segment_id, (pause_sec, jingle_path)]: Pause duration and jingle path for each segment
+        """
+        pauses = {}
+        
+        if not segments or not self.enable_jingles or not self.jingle_provider.is_available():
+            return pauses
+        
+        # Calculate pause for each segment (except the last one)
+        for i, segment in enumerate(segments[:-1]):
+            # Select random jingle and get its duration
+            jingle_path = self.jingle_provider.get_random_jingle()
+            if jingle_path:
+                jingle_duration = self.jingle_provider.get_jingle_duration(jingle_path)
+                # Pause = full jingle duration (no overlap, perfect sync)
+                pause_sec = jingle_duration
+                pauses[segment.segment_id] = (pause_sec, jingle_path)
+                console.print(
+                    f"[dim]  Segment {segment.segment_id}: jingle={jingle_path.name} "
+                    f"({jingle_duration:.2f}s), pause={pause_sec:.2f}s (no overlap)[/dim]"
+                )
+            else:
+                pauses[segment.segment_id] = (0.0, None)
+        
+        return pauses
+    
+    def _combine_audio_with_pauses(
+        self,
+        phrase_data: list,
+        pause_ms: int,
+        segment_pauses: dict[str, tuple[float, Optional[Path]]],
+        segments: Optional[list]
+    ) -> tuple[AudioSegment, list]:
+        """Combine audio with dynamic segment pauses and adjust phrase timestamps
+        
+        Args:
+            phrase_data: List of (audio_segment, start_ms, end_ms, text, speaker) tuples
+            pause_ms: Pause between individual phrases (250ms)
+            segment_pauses: Dict of {segment_id: (pause_sec, jingle_path)}
+            segments: List of ScriptSegment objects
+        
+        Returns:
+            tuple: (combined_audio, adjusted_phrase_data with offset timestamps)
+        """
+        if not phrase_data:
+            return AudioSegment.silent(duration=1000), []
+        
+        if not segments:
+            # Legacy mode: no segments, use original _combine_audio logic
+            pause = AudioSegment.silent(duration=pause_ms)
+            combined = phrase_data[0][0]
+            for item in phrase_data[1:]:
+                segment = item[0]
+                combined += pause + segment
+            return combined, phrase_data
+        
+        # New mode: segment-based with dynamic pauses
+        combined = AudioSegment.silent(duration=0)
+        adjusted_phrase_data = []
+        phrase_index = 0
+        cumulative_offset_ms = 0  # Cumulative offset from inserted pauses
+        
+        pause = AudioSegment.silent(duration=pause_ms)
+        
+        for seg_idx, segment in enumerate(segments):
+            # Combine phrases for this segment
+            num_turns = len(segment.turns)
+            for _ in range(num_turns):
+                if phrase_index >= len(phrase_data):
+                    break
+                
+                audio_seg, orig_start_ms, orig_end_ms, text, speaker = phrase_data[phrase_index]
+                
+                # Adjust timestamps with cumulative offset
+                adjusted_start_ms = orig_start_ms + cumulative_offset_ms
+                adjusted_end_ms = orig_end_ms + cumulative_offset_ms
+                
+                adjusted_phrase_data.append((
+                    audio_seg,
+                    adjusted_start_ms,
+                    adjusted_end_ms,
+                    text,
+                    speaker
+                ))
+                
+                combined += audio_seg + pause
+                phrase_index += 1
+            
+            # Insert pause after segment (if not last segment)
+            pause_info = segment_pauses.get(segment.segment_id)
+            if pause_info:
+                pause_sec, jingle_path = pause_info
+                if pause_sec > 0:
+                    pause_ms_seg = int(pause_sec * 1000)
+                    combined += AudioSegment.silent(duration=pause_ms_seg)
+                    cumulative_offset_ms += pause_ms_seg
+                    
+                    console.print(
+                        f"[yellow]  → Inserted {pause_sec:.2f}s pause after {segment.segment_id} "
+                        f"(jingle: {jingle_path.name if jingle_path else 'None'}), "
+                        f"cumulative offset: {cumulative_offset_ms/1000:.2f}s[/yellow]"
+                    )
+        
+        return combined, adjusted_phrase_data
+    
     def _combine_audio(
         self,
         phrase_data: list,
         pause_ms: int
     ) -> AudioSegment:
-        """音声セグメントを結合"""
+        """音声セグメントを結合（レガシーモード用）"""
         if not phrase_data:
             return AudioSegment.silent(duration=1000)
         
-        # 無音セグメント
         pause = AudioSegment.silent(duration=pause_ms)
-        
-        # 結合（話者ID追加に対応）
         combined = phrase_data[0][0]
         for item in phrase_data[1:]:
-            segment = item[0]  # 最初の要素が音声セグメント
+            segment = item[0]
             combined += pause + segment
         
         return combined
@@ -405,6 +538,47 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                 break
 
         return phrase_data
+    
+    def _build_chapters(self, phrase_data: list, script: Script) -> list[ChapterMarker]:
+        """Build chapter markers from phrase data and script sections
+        
+        Args:
+            phrase_data: List of (audio_segment, start_ms, end_ms, text, speaker) tuples
+            script: Script object with section information
+        
+        Returns:
+            List of ChapterMarker objects
+        """
+        if not phrase_data or not script:
+            return []
+        
+        pre_roll_offset_ms = 2000  # Pre-roll silence added to audio
+        chapters: list[ChapterMarker] = []
+        dialogue = script.get_dialogue_only()
+        
+        # Map dialogue lines to phrase data by index
+        for idx, line in enumerate(dialogue):
+            if not line.section or idx >= len(phrase_data):
+                continue
+            
+            # Get timing from phrase_data
+            _, start_ms, _, text, _ = phrase_data[idx]
+            start_sec = (start_ms + pre_roll_offset_ms) / 1000.0
+            
+            # Generate chapter title
+            chapter_title = self._get_chapter_title(line.section, line.text, line.chapter_title)
+            
+            # Only add chapter if it's a new section (avoid duplicates)
+            if not chapters or chapters[-1].section_id != line.section:
+                chapters.append(
+                    ChapterMarker(
+                        start_time_sec=start_sec,
+                        title=chapter_title,
+                        section_id=line.section,
+                    )
+                )
+        
+        return chapters
     
     def _get_chapter_title(self, section_id: str, text: str, chapter_title: Optional[str] = None) -> str:
         """セクションIDからチャプタータイトルを生成

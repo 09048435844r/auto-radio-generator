@@ -1,15 +1,27 @@
-"""FFmpegを使用した動画レンダリング"""
+"""FFmpegを使用した動画レンダリング（3フェーズパイプライン版）
+
+Phase A: Timeline Calculation - セグメント情報から映像・音声のタイムラインを計算
+Phase B: Independent Rendering - 映像トラックと音声トラックを独立して生成
+Phase C: Muxing - 再エンコードなしで高速結合
+"""
 import asyncio
 import subprocess
 import shutil
 import os
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 from rich.console import Console
 
 from core.interfaces import ChapterMarker, IVideoRenderer, RenderResult, SynthesisResult
-from core.models import AppConfig
+from core.models import AppConfig, ScriptSegment
+from services.media_processing import ImageProvider, JingleProvider
+from .timeline_calculator import TimelineCalculator
+from .audio_track_renderer import AudioTrackRenderer
+from .video_track_renderer import VideoTrackRenderer
+from .ffmpeg_renderer_legacy import render_legacy
+from .ffmpeg_renderer_mux import mux_tracks
 
 console = Console()
 
@@ -26,6 +38,11 @@ class FfmpegRenderer(IVideoRenderer):
         
         # FFmpegのパス（環境変数PATH、またはプロジェクト内のffmpeg.exe）
         self.ffmpeg_path = self._find_ffmpeg()
+        
+        # 3-phase pipeline components
+        self.timeline_calculator = TimelineCalculator(config)
+        self.video_track_renderer = VideoTrackRenderer(config)
+        self.audio_track_renderer = AudioTrackRenderer(config)
     
     def _find_ffmpeg(self) -> str:
         """FFmpegの実行パスを探す"""
@@ -153,87 +170,164 @@ class FfmpegRenderer(IVideoRenderer):
         output_path: Path,
         subtitle_path: Path | None = None,
         chapters: list[ChapterMarker] | None = None,
+        segments: Optional[list[ScriptSegment]] = None,
     ) -> RenderResult:
-        """動画を生成
+        """動画を生成（3フェーズパイプライン）
+        
+        Phase A: Timeline Calculation
+        Phase B: Independent Rendering (Video Track + Audio Track)
+        Phase C: Muxing (再エンコードなし)
         
         Args:
             synthesis_result: 音声合成の結果
-            background_image: 背景画像パス
+            background_image: 背景画像パス（後方互換性のため残す、segmentsがある場合は無視）
             bgm_file: BGMファイルパス
             output_path: 出力動画パス
-            subtitle_path: 字幕ファイルパス（オプショナル、明示的に指定されない場合はsynthesis_resultから取得）
-            chapters: チャプターマーカー（未指定時はsynthesis_result.chaptersを使用）
+            subtitle_path: 字幕ファイルパス（オプショナル）
+            chapters: チャプターマーカー（オプショナル）
+            segments: スクリプトセグメント（新規、セグメント単位の背景切り替え用）
         """
-        console.print("[cyan]動画を生成中...[/cyan]")
-        
         # 出力ディレクトリを確保
         output_path.parent.mkdir(parents=True, exist_ok=True)
         
-        # 字幕パスの決定：明示的に指定された場合はそれを優先、そうでなければsynthesis_resultから取得
+        # 字幕パスとチャプターの決定
         final_subtitle_path = subtitle_path if subtitle_path is not None else synthesis_result.subtitle_path
         final_chapters = chapters if chapters is not None else synthesis_result.chapters
         
-        # 設定値
-        resolution = self.video_config.output_resolution
-        fps = self.video_config.output_fps
-        bgm_volume = self.video_config.bgm_volume
-        fade_in = self.video_config.bgm_fade_in_sec
-        fade_out = self.video_config.bgm_fade_out_sec
-        total_duration = synthesis_result.total_duration_sec
+        # セグメント情報がない場合は従来の単一背景画像モードで動作（後方互換性）
+        if not segments:
+            console.print("[yellow]⚠ No segments provided, using legacy single-image mode[/yellow]")
+            return await self._render_legacy(
+                synthesis_result=synthesis_result,
+                background_image=background_image,
+                bgm_file=bgm_file,
+                output_path=output_path,
+                subtitle_path=final_subtitle_path,
+                chapters=final_chapters,
+            )
         
-        # FFmpegコマンドを構築
-        cmd = self._build_ffmpeg_command(
-            background_image=background_image,
-            audio_file=synthesis_result.audio_path,
-            bgm_file=bgm_file,
-            subtitle_file=final_subtitle_path,
-            output_path=output_path,
-            resolution=resolution,
-            fps=fps,
-            bgm_volume=bgm_volume,
-            fade_in_sec=fade_in,
-            fade_out_sec=fade_out,
-            total_duration_sec=total_duration,
-            chapters=final_chapters,
-        )
+        # 3-phase pipeline mode
+        console.print("[cyan]動画を生成中（3フェーズパイプライン）...[/cyan]")
         
-        # デバッグ: FFmpegフルコマンドをログ出力
-        full_cmd_str = ' '.join(cmd)
-        console.print(f"[dim]実行コマンド: {' '.join(cmd[:10])}...[/dim]")
-        console.print(f"[dim]DEBUG filter_complex:[/dim]")
-        # filter_complexの値だけ抽出して見やすく表示
+        # 一時ファイル用ディレクトリ
+        temp_dir = output_path.parent / ".temp"
+        temp_dir.mkdir(exist_ok=True)
+        
         try:
-            fc_idx = cmd.index("-filter_complex")
-            console.print(f"[dim]{cmd[fc_idx + 1]}[/dim]")
-        except ValueError:
-            pass
-        console.print(f"[dim]DEBUG full command ({len(cmd)} args):[/dim]")
-        console.print(f"[dim]{full_cmd_str}[/dim]")
+            # ========== Phase A: Timeline Calculation ==========
+            console.print("[cyan]Phase A: タイムライン計算中...[/cyan]")
+            
+            image_provider = ImageProvider(self.config)
+            jingle_provider = JingleProvider()
+            
+            timeline = await self.timeline_calculator.calculate_timeline(
+                segments=segments,
+                synthesis_result=synthesis_result,
+                image_provider=image_provider,
+                jingle_provider=jingle_provider,
+                bgm_path=bgm_file,
+            )
+            
+            console.print(f"[green]✓ タイムライン計算完了: {len(timeline.segments)}セグメント[/green]")
+            
+            # ========== Phase B: Independent Rendering ==========
+            console.print("[cyan]Phase B: 映像・音声トラック生成中...[/cyan]")
+            
+            video_track_path = temp_dir / "video_track.mp4"
+            audio_track_path = temp_dir / "audio_track.wav"
+            
+            # 並列実行（映像と音声は完全に独立）
+            video_task = self.video_track_renderer.render_video_track(
+                timeline=timeline,
+                output_path=video_track_path,
+                chapters=final_chapters,
+            )
+            audio_task = self.audio_track_renderer.render_audio_track(
+                timeline=timeline,
+                output_path=audio_track_path,
+            )
+            
+            await asyncio.gather(video_task, audio_task)
+            
+            console.print(f"[green]✓ 映像トラック生成完了: {video_track_path.name}[/green]")
+            console.print(f"[green]✓ 音声トラック生成完了: {audio_track_path.name}[/green]")
+            
+            # ========== Phase C: Muxing (再エンコードなし) ==========
+            console.print("[cyan]Phase C: 最終結合中...[/cyan]")
+            
+            await self._mux_tracks(
+                video_track=video_track_path,
+                audio_track=audio_track_path,
+                output_path=output_path,
+            )
+            
+            # 中間ファイル削除（設定で保持も可能）
+            keep_temp = getattr(getattr(self.config.yaml, "dev", None), "keep_temp_files", False)
+            if not keep_temp:
+                shutil.rmtree(temp_dir)
+            else:
+                console.print(f"[dim]中間ファイルを保持: {temp_dir}[/dim]")
+            
+            # 結果を返す
+            file_size_mb = output_path.stat().st_size / (1024 * 1024)
+            total_duration = synthesis_result.total_duration_sec
+            
+            console.print(f"[green]OK 動画生成完了[/green] {output_path.name}")
+            console.print(f"  → サイズ: {file_size_mb:.1f} MB, 長さ: {total_duration:.1f}秒")
+            console.print(f"  → セグメント数: {len(timeline.segments)}")
+            
+            return RenderResult(
+                video_path=output_path,
+                duration_sec=total_duration,
+                file_size_mb=file_size_mb
+            )
         
-        # 非同期でFFmpegを実行
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
+        except Exception as e:
+            # エラー時も中間ファイルを保持（デバッグ用）
+            console.print(f"[red]✗ 動画生成エラー: {e}[/red]")
+            console.print(f"[yellow]中間ファイルを保持（デバッグ用）: {temp_dir}[/yellow]")
+            raise
+    
+    async def _mux_tracks(self, video_track: Path, audio_track: Path, output_path: Path) -> None:
+        """Mux video and audio tracks (Phase C)
         
-        stdout, stderr = await process.communicate()
+        Args:
+            video_track: Video track file path
+            audio_track: Audio track file path
+            output_path: Output video file path
+        """
+        await mux_tracks(self.ffmpeg_path, video_track, audio_track, output_path)
+    
+    async def _render_legacy(
+        self,
+        synthesis_result: SynthesisResult,
+        background_image: Path,
+        bgm_file: Path,
+        output_path: Path,
+        subtitle_path: Path,
+        chapters: list[ChapterMarker],
+    ) -> RenderResult:
+        """Legacy rendering method (backward compatibility)
         
-        if process.returncode != 0:
-            error_msg = stderr.decode('utf-8', errors='replace')
-            console.print(f"[red]✗ FFmpeg エラー:[/red]\n{error_msg[-1000:]}")
-            raise RuntimeError(f"FFmpeg failed with code {process.returncode}")
+        Args:
+            synthesis_result: Audio synthesis result
+            background_image: Background image path
+            bgm_file: BGM file path
+            output_path: Output video path
+            subtitle_path: Subtitle file path
+            chapters: Chapter markers
         
-        # 結果を返す
-        file_size_mb = output_path.stat().st_size / (1024 * 1024)
-        
-        console.print(f"[green]OK 動画生成完了[/green] {output_path.name}")
-        console.print(f"  → サイズ: {file_size_mb:.1f} MB, 長さ: {total_duration:.1f}秒")
-        
-        return RenderResult(
-            video_path=output_path,
-            duration_sec=total_duration,
-            file_size_mb=file_size_mb
+        Returns:
+            RenderResult: Rendering result
+        """
+        return await render_legacy(
+            self,
+            synthesis_result,
+            background_image,
+            bgm_file,
+            output_path,
+            subtitle_path,
+            chapters,
         )
     
     def _build_ffmpeg_command(

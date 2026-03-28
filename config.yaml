@@ -428,6 +428,13 @@ video_renderer:
   bgm_fade_in_sec: 3.0       # フェードイン時間（秒）
   bgm_fade_out_sec: 3.0      # フェードアウト時間（秒）
   
+  # セグメント単位の背景画像切り替え設定
+  background_mode: "static"  # "static": ローカルアセット選択 | "dynamic": DALL-E 3動的生成
+  
+  # ジングル設定（セグメント境界での演出）
+  enable_jingles: true       # ジングル挿入を有効化
+  jingle_overlap_sec: 0.0    # オーバーラップなし（完全同期モデル）
+  
   # 音声スペクトラム可視化（画面下部の波形表示）
   enable_spectrum: true      # スペクトラム表示を有効化
   spectrum_color: "0x00FF88" # スペクトラムの色（緑系）
@@ -519,3 +526,11 @@ publishing:
     VOICEVOX:ずんだもん
     VOICEVOX:四国めたん
     -----------------------------------
+
+# -----------------------------------------------------------------------------
+# 開発・デバッグ設定
+# -----------------------------------------------------------------------------
+dev:
+  mock_mode: false           # true: テストデータを使用（API呼び出しなし）
+  mock_data_path: "tests/mock_data"  # モックデータのパス
+  keep_temp_files: false     # true: 中間ファイルを削除しない（デバッグ用）

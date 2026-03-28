@@ -112,9 +112,10 @@ class ScriptingPhaseResult:
     research_content: Optional[str] = None
     research_sources: Optional[list[ResearchSource]] = None
     perplexity_usage: Optional[PerplexityUsage] = None
-    gemini_usage: Optional[GeminiUsage] = None
+    gemini_usage: Optional[LLMUsage] = None
     research_duration_sec: float = 0.0
     script_duration_sec: float = 0.0
+    segments: Optional[list] = None  # ScriptSegment list for segment-based rendering
 
 
 @dataclass
@@ -727,6 +728,8 @@ async def execute_scripting_phase(
     
     script_start = time.time()
 
+    segments = None  # セグメント情報を保持（動画生成で使用）
+    
     if use_orchestrator and research_data is not None:
         # --- 新アーキテクチャ: Hierarchical Agentic Workflow ---
         cb.log("[cyan][Orchestrator] 長尺台本生成モード（TopicCuration → SegmentGeneration）[/cyan]")
@@ -739,6 +742,7 @@ async def execute_scripting_phase(
             progress_callback=cb,
         )
         gemini_usage = orchestrator.get_total_usage()
+        segments = orchestrator.segments  # セグメント情報を取得
     else:
         # --- 旧アーキテクチャ: 単一API呼び出し（フォールバック） ---
         script_generator = create_script_generator(config, provider=provider)
@@ -775,7 +779,8 @@ async def execute_scripting_phase(
         perplexity_usage=perplexity_usage,
         gemini_usage=gemini_usage,
         research_duration_sec=research_duration,
-        script_duration_sec=script_duration
+        script_duration_sec=script_duration,
+        segments=segments  # セグメント情報を返す
     )
 
 
@@ -785,6 +790,7 @@ async def execute_production_phase(
     output_dir: Path,
     project_root: Path,
     speed_scale: Optional[float] = None,
+    segments: Optional[list] = None,
     callbacks: Optional[ProgressCallback] = None
 ) -> ProductionPhaseResult:
     """制作フェーズ: 音声合成 → 動画生成
@@ -795,6 +801,7 @@ async def execute_production_phase(
         output_dir: 出力ディレクトリ
         project_root: プロジェクトルート
         speed_scale: 音声スピード倍率（オプション）
+        segments: スクリプトセグメント（セグメント単位の背景切り替え用）
         callbacks: 進捗コールバック
     
     Returns:
@@ -812,9 +819,10 @@ async def execute_production_phase(
     
     voicevox = VoicevoxClient(config)
     synthesis_result = await voicevox.synthesize(
-        script,
-        audio_output_dir,
-        speed_scale_override=speed_scale
+        script, 
+        audio_output_dir, 
+        speed_scale_override=speed_scale,
+        segments=segments
     )
     
     voicevox_usage = VoicevoxUsage(
@@ -849,6 +857,7 @@ async def execute_production_phase(
         output_path=video_output_path,
         subtitle_path=synthesis_result.subtitle_path,
         chapters=synthesis_result.chapters,
+        segments=segments,  # セグメント単位の背景切り替え用
     )
     
     render_duration = time.time() - render_start
@@ -1636,6 +1645,7 @@ def run_workflow_sync(
                 output_dir=output_base,
                 project_root=PROJECT_ROOT,
                 speed_scale=overrides_obj.speed_scale,
+                segments=scripting_result.segments,  # セグメント情報を渡す
                 callbacks=callbacks
             )
             

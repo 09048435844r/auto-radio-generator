@@ -8,8 +8,8 @@ from google import genai
 from google.genai import types
 from rich.console import Console
 
-from core.interfaces.script_generator import IScriptGenerator
-from core.models import AppConfig, Script, LLMUsage
+from core.interfaces import IScriptGenerator, ResearchResult
+from core.models import AppConfig, Script, LLMUsage, GeminiUsage, ResearchPlan
 from core.models.script import DialogueTurn, TurnType
 from core.utils import sanitize_json_lightweight
 

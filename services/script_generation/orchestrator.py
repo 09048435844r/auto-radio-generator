@@ -49,6 +49,9 @@ class ScriptOrchestrator(IScriptOrchestrator):
         self._total_input_tokens = 0   # 全プロバイダー合計（後方互換性のため保持）
         self._total_output_tokens = 0  # 全プロバイダー合計（後方互換性のため保持）
         self._total_requests = 0       # 全プロバイダー合計（後方互換性のため保持）
+        
+        # Generated segments for video rendering pipeline
+        self.segments: list[ScriptSegment] = []
 
     async def generate_script(
         self,
@@ -101,6 +104,7 @@ class ScriptOrchestrator(IScriptOrchestrator):
         # --------------------------------------------------------
         total_segments = 1 + len(curation_result.topics) + 1  # intro + N + conclusion
         all_segments: list[ScriptSegment] = []
+        self.segments = []  # Reset segments for this generation
         context = ""
 
         # --- 2a: 導入セグメント ---
@@ -169,6 +173,7 @@ class ScriptOrchestrator(IScriptOrchestrator):
         # Step 3: 統合
         # --------------------------------------------------------
         log(f"\n[cyan]--- Step 3/4: セグメント統合 ---[/cyan]")
+        self.segments = all_segments  # Store segments for video rendering
         script = self._integrate_segments(theme, all_segments)
 
         total_turns = len(script.sections)
