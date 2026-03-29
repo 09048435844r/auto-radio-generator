@@ -1745,7 +1745,7 @@ def run_workflow_sync(
                     thumbnail_bg_path = output_base / "thumbnail_bg.png"
                     
                     # Use await instead of asyncio.run() to avoid nested event loop error
-                    background_image = await thumbnail_bg_generator.generate_background(
+                    background_image = await thumbnail_bg_generator.generate(
                         theme=theme,
                         script_summary=script_summary,
                         output_path=thumbnail_bg_path,
