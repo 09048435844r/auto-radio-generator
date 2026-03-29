@@ -32,8 +32,9 @@ def calculate_segment_timings(
     segment_timings = []
     phrase_index = 0
     pre_roll_offset_ms = 2000  # Pre-roll silence added to audio
+    post_roll_offset_ms = 5000  # Post-roll silence added to audio (末尾5秒)
     
-    for segment in segments:
+    for i, segment in enumerate(segments):
         # Count turns in this segment
         num_turns = len(segment.turns)
         
@@ -52,6 +53,11 @@ def calculate_segment_timings(
         end_phrase_index = min(phrase_index + num_turns - 1, len(phrase_data) - 1)
         end_ms = phrase_data[end_phrase_index][2]  # end_time from phrase_data
         end_sec = (end_ms + pre_roll_offset_ms) / 1000.0
+        
+        # Add post-roll to the last segment to match total audio duration
+        is_last_segment = (i == len(segments) - 1)
+        if is_last_segment:
+            end_sec += post_roll_offset_ms / 1000.0
         
         duration_sec = end_sec - start_sec
         
