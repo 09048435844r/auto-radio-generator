@@ -257,6 +257,13 @@ class CostCalculator:
                 lines.append(f"| 台本生成 | {usage.script_duration_sec:.1f}秒 |")
             if usage.audio_duration_sec > 0:
                 lines.append(f"| 音声合成 | {usage.audio_duration_sec:.1f}秒 |")
+            
+            # Add image generation times if present
+            if usage.segment_bg_generation_time > 0:
+                lines.append(f"| セグメント背景生成 | {usage.segment_bg_generation_time:.1f}秒 |")
+            if usage.thumbnail_bg_generation_time > 0:
+                lines.append(f"| サムネイル背景生成 | {usage.thumbnail_bg_generation_time:.1f}秒 |")
+            
             if usage.render_duration_sec > 0:
                 lines.append(f"| 動画生成 | {usage.render_duration_sec:.1f}秒 |")
             lines.append(f"| **合計** | **{usage.total_duration_sec:.1f}秒** |")

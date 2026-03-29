@@ -13,6 +13,7 @@ class RenderResult:
     video_path: Path          # 生成された動画ファイルパス
     duration_sec: float       # 動画の長さ（秒）
     file_size_mb: float       # ファイルサイズ（MB）
+    segment_bg_generation_time: float = 0.0  # セグメント背景生成時間（秒）
 
 
 class IVideoRenderer(ABC):

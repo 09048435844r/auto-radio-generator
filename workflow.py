@@ -94,6 +94,9 @@ class WorkflowResult:
     # サムネイル再作成用
     theme: str = ""  # 元のテーマ
     output_dir: Optional[Path] = None  # 出力先ディレクトリ
+    # 画像生成時間
+    segment_bg_generation_time: float = 0.0  # セグメント背景生成時間（秒）
+    thumbnail_bg_generation_time: float = 0.0  # サムネイル背景生成時間（秒）
 
 
 @dataclass
@@ -130,6 +133,7 @@ class ProductionPhaseResult:
     voicevox_usage: VoicevoxUsage
     audio_duration_sec: float = 0.0
     render_duration_sec: float = 0.0
+    segment_bg_generation_time: float = 0.0  # セグメント背景生成時間（秒）
 
 
 def _normalize_non_empty_strings(values: list[str]) -> list[str]:
@@ -886,7 +890,8 @@ async def execute_production_phase(
         chapters=synthesis_result.chapters,
         voicevox_usage=voicevox_usage,
         audio_duration_sec=audio_duration,
-        render_duration_sec=render_duration
+        render_duration_sec=render_duration,
+        segment_bg_generation_time=render_result.segment_bg_generation_time
     )
 
 
@@ -1654,6 +1659,10 @@ def run_workflow_sync(
             total_usage.audio_duration_sec = production_result.audio_duration_sec
             total_usage.render_duration_sec = production_result.render_duration_sec
             
+            # 画像生成時間を記録
+            segment_bg_time = production_result.segment_bg_generation_time
+            total_usage.segment_bg_generation_time = segment_bg_time
+            
             # ========== Phase 4: 後処理（メタデータ生成） ==========
             callbacks.progress(0.97, "📦 後処理中...")
             skip_metadata_in_mock = bool(
@@ -1682,10 +1691,12 @@ def run_workflow_sync(
             # サムネイル背景を生成（FLUX.1 dynamic mode）
             video_config = getattr(config.yaml, "video_renderer", None)
             thumbnail_bg_mode = getattr(video_config, "thumbnail_background_mode", "static") if video_config else "static"
+            thumbnail_bg_generation_time = 0.0
             
             if thumbnail_bg_mode == "dynamic":
                 try:
                     callbacks.log("[INFO] サムネイル背景を動的生成中（FLUX.1）...")
+                    thumbnail_bg_start = time.time()
                     
                     # Generate script summary for prompt
                     script_summary = scripting_result.script.description[:300] if scripting_result.script.description else theme
@@ -1702,7 +1713,9 @@ def run_workflow_sync(
                         topic_title=scripting_result.script.title
                     )
                     
-                    callbacks.log(f"✓ サムネイル背景生成完了（FLUX.1）: {thumbnail_bg_path.name}")
+                    thumbnail_bg_generation_time = time.time() - thumbnail_bg_start
+                    total_usage.thumbnail_bg_generation_time = thumbnail_bg_generation_time
+                    callbacks.log(f"✓ サムネイル背景生成完了（FLUX.1）: {thumbnail_bg_path.name} ({thumbnail_bg_generation_time:.1f}秒)")
                 except Exception as e:
                     callbacks.log(f"⚠ サムネイル背景生成失敗、静的背景を使用: {e}")
                     background_image = PROJECT_ROOT / config.yaml.paths.background_image
@@ -1956,9 +1969,10 @@ def run_workflow_sync(
                 formatted_title=formatted_title,
                 formatted_description=formatted_description,
                 uploaded_video_url=uploaded_video_url,
-                # サムネイル再作成用
                 theme=theme,
                 output_dir=output_base,
+                segment_bg_generation_time=segment_bg_time,
+                thumbnail_bg_generation_time=thumbnail_bg_generation_time,
             )
             
         except Exception as e:

@@ -230,6 +230,11 @@ class FfmpegRenderer(IVideoRenderer):
             
             console.print(f"[green]✓ タイムライン計算完了: {len(timeline.segments)}セグメント[/green]")
             
+            # Get wall-clock time for image generation
+            segment_bg_generation_time = image_provider.get_total_generation_time()
+            if segment_bg_generation_time > 0:
+                console.print(f"[dim]セグメント背景生成時間（実測）: {segment_bg_generation_time:.1f}秒[/dim]")
+            
             # ========== Phase B: Independent Rendering ==========
             console.print("[cyan]Phase B: 映像・音声トラック生成中...[/cyan]")
             
@@ -279,7 +284,8 @@ class FfmpegRenderer(IVideoRenderer):
             return RenderResult(
                 video_path=output_path,
                 duration_sec=total_duration,
-                file_size_mb=file_size_mb
+                file_size_mb=file_size_mb,
+                segment_bg_generation_time=segment_bg_generation_time
             )
         
         except Exception as e:

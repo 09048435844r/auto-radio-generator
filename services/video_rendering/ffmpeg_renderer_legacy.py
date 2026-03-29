@@ -76,5 +76,6 @@ async def render_legacy(
     return RenderResult(
         video_path=output_path,
         duration_sec=total_duration,
-        file_size_mb=file_size_mb
+        file_size_mb=file_size_mb,
+        segment_bg_generation_time=0.0  # Legacy mode does not generate dynamic backgrounds
     )

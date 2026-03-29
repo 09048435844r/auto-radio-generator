@@ -67,12 +67,16 @@ class TotalUsage:
     llm_usage: dict[str, LLMUsage] = field(default_factory=dict)
     voicevox: VoicevoxUsage = field(default_factory=VoicevoxUsage)
     
-    # Processing time
-    total_duration_sec: float = 0.0
+    # Duration tracking
     research_duration_sec: float = 0.0
     script_duration_sec: float = 0.0
     audio_duration_sec: float = 0.0
     render_duration_sec: float = 0.0
+    total_duration_sec: float = 0.0
+    
+    # Image generation time tracking
+    segment_bg_generation_time: float = 0.0  # セグメント背景生成時間（秒）
+    thumbnail_bg_generation_time: float = 0.0  # サムネイル背景生成時間（秒）
     
     @property
     def gemini(self) -> LLMUsage:

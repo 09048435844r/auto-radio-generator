@@ -46,6 +46,10 @@ class ImageProvider:
         self.cache_dir = Path("output/.image_cache")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         
+        # Track wall-clock time for all image generation
+        self._generation_start_time: Optional[float] = None
+        self._generation_end_time: Optional[float] = None
+        
         # Scan available static images
         self._static_images: dict[str, list[Path]] = {}
         if self.mode == "static":
@@ -114,6 +118,12 @@ class ImageProvider:
         Returns:
             Path: Generated image path
         """
+        import time
+        
+        # Track wall-clock time for first generation
+        if self._generation_start_time is None:
+            self._generation_start_time = time.time()
+        
         # 1. Generate prompt from segment
         prompt = await self.prompt_generator.generate_prompt(segment)
         
@@ -127,19 +137,28 @@ class ImageProvider:
             return cache_path
         
         # 3. Generate image via FluxClient
+        gen_start = time.time()
         try:
             console.print(f"[cyan]Generating image for {segment.segment_id}...[/cyan]")
+            
             image_path = await self.flux_client.generate_image(prompt, cache_path)
             
-            console.print(f"[green]✓ Generated: {image_path.name}[/green]")
-            logger.info(f"Image generated for segment {segment.segment_id}: {image_path}")
+            gen_time = time.time() - gen_start
+            console.print(f"[green]✓ Generated: {image_path.name} ({gen_time:.1f}s)[/green]")
+            logger.info(f"Image generated for segment {segment.segment_id}: {image_path} ({gen_time:.1f}s)")
+            
+            # Update end time for wall-clock tracking
+            self._generation_end_time = time.time()
             
             return image_path
             
         except Exception as e:
-            # Fallback to static mode on error
-            logger.error(f"Dynamic image generation failed: {e}, falling back to static mode")
-            console.print(f"[yellow]⚠ Generation failed, using static fallback[/yellow]")
+            # Track time even on failure
+            gen_time = time.time() - gen_start
+            self._generation_end_time = time.time()
+            
+            logger.error(f"Dynamic image generation failed after {gen_time:.1f}s: {e}, falling back to static mode")
+            console.print(f"[yellow]⚠ Generation failed ({gen_time:.1f}s), using static fallback[/yellow]")
             return self._select_static_image(segment)
     
     def _select_static_image(self, segment: ScriptSegment) -> Path:
@@ -202,3 +221,16 @@ class ImageProvider:
             str: Cache key (64-char hex, SHA-256)
         """
         return hashlib.sha256(prompt.encode()).hexdigest()
+    
+    def get_total_generation_time(self) -> float:
+        """Get total wall-clock time for all image generation
+        
+        Returns actual elapsed time (wall-clock), not sum of individual generation times.
+        This is more accurate for parallel/async operations.
+        
+        Returns:
+            float: Total generation time in seconds (0.0 if no generation occurred)
+        """
+        if self._generation_start_time is None or self._generation_end_time is None:
+            return 0.0
+        return self._generation_end_time - self._generation_start_time
