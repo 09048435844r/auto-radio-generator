@@ -19,6 +19,7 @@ from rich.console import Console
 
 from core.models import AppConfig
 from core.models.curation import ScriptSegment
+from core.models.visual import VisualPalette
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -31,13 +32,15 @@ class ImageProvider:
     Supports static (local assets) and dynamic (DALL-E 3) modes.
     """
     
-    def __init__(self, config: AppConfig):
+    def __init__(self, config: AppConfig, visual_palette: Optional[VisualPalette] = None):
         """Initialize image provider
         
         Args:
             config: Application configuration
+            visual_palette: Optional color palette for visual consistency across segments
         """
         self.config = config
+        self.visual_palette = visual_palette
         
         # Get mode from config (default to static)
         self.mode = config.yaml.video_renderer.background_mode
@@ -50,10 +53,9 @@ class ImageProvider:
         self._generation_start_time: Optional[float] = None
         self._generation_end_time: Optional[float] = None
         
-        # Scan available static images
+        # Scan available static images (always scan for fallback support)
         self._static_images: dict[str, list[Path]] = {}
-        if self.mode == "static":
-            self._scan_static_images()
+        self._scan_static_images()
         
         # Initialize dynamic generation components
         if self.mode == "dynamic":
@@ -124,8 +126,8 @@ class ImageProvider:
         if self._generation_start_time is None:
             self._generation_start_time = time.time()
         
-        # 1. Generate prompt from segment
-        prompt = await self.prompt_generator.generate_prompt(segment)
+        # 1. Generate prompt from segment with palette
+        prompt = await self.prompt_generator.generate_prompt(segment, self.visual_palette)
         
         # 2. Check cache (prompt-based key)
         cache_key = self._get_prompt_cache_key(prompt)

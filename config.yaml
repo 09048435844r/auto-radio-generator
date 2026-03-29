@@ -444,16 +444,17 @@ video_renderer:
   spectrum_mode: "cline"     # 表示モード: line, cline, bar
 
 # -----------------------------------------------------------------------------
-# FLUX.1 画像生成設定 (Stable Diffusion WebUI Forge)
+# FLUX.1 画像生成設定（Stable Diffusion WebUI Forge）
 # -----------------------------------------------------------------------------
+# セグメント背景・サムネイル背景の動的生成に使用します。
 flux:
   base_url: "http://127.0.0.1:7890"  # Forge API URL
-  timeout: 120  # API timeout (seconds)
+  timeout: 300  # API timeout (seconds) - 低VRAM環境での10倍遅延に対応
   
-  # FLUX.1 [schnell] 固定設定
-  steps: 20
-  width: 1344
-  height: 768
+  # FLUX.1 [schnell] 最適化設定（低VRAM対応）
+  steps: 10      # 20 → 10 (schnellは4-10ステップで高品質、処理時間半減)
+  width: 1024    # 1344 → 1024 (VRAM消費約50%削減)
+  height: 576    # 768 → 576 (アスペクト比16:9維持)
   sampler_name: "Euler"
   scheduler: "Simple"
   cfg_scale: 1.0  # FLUX.1 [schnell] 必須設定

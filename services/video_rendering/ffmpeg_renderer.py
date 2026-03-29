@@ -10,7 +10,7 @@ import shutil
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from rich.console import Console
 
@@ -171,6 +171,7 @@ class FfmpegRenderer(IVideoRenderer):
         subtitle_path: Path | None = None,
         chapters: list[ChapterMarker] | None = None,
         segments: Optional[list[ScriptSegment]] = None,
+        visual_palette: Optional[Any] = None,
     ) -> RenderResult:
         """動画を生成（3フェーズパイプライン）
         
@@ -217,7 +218,7 @@ class FfmpegRenderer(IVideoRenderer):
             # ========== Phase A: Timeline Calculation ==========
             console.print("[cyan]Phase A: タイムライン計算中...[/cyan]")
             
-            image_provider = ImageProvider(self.config)
+            image_provider = ImageProvider(self.config, visual_palette=visual_palette)
             jingle_provider = JingleProvider()
             
             timeline = await self.timeline_calculator.calculate_timeline(
