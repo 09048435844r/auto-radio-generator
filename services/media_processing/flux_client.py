@@ -1,8 +1,8 @@
 """FLUX.1 image generation client for Stable Diffusion WebUI Forge API"""
 import base64
 import logging
+import tempfile
 from pathlib import Path
-from typing import Optional
 
 import httpx
 from rich.console import Console
@@ -111,16 +111,32 @@ class FluxClient:
                 result = response.json()
                 
                 # Extract first image from response
-                if "images" not in result or len(result["images"]) == 0:
+                images = result.get("images")
+                if not images or not isinstance(images, list) or len(images) == 0:
                     raise RuntimeError("No images returned from Forge API")
                 
-                # Decode base64 image
-                image_b64 = result["images"][0]
-                image_data = base64.b64decode(image_b64)
+                # Decode base64 image with error handling
+                image_b64 = images[0]
+                try:
+                    image_data = base64.b64decode(image_b64)
+                except Exception as e:
+                    raise RuntimeError(f"Failed to decode base64 image: {e}")
                 
-                # Save to output path
+                # Save to output path atomically (prevent race conditions)
                 output_path.parent.mkdir(parents=True, exist_ok=True)
-                output_path.write_bytes(image_data)
+                
+                # Write to temporary file first, then atomic rename
+                with tempfile.NamedTemporaryFile(
+                    mode='wb',
+                    dir=output_path.parent,
+                    delete=False,
+                    suffix='.tmp'
+                ) as tmp_file:
+                    tmp_file.write(image_data)
+                    tmp_path = Path(tmp_file.name)
+                
+                # Atomic rename (replaces existing file if present)
+                tmp_path.replace(output_path)
                 
                 logger.info(f"Image saved: {output_path}")
                 console.print(f"[green]✓ Image generated: {output_path.name}[/green]")

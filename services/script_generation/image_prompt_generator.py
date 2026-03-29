@@ -1,6 +1,5 @@
 """Image prompt generator for FLUX.1 background images"""
 import logging
-from typing import Optional
 
 from google import genai
 from google.genai import types
@@ -54,7 +53,7 @@ EXAMPLE OUTPUT:
         
         # Use Gemini Flash for fast, low-cost prompt generation
         gemini_config = getattr(config.yaml.script_generator, "gemini", None)
-        self.model_name = gemini_config.flash_model if gemini_config else "gemini-2.0-flash-exp"
+        self.model_name = getattr(gemini_config, "flash_model", "gemini-2.0-flash-exp") if gemini_config else "gemini-2.0-flash-exp"
         
         logger.info(f"ImagePromptGenerator initialized with model: {self.model_name}")
     

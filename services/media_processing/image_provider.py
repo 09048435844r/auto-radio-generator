@@ -40,8 +40,7 @@ class ImageProvider:
         self.config = config
         
         # Get mode from config (default to static)
-        video_config = getattr(config.yaml, "video_renderer", None)
-        self.mode = getattr(video_config, "background_mode", "static") if video_config else "static"
+        self.mode = config.yaml.video_renderer.background_mode
         
         self.static_images_dir = Path("assets/backgrounds")
         self.cache_dir = Path("output/.image_cache")
@@ -191,26 +190,15 @@ class ImageProvider:
         logger.debug(f"Selected image for segment '{segment.segment_id}': {selected.name}")
         return selected
     
-    def _get_cache_key(self, segment: ScriptSegment) -> str:
-        """Generate cache key for a segment
-        
-        Args:
-            segment: Script segment
-        
-        Returns:
-            str: Cache key
-        """
-        # Use segment_id and topic_title to generate unique key
-        content = f"{segment.segment_id}_{segment.topic_title or segment.segment_type}"
-        return hashlib.md5(content.encode()).hexdigest()[:16]
-    
     def _get_prompt_cache_key(self, prompt: str) -> str:
         """Generate cache key from prompt hash
+        
+        Uses SHA-256 full hash to prevent collision risks.
         
         Args:
             prompt: Image generation prompt
         
         Returns:
-            str: Cache key (16-char hex)
+            str: Cache key (64-char hex, SHA-256)
         """
-        return hashlib.md5(prompt.encode()).hexdigest()[:16]
+        return hashlib.sha256(prompt.encode()).hexdigest()

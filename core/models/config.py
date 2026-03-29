@@ -163,6 +163,7 @@ class VideoRendererConfig(BaseModel):
     output_audio_codec: str = "aac"
     output_audio_bitrate: str = "192k"
     use_gpu: bool = True  # GPU加速（NVENC）を使用
+    background_mode: Literal["static", "dynamic"] = "static"  # Background image mode
     bgm_volume: float = 0.15
     bgm_fade_in_sec: float = 3.0
     bgm_fade_out_sec: float = 3.0
