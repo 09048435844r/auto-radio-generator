@@ -172,6 +172,18 @@ class VideoRendererConfig(BaseModel):
     spectrum_mode: str = "cline"
 
 
+class FluxConfig(BaseModel):
+    """FLUX.1 (Forge API) 設定"""
+    base_url: str = "http://127.0.0.1:7890"
+    timeout: int = 120
+    steps: int = 20
+    width: int = 1344
+    height: int = 768
+    sampler_name: str = "Euler"
+    scheduler: str = "Simple"
+    cfg_scale: float = 1.0
+
+
 class VideoConfig(BaseModel):
     """動画表示設定（オーバーレイ等）"""
     show_topic_overlay: bool = True
@@ -236,18 +248,13 @@ class PublishingConfig(BaseModel):
 
 
 class YamlConfig(BaseModel):
-    """YAML設定ファイル全体"""
+    """config.yamlから読み込む設定"""
     researcher: ResearcherConfig = Field(default_factory=ResearcherConfig)
-    script_generator: ScriptGeneratorConfig = Field(
-        default_factory=ScriptGeneratorConfig
-    )
-    audio_synthesizer: AudioSynthesizerConfig = Field(
-        default_factory=AudioSynthesizerConfig
-    )
-    video_renderer: VideoRendererConfig = Field(
-        default_factory=VideoRendererConfig
-    )
+    script_generator: ScriptGeneratorConfig = Field(default_factory=ScriptGeneratorConfig)
+    audio_synthesizer: AudioSynthesizerConfig = Field(default_factory=AudioSynthesizerConfig)
+    video_renderer: VideoRendererConfig = Field(default_factory=VideoRendererConfig)
     video: VideoConfig = Field(default_factory=VideoConfig)
+    flux: FluxConfig = Field(default_factory=FluxConfig)
     paths: PathsConfig = Field(default_factory=PathsConfig)
     personalities: PersonalitiesConfig = Field(default_factory=PersonalitiesConfig)
     dev: DevConfig = Field(default_factory=DevConfig)  # 開発用設定

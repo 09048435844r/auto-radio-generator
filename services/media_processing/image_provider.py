@@ -51,6 +51,17 @@ class ImageProvider:
         self._static_images: dict[str, list[Path]] = {}
         if self.mode == "static":
             self._scan_static_images()
+        
+        # Initialize dynamic generation components
+        if self.mode == "dynamic":
+            from services.script_generation.image_prompt_generator import ImagePromptGenerator
+            from services.media_processing.flux_client import FluxClient
+            
+            self.prompt_generator = ImagePromptGenerator(config)
+            self.flux_client = FluxClient(config)
+            
+            logger.info("Dynamic image generation mode enabled (FLUX.1)")
+            console.print("[cyan]Dynamic image generation mode enabled (FLUX.1)[/cyan]")
     
     def _scan_static_images(self):
         """Scan assets/backgrounds/ and categorize by segment type"""
@@ -96,7 +107,7 @@ class ImageProvider:
             return self._select_static_image(segment)
     
     async def _generate_dynamic_image(self, segment: ScriptSegment) -> Path:
-        """Generate background image via DALL-E 3 (future implementation)
+        """Generate background image via FLUX.1
         
         Args:
             segment: Script segment
@@ -104,19 +115,33 @@ class ImageProvider:
         Returns:
             Path: Generated image path
         """
-        # Check cache first
-        cache_key = self._get_cache_key(segment)
+        # 1. Generate prompt from segment
+        prompt = await self.prompt_generator.generate_prompt(segment)
+        
+        # 2. Check cache (prompt-based key)
+        cache_key = self._get_prompt_cache_key(prompt)
         cache_path = self.cache_dir / f"{cache_key}.png"
         
         if cache_path.exists():
             console.print(f"[dim]Using cached image: {cache_path.name}[/dim]")
+            logger.info(f"Cache hit for segment {segment.segment_id}")
             return cache_path
         
-        # TODO: Implement DALL-E 3 generation
-        # For now, fall back to static mode
-        logger.warning("Dynamic image generation not yet implemented, falling back to static mode")
-        console.print("[yellow]⚠ Dynamic image generation not yet implemented, using static fallback[/yellow]")
-        return self._select_static_image(segment)
+        # 3. Generate image via FluxClient
+        try:
+            console.print(f"[cyan]Generating image for {segment.segment_id}...[/cyan]")
+            image_path = await self.flux_client.generate_image(prompt, cache_path)
+            
+            console.print(f"[green]✓ Generated: {image_path.name}[/green]")
+            logger.info(f"Image generated for segment {segment.segment_id}: {image_path}")
+            
+            return image_path
+            
+        except Exception as e:
+            # Fallback to static mode on error
+            logger.error(f"Dynamic image generation failed: {e}, falling back to static mode")
+            console.print(f"[yellow]⚠ Generation failed, using static fallback[/yellow]")
+            return self._select_static_image(segment)
     
     def _select_static_image(self, segment: ScriptSegment) -> Path:
         """Select background image from local assets
@@ -178,3 +203,14 @@ class ImageProvider:
         # Use segment_id and topic_title to generate unique key
         content = f"{segment.segment_id}_{segment.topic_title or segment.segment_type}"
         return hashlib.md5(content.encode()).hexdigest()[:16]
+    
+    def _get_prompt_cache_key(self, prompt: str) -> str:
+        """Generate cache key from prompt hash
+        
+        Args:
+            prompt: Image generation prompt
+        
+        Returns:
+            str: Cache key (16-char hex)
+        """
+        return hashlib.md5(prompt.encode()).hexdigest()[:16]
