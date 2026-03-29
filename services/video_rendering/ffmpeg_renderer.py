@@ -16,6 +16,7 @@ from rich.console import Console
 
 from core.interfaces import ChapterMarker, IVideoRenderer, RenderResult, SynthesisResult
 from core.models import AppConfig, ScriptSegment
+from core.models.visual import VisualIdentity  # Issue #7 fix: Proper type import
 from services.media_processing import ImageProvider, JingleProvider
 from .timeline_calculator import TimelineCalculator
 from .audio_track_renderer import AudioTrackRenderer
@@ -171,7 +172,7 @@ class FfmpegRenderer(IVideoRenderer):
         subtitle_path: Path | None = None,
         chapters: list[ChapterMarker] | None = None,
         segments: Optional[list[ScriptSegment]] = None,
-        visual_palette: Optional[Any] = None,
+        visual_identity: Optional[VisualIdentity] = None,
     ) -> RenderResult:
         """動画を生成（3フェーズパイプライン）
         
@@ -218,7 +219,7 @@ class FfmpegRenderer(IVideoRenderer):
             # ========== Phase A: Timeline Calculation ==========
             console.print("[cyan]Phase A: タイムライン計算中...[/cyan]")
             
-            image_provider = ImageProvider(self.config, visual_palette=visual_palette)
+            image_provider = ImageProvider(self.config, visual_identity=visual_identity)
             jingle_provider = JingleProvider()
             
             timeline = await self.timeline_calculator.calculate_timeline(

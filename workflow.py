@@ -24,6 +24,7 @@ from core.models import (
     ExecutionLogEntry, PromptRecord, ConfigSnapshot, CostLogEntry
 )
 from core.models.script import DialogueTurn  # 追加インポート
+from core.models.visual import VisualIdentity  # Issue #7 fix: Proper type import
 from core.interfaces import ResearchMode, ChapterMarker, ResearchResult
 from services.script_generation import GeminiClient
 from services.script_generation.orchestrator import ScriptOrchestrator
@@ -98,7 +99,8 @@ class WorkflowResult:
     segment_bg_generation_time: float = 0.0  # セグメント背景生成時間（秒）
     thumbnail_bg_generation_time: float = 0.0  # サムネイル背景生成時間（秒）
     # Visual identity
-    visual_palette: Optional[Any] = None  # VisualPalette for color consistency
+    # Issue #7 fix: Proper type annotation instead of Any
+    visual_identity: Optional[VisualIdentity] = None  # VisualIdentity for brand consistency
 
 
 @dataclass
@@ -121,7 +123,8 @@ class ScriptingPhaseResult:
     research_duration_sec: float = 0.0
     script_duration_sec: float = 0.0
     segments: Optional[list] = None  # ScriptSegment list for segment-based rendering
-    visual_palette: Optional[Any] = None  # VisualPalette for color consistency
+    # Issue #7 fix: Proper type annotation instead of Any
+    visual_identity: Optional[VisualIdentity] = None  # VisualIdentity for brand consistency
 
 
 @dataclass
@@ -779,33 +782,33 @@ async def execute_scripting_phase(
     script_path.write_text(script.model_dump_json(indent=2), encoding="utf-8")
     cb.log(f"✓ 台本保存: {script_path.name}")
     
-    # Step 3: Visual Palette Generation (for dynamic background mode)
-    visual_palette = None
+    # Step 3: Visual Identity Generation (for dynamic background mode)
+    visual_identity = None
     video_config = getattr(config.yaml, "video_renderer", None)
     background_mode = getattr(video_config, "background_mode", "static") if video_config else "static"
     
     if background_mode == "dynamic":
         try:
-            cb.log("\n== Phase 2-3: ビジュアルパレット生成 ==")
-            cb.log("[INFO] 動画固有のカラーパレットを生成中（FLUX.1用）...")
+            cb.log("\n== Phase 2-3: ビジュアルアイデンティティ生成 ==")
+            cb.log("[INFO] 動画固有のビジュアルブランド（色+スタイル）を生成中（FLUX.1用）...")
             
             from services.script_generation.visual_palette_generator import VisualPaletteGenerator
             
             palette_generator = VisualPaletteGenerator(config)
             script_summary = script.description[:300] if script.description else theme
             
-            visual_palette = await palette_generator.generate_palette(
+            visual_identity = await palette_generator.generate_palette(
                 theme=theme,
                 script_summary=script_summary
             )
             
-            cb.log(f"✓ カラーパレット決定: {visual_palette}")
+            cb.log(f"✓ ビジュアルアイデンティティ決定: {visual_identity}")
         except Exception as e:
-            cb.log(f"⚠ カラーパレット生成失敗: {e}")
+            cb.log(f"⚠ ビジュアルアイデンティティ生成失敗: {e}")
             cb.log("[INFO] 各コンポーネントのデフォルト色にフォールバックします")
-            visual_palette = None
+            visual_identity = None
     else:
-        cb.log("[INFO] Static mode: カラーパレット生成をスキップ")
+        cb.log("[INFO] Static mode: ビジュアルアイデンティティ生成をスキップ")
     
     return ScriptingPhaseResult(
         script=script,
@@ -816,7 +819,7 @@ async def execute_scripting_phase(
         research_duration_sec=research_duration,
         script_duration_sec=script_duration,
         segments=segments,  # セグメント情報を返す
-        visual_palette=visual_palette  # カラーパレットを返す
+        visual_identity=visual_identity  # ビジュアルアイデンティティを返す
     )
 
 
@@ -827,7 +830,7 @@ async def execute_production_phase(
     project_root: Path,
     speed_scale: Optional[float] = None,
     segments: Optional[list] = None,
-    visual_palette: Optional[Any] = None,
+    visual_identity: Optional[VisualIdentity] = None,
     callbacks: Optional[ProgressCallback] = None
 ) -> ProductionPhaseResult:
     """制作フェーズ: 音声合成 → 動画生成
@@ -839,6 +842,7 @@ async def execute_production_phase(
         project_root: プロジェクトルート
         speed_scale: 音声スピード倍率（オプション）
         segments: スクリプトセグメント（セグメント単位の背景切り替え用）
+        visual_identity: ビジュアルアイデンティティ（色とスタイルの統一用）
         callbacks: 進捗コールバック
     
     Returns:
@@ -895,7 +899,7 @@ async def execute_production_phase(
         subtitle_path=synthesis_result.subtitle_path,
         chapters=synthesis_result.chapters,
         segments=segments,  # セグメント単位の背景切り替え用
-        visual_palette=visual_palette,  # カラーパレットを渡す
+        visual_identity=visual_identity,  # ビジュアルアイデンティティを渡す
     )
     
     render_duration = time.time() - render_start
@@ -1685,7 +1689,7 @@ def run_workflow_sync(
                 project_root=PROJECT_ROOT,
                 speed_scale=overrides_obj.speed_scale,
                 segments=scripting_result.segments,  # セグメント情報を渡す
-                visual_palette=scripting_result.visual_palette,  # カラーパレットを渡す
+                visual_identity=scripting_result.visual_identity,  # ビジュアルアイデンティティを渡す
                 callbacks=callbacks
             )
             
@@ -1745,7 +1749,7 @@ def run_workflow_sync(
                         theme=theme,
                         script_summary=script_summary,
                         output_path=thumbnail_bg_path,
-                        visual_palette=scripting_result.visual_palette,  # カラーパレットを渡す
+                        visual_identity=scripting_result.visual_identity,  # ビジュアルアイデンティティを渡す
                         topic_title=scripting_result.script.title
                     )
                     
@@ -2009,7 +2013,7 @@ def run_workflow_sync(
                 output_dir=output_base,
                 segment_bg_generation_time=segment_bg_time,
                 thumbnail_bg_generation_time=thumbnail_bg_generation_time,
-                visual_palette=scripting_result.visual_palette,  # カラーパレットを格納
+                visual_identity=scripting_result.visual_identity,  # ビジュアルアイデンティティを格納
             )
             
         except Exception as e:

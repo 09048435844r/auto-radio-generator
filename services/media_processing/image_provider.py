@@ -19,7 +19,7 @@ from rich.console import Console
 
 from core.models import AppConfig
 from core.models.curation import ScriptSegment
-from core.models.visual import VisualPalette
+from core.models.visual import VisualIdentity, VisualPalette
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -32,15 +32,16 @@ class ImageProvider:
     Supports static (local assets) and dynamic (DALL-E 3) modes.
     """
     
-    def __init__(self, config: AppConfig, visual_palette: Optional[VisualPalette] = None):
+    def __init__(self, config: AppConfig, visual_identity: Optional[VisualIdentity] = None):
         """Initialize image provider
         
         Args:
             config: Application configuration
-            visual_palette: Optional color palette for visual consistency across segments
+            visual_identity: Optional visual identity for brand consistency
         """
         self.config = config
-        self.visual_palette = visual_palette
+        # Issue #2, #6 fix: Single parameter for clarity
+        self.visual_identity = visual_identity
         
         # Get mode from config (default to static)
         self.mode = config.yaml.video_renderer.background_mode
@@ -126,8 +127,12 @@ class ImageProvider:
         if self._generation_start_time is None:
             self._generation_start_time = time.time()
         
-        # 1. Generate prompt from segment with palette
-        prompt = await self.prompt_generator.generate_prompt(segment, self.visual_palette)
+        # 1. Generate prompt from segment with visual identity
+        # Issue #6 fix: Pass only visual_identity
+        prompt = await self.prompt_generator.generate_prompt(
+            segment, 
+            visual_identity=self.visual_identity
+        )
         
         # 2. Check cache (prompt-based key)
         cache_key = self._get_prompt_cache_key(prompt)

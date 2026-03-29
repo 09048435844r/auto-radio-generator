@@ -7,46 +7,66 @@ from google.genai import types
 from rich.console import Console
 
 from core.models import AppConfig
-from core.models.visual import VisualPalette
+from core.models.visual import (
+    VisualIdentity,
+    VisualPalette,
+    DEFAULT_PRIMARY_COLOR,
+    DEFAULT_SECONDARY_COLOR,
+    DEFAULT_COLOR_MOOD,
+    DEFAULT_AESTHETIC,
+    DEFAULT_VISUAL_KEYWORDS,
+)
 
 logger = logging.getLogger(__name__)
 console = Console()
 
 
 class VisualPaletteGenerator:
-    """LLM-based visual palette generator
+    """LLM-based visual identity generator
     
-    Uses Gemini Flash to generate a unique color palette for each video,
-    ensuring visual brand consistency across all segments and thumbnail.
+    Uses Gemini Flash to generate a unique visual brand (color palette + aesthetic)
+    for each video, ensuring visual consistency across all segments and thumbnail.
+    
+    Note: This class generates VisualIdentity but returns VisualPalette for
+    backward compatibility. Use generate_identity() for full VisualIdentity.
     """
     
-    SYSTEM_PROMPT = """You are a professional color theorist and cinematographer specializing in cyberpunk/vaporwave aesthetics.
+    SYSTEM_PROMPT = """You are a professional art director and cinematographer.
 
-Your task is to generate a UNIQUE, THEMATIC color palette for a video based on its theme and content.
+Your task is to generate a UNIFIED VISUAL BRAND for a video, including both COLOR PALETTE and AESTHETIC STYLE.
 
 REQUIREMENTS:
-1. Select TWO neon colors that:
+
+1. COLOR PALETTE - Select TWO neon colors that:
    - Are VISUALLY DISTINCTIVE and create strong contrast
    - Reflect the video's theme and mood
-   - Work well in cyberpunk/vaporwave aesthetic
    - Use RICH, EVOCATIVE descriptors (e.g., "electric cyan" NOT "blue")
+   - Examples: "electric cyan", "hot magenta", "toxic green", "neon pink", "acid yellow"
 
-2. Color naming guidelines:
-   - ✅ GOOD: "electric cyan", "hot magenta", "vivid crimson", "golden amber", "toxic green", "deep violet"
-   - ❌ BAD: "blue", "red", "green", "purple" (too generic)
-   - ✅ GOOD: "neon pink", "acid yellow", "plasma blue", "laser red"
-   - ❌ BAD: "light blue", "dark red" (not evocative enough)
+2. COLOR MOOD - Capture the color-based atmosphere in 2-4 words:
+   - Examples: "futuristic medical", "warm nostalgic", "mysterious paranormal"
 
-3. Mood description:
-   - Capture the overall visual atmosphere in 2-4 words
-   - Examples: "futuristic medical", "dystopian urban", "retro-tech nostalgia"
+3. AESTHETIC STYLE - Choose ONE primary aesthetic that fits the theme:
+   - Clean Minimalist Modern (clinical, professional, high-tech)
+   - Cozy Lo-fi Studio (warm, analog, intimate)
+   - Dystopian Industrial (gritty, mechanical, harsh)
+   - Retro Arcade (pixelated, CRT glow, nostalgic)
+   - Clinical Futuristic (sterile, precision, advanced)
+   - Neon Cyberpunk (urban, neon-lit, futuristic)
+   - Warm Analog (vintage, film grain, organic)
+   - Or create your own that fits the theme
+
+4. VISUAL KEYWORDS - Provide 3-5 keywords defining the aesthetic:
+   - Examples: ["clinical", "sterile", "high-tech"], ["warm", "vintage", "cozy"]
 
 OUTPUT FORMAT (JSON):
 {
   "primary_color": "<rich color descriptor>",
   "secondary_color": "<rich color descriptor>",
-  "mood": "<2-4 word atmosphere>",
-  "reasoning": "<brief explanation of color choice>"
+  "color_mood": "<2-4 word color atmosphere>",
+  "aesthetic": "<aesthetic style name>",
+  "visual_keywords": ["<keyword1>", "<keyword2>", "<keyword3>"],
+  "reasoning": "<brief explanation>"
 }
 
 EXAMPLES:
@@ -55,24 +75,40 @@ Theme: "持続血糖測定器CGMについて"
 {
   "primary_color": "electric cyan",
   "secondary_color": "hot magenta",
-  "mood": "futuristic medical",
-  "reasoning": "Cyan evokes medical technology and data displays, magenta adds human vitality and urgency"
+  "color_mood": "futuristic medical",
+  "aesthetic": "Clean Minimalist Modern",
+  "visual_keywords": ["clinical", "sterile", "high-tech", "precision"],
+  "reasoning": "Medical theme requires clean, professional aesthetic with tech-forward colors"
 }
 
 Theme: "都市伝説の真相"
 {
   "primary_color": "toxic green",
   "secondary_color": "deep violet",
-  "mood": "mysterious paranormal",
-  "reasoning": "Green suggests the uncanny and supernatural, violet adds mystical depth"
+  "color_mood": "mysterious paranormal",
+  "aesthetic": "Dystopian Industrial",
+  "visual_keywords": ["gritty", "dark", "ominous", "urban decay"],
+  "reasoning": "Urban legends call for dark, mysterious aesthetic with supernatural colors"
 }
 
 Theme: "レトロゲームの歴史"
 {
   "primary_color": "neon pink",
   "secondary_color": "acid yellow",
-  "mood": "retro-tech nostalgia",
-  "reasoning": "Pink and yellow evoke 80s arcade aesthetics and vintage CRT displays"
+  "color_mood": "retro-tech nostalgia",
+  "aesthetic": "Retro Arcade",
+  "visual_keywords": ["pixelated", "CRT glow", "80s arcade", "vintage"],
+  "reasoning": "Retro gaming theme calls for warm nostalgic colors and arcade aesthetic"
+}
+
+Theme: "Lo-fiヒップホップの魅力"
+{
+  "primary_color": "warm amber",
+  "secondary_color": "soft violet",
+  "color_mood": "cozy nostalgic",
+  "aesthetic": "Cozy Lo-fi Studio",
+  "visual_keywords": ["warm", "analog", "intimate", "vinyl texture"],
+  "reasoning": "Lo-fi music requires warm, intimate aesthetic with analog feel"
 }
 """
     
@@ -96,36 +132,36 @@ Theme: "レトロゲームの歴史"
         
         logger.info(f"VisualPaletteGenerator initialized with model: {self.model_name}")
     
-    async def generate_palette(
+    async def generate_identity(
         self,
         theme: str,
         script_summary: str
-    ) -> VisualPalette:
-        """Generate unique color palette for video
+    ) -> VisualIdentity:
+        """Generate unique visual identity (color palette + aesthetic) for video
         
         Args:
             theme: Video theme
             script_summary: Script summary (200-300 chars)
         
         Returns:
-            VisualPalette: Generated color palette
+            VisualIdentity: Generated visual identity
         
         Raises:
             RuntimeError: If generation fails
         """
-        logger.info(f"Generating visual palette for theme: {theme}")
-        console.print("[cyan]Generating unique color palette for video...[/cyan]")
+        logger.info(f"Generating visual identity for theme: {theme}")
+        console.print("[cyan]Generating unique visual brand (color + aesthetic) for video...[/cyan]")
         console.print(f"[dim]Theme: {theme}[/dim]")
         
         # Build user message
-        user_message = f"""Generate a unique color palette for this video:
+        user_message = f"""Generate a unified visual brand for this video:
 
 Theme: {theme}
 
 Summary:
 {script_summary[:300]}
 
-Create a visually distinctive palette that captures the essence of this theme."""
+Create a visually distinctive brand (color palette + aesthetic) that captures the essence of this theme."""
         
         try:
             response = await self.client.aio.models.generate_content(
@@ -145,32 +181,77 @@ Create a visually distinctive palette that captures the essence of this theme.""
             
             # Parse JSON response
             import json
-            palette_data = json.loads(response.text)
+            identity_data = json.loads(response.text)
             
-            palette = VisualPalette(
-                primary_color=palette_data["primary_color"],
-                secondary_color=palette_data["secondary_color"],
-                mood=palette_data["mood"],
-                reasoning=palette_data.get("reasoning", "")
+            identity = VisualIdentity(
+                primary_color=identity_data["primary_color"],
+                secondary_color=identity_data["secondary_color"],
+                color_mood=identity_data["color_mood"],
+                aesthetic=identity_data["aesthetic"],
+                visual_keywords=identity_data.get("visual_keywords", []),
+                reasoning=identity_data.get("reasoning", "")
             )
             
-            logger.info(f"Generated palette: {palette}")
-            console.print(f"[green]✓ Palette generated: {palette}[/green]")
-            console.print(f"[dim]Reasoning: {palette.reasoning}[/dim]")
+            logger.info(f"Generated visual identity: {identity}")
+            console.print(f"[green]✓ Visual identity generated: {identity}[/green]")
+            console.print(f"[dim]Reasoning: {identity.reasoning}[/dim]")
             
-            return palette
+            return identity
             
         except Exception as e:
-            logger.error(f"Palette generation failed: {e}")
-            console.print(f"[red]✗ Palette generation failed: {e}[/red]")
+            logger.error(f"Visual identity generation failed: {e}")
+            console.print(f"[red]✗ Visual identity generation failed: {e}[/red]")
             
-            # Fallback to default cyberpunk palette
-            fallback = self._get_fallback_palette(theme)
-            console.print(f"[yellow]Using fallback palette: {fallback}[/yellow]")
+            # Fallback to default cyberpunk identity
+            fallback = self._get_fallback_identity(theme)
+            console.print(f"[yellow]Using fallback visual identity: {fallback}[/yellow]")
             return fallback
     
+    async def generate_palette(
+        self,
+        theme: str,
+        script_summary: str
+    ) -> VisualPalette:
+        """Generate unique color palette for video (backward compatibility wrapper)
+        
+        This method wraps generate_identity() and returns VisualPalette for
+        backward compatibility with existing code.
+        
+        Args:
+            theme: Video theme
+            script_summary: Script summary (200-300 chars)
+        
+        Returns:
+            VisualPalette: Generated visual identity as VisualPalette
+        
+        Raises:
+            RuntimeError: If generation fails
+        """
+        identity = await self.generate_identity(theme, script_summary)
+        # VisualPalette is a subclass of VisualIdentity, so this is safe
+        return identity
+    
+    def _get_fallback_identity(self, theme: str) -> VisualIdentity:
+        """Get fallback visual identity if generation fails
+        
+        Args:
+            theme: Video theme
+        
+        Returns:
+            VisualIdentity: Default cyberpunk visual identity
+        """
+        # Issue #4 fix: Use centralized default constants
+        return VisualIdentity(
+            primary_color=DEFAULT_PRIMARY_COLOR,
+            secondary_color=DEFAULT_SECONDARY_COLOR,
+            color_mood=DEFAULT_COLOR_MOOD,
+            aesthetic=DEFAULT_AESTHETIC,
+            visual_keywords=DEFAULT_VISUAL_KEYWORDS.copy(),
+            reasoning=f"Fallback visual identity for theme: {theme}"
+        )
+    
     def _get_fallback_palette(self, theme: str) -> VisualPalette:
-        """Get fallback palette if generation fails
+        """Get fallback palette if generation fails (backward compatibility)
         
         Args:
             theme: Video theme

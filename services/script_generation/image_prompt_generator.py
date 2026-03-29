@@ -8,7 +8,13 @@ from rich.console import Console
 
 from core.models import AppConfig
 from core.models.curation import ScriptSegment
-from core.models.visual import VisualPalette
+from core.models.visual import (
+    VisualIdentity,
+    VisualPalette,
+    DEFAULT_PRIMARY_COLOR,
+    DEFAULT_SECONDARY_COLOR,
+    DEFAULT_AESTHETIC,
+)
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -21,49 +27,59 @@ class ImagePromptGenerator:
     based on radio script segment content.
     """
     
-    # Default color palette when VisualPalette is not provided
-    DEFAULT_COLOR_PALETTE = "electric cyan and hot magenta neon lighting"
+    # Default color palette when VisualIdentity is not provided
+    # Issue #4 fix: Derive from centralized constants
+    DEFAULT_COLOR_PALETTE = f"{DEFAULT_PRIMARY_COLOR} and {DEFAULT_SECONDARY_COLOR} neon lighting"
     
-    SYSTEM_PROMPT_TEMPLATE = """You are a professional cinematographer creating diverse, narrative-driven shots for AI image generation.
+    SYSTEM_PROMPT_TEMPLATE = """You are a professional cinematographer creating narrative-driven shots for AI image generation.
 
 Your task is to generate a detailed English prompt for FLUX.1 image generation based on the given radio script segment.
 
-VISUAL IDENTITY (MANDATORY):
+UNIFIED VISUAL BRAND (MANDATORY - Apply to ALL shots):
 - Color Palette: {color_palette}
-- Aesthetic: vaporwave / cyberpunk fusion
+- Aesthetic: {aesthetic}
 - Film Quality: shot on Kodak Portra 400 film, subtle film grain, highly detailed
 
-COMPOSITION GUIDELINES (FLEXIBLE):
+NARRATIVE GUIDANCE (FLEXIBLE - Interpret creatively):
 {composition_guidance}
+
+CREATIVE FREEDOM:
+- Camera angles, distances, and framing: YOUR CHOICE based on narrative needs
+- Lighting style and mood: YOUR CHOICE to support the emotional tone
+- Composition and visual storytelling: YOUR CHOICE to maximize impact
+
+CONSTRAINTS (MANDATORY):
+- ALWAYS incorporate the color palette and aesthetic
+- ALWAYS end with: "no text"
+- ALWAYS include film quality keywords
 
 OUTPUT FORMAT:
 Return ONLY the English prompt text, no explanations or additional text.
-ALWAYS end with: "no text"
 
 EXAMPLE OUTPUT:
-"A futuristic cyberpunk medical facility with holographic displays, bathed in electric cyan and hot magenta neon glow, aerial establishing shot capturing the vast complex, dawn atmosphere with soft light filtering through, shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
+"A futuristic medical facility with holographic displays, bathed in electric cyan and hot magenta neon glow, Clean Minimalist Modern aesthetic, clinical and sterile atmosphere, shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
 """
     
     THUMBNAIL_SYSTEM_PROMPT_TEMPLATE = """You are a professional cinematographer specializing in creating eye-catching YouTube thumbnail backgrounds.
 
 Your task is to generate a detailed English prompt for FLUX.1 that creates a visually striking, attention-grabbing background image.
 
-VISUAL IDENTITY (MANDATORY):
+UNIFIED VISUAL BRAND (MANDATORY):
 - Color Palette: {color_palette}
-- Aesthetic: vaporwave / cyberpunk fusion
+- Aesthetic: {aesthetic}
 - Film Quality: shot on Kodak Portra 400 film, subtle film grain, highly detailed
 
 REQUIREMENTS:
 - Focus: Create a SYMBOLIC representation of the video's theme
 - Impact: Maximum visual impact for thumbnail click-through rate
-- Composition: Dynamic, attention-grabbing framing
+- Composition: Dynamic, attention-grabbing framing (YOUR CHOICE)
 - ALWAYS end with: "no text" (MANDATORY)
 
 OUTPUT FORMAT:
 Return ONLY the English prompt text, no explanations.
 
 EXAMPLE:
-"A dramatic cyberpunk medical facility with holographic displays showing glucose data, bathed in electric cyan and hot magenta neon glow, dynamic diagonal composition with depth, futuristic health monitoring devices in sharp focus, shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
+"A dramatic medical facility with holographic displays showing glucose data, bathed in electric cyan and hot magenta neon glow, Clean Minimalist Modern aesthetic, clinical and high-tech atmosphere, shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
 """
     
     def __init__(self, config: AppConfig):
@@ -89,33 +105,40 @@ EXAMPLE:
     async def generate_prompt(
         self,
         segment: ScriptSegment,
-        visual_palette: Optional[VisualPalette] = None
+        visual_identity: Optional[VisualIdentity] = None
     ) -> str:
         """Generate English image prompt from segment content
         
         Args:
             segment: Script segment
-            visual_palette: Optional color palette for visual consistency
+            visual_identity: Optional visual identity for brand consistency
         
         Returns:
             str: English prompt for FLUX.1
         """
+        # Issue #6 fix: Single parameter for clarity
+        identity = visual_identity
+        
         # Extract segment context
         segment_context = self._build_segment_context(segment)
         
         # Get composition guidance based on segment type
         composition_guidance = self._get_composition_guidance(segment.segment_type)
         
-        # Build color palette description
-        if visual_palette:
-            color_palette = visual_palette.to_prompt_fragment()
+        # Build color palette and aesthetic descriptions
+        # Issue #1 fix: No isinstance check needed (VisualPalette is now an alias)
+        if identity:
+            color_palette = identity.to_color_fragment()
+            aesthetic = identity.to_aesthetic_fragment()
         else:
             # Fallback to default cyberpunk colors
             color_palette = self.DEFAULT_COLOR_PALETTE
+            aesthetic = f"{DEFAULT_AESTHETIC} aesthetic"
         
         # Build dynamic system prompt
         system_prompt = self.SYSTEM_PROMPT_TEMPLATE.format(
             color_palette=color_palette,
+            aesthetic=aesthetic,
             composition_guidance=composition_guidance
         )
         
@@ -128,7 +151,7 @@ Topic: {segment.topic_title or "General discussion"}
 Context:
 {segment_context}
 
-Generate a vaporwave/cyberpunk aesthetic prompt following the requirements."""
+Generate a prompt that maintains the unified visual brand while telling a visual story."""
         
         logger.info(f"Generating prompt for segment: {segment.segment_id}")
         console.print(f"[cyan]Generating image prompt for {segment.segment_id}...[/cyan]")
@@ -164,7 +187,7 @@ Generate a vaporwave/cyberpunk aesthetic prompt following the requirements."""
             console.print(f"[red]✗ Prompt generation failed: {e}[/red]")
             
             # Fallback to generic prompt
-            fallback = self._get_fallback_prompt(segment, visual_palette)
+            fallback = self._get_fallback_prompt(segment, identity)
             console.print(f"[yellow]Using fallback prompt[/yellow]")
             return fallback
     
@@ -201,7 +224,7 @@ Generate a vaporwave/cyberpunk aesthetic prompt following the requirements."""
         theme: str,
         script_summary: str,
         topic_title: Optional[str] = None,
-        visual_palette: Optional[VisualPalette] = None
+        visual_identity: Optional[VisualIdentity] = None
     ) -> str:
         """Generate eye-catching thumbnail background prompt
         
@@ -209,21 +232,28 @@ Generate a vaporwave/cyberpunk aesthetic prompt following the requirements."""
             theme: Video theme
             script_summary: Script summary (200-300 chars)
             topic_title: Optional topic title
-            visual_palette: Optional color palette for visual consistency
+            visual_identity: Optional visual identity for brand consistency
         
         Returns:
             str: English prompt for FLUX.1 thumbnail background
         """
-        # Build color palette description
-        if visual_palette:
-            color_palette = visual_palette.to_prompt_fragment()
+        # Issue #6 fix: Single parameter for clarity
+        identity = visual_identity
+        
+        # Build color palette and aesthetic descriptions
+        # Issue #1 fix: No isinstance check needed (VisualPalette is now an alias)
+        if identity:
+            color_palette = identity.to_color_fragment()
+            aesthetic = identity.to_aesthetic_fragment()
         else:
             # Fallback to default cyberpunk colors
             color_palette = self.DEFAULT_COLOR_PALETTE
+            aesthetic = f"{DEFAULT_AESTHETIC} aesthetic"
         
         # Build dynamic system prompt
         system_prompt = self.THUMBNAIL_SYSTEM_PROMPT_TEMPLATE.format(
-            color_palette=color_palette
+            color_palette=color_palette,
+            aesthetic=aesthetic
         )
         
         # Build user message
@@ -270,32 +300,35 @@ Create a SYMBOLIC, eye-catching representation that maximizes click-through rate
             console.print(f"[red]✗ Thumbnail prompt generation failed: {e}[/red]")
             
             # Fallback to generic thumbnail prompt
-            fallback = self._get_fallback_thumbnail_prompt(theme, visual_palette)
+            fallback = self._get_fallback_thumbnail_prompt(theme, identity)
             console.print(f"[yellow]Using fallback thumbnail prompt[/yellow]")
             return fallback
     
     def _get_composition_guidance(self, segment_type: str) -> str:
         """Get composition guidance based on segment type
         
+        Provides mood-based guidance without constraining specific camera angles,
+        lighting, or composition. LLM has creative freedom to interpret.
+        
         Args:
             segment_type: Segment type (intro, deep_dive, conclusion)
         
         Returns:
-            str: Composition guidance for LLM
+            str: Narrative guidance for LLM
         """
         guidance_map = {
-            "intro": """- Camera: Wide establishing shot, aerial or distant perspective to set the scene
-- Mood: Inviting, atmospheric, scene-setting
-- Time: Dawn or dusk lighting for dramatic introduction
-- Focus: Capture the overall environment and context""",
-            "deep_dive": """- Camera: Medium to close-up shots, focus on specific details and subjects
-- Mood: Intense, investigative, analytical
-- Lighting: Focused spotlights, high contrast for emphasis
-- Focus: Highlight key elements and intricate details""",
-            "conclusion": """- Camera: Pull-back to wide shot, reflective perspective
-- Mood: Contemplative, hopeful, lingering atmosphere
-- Time: Sunset or night for emotional resonance
-- Focus: Create sense of closure and reflection"""
+            "intro": """- Narrative Role: Scene-setting, establishing context and atmosphere
+- Emotional Tone: Inviting, atmospheric, welcoming
+- Visual Focus: Overall environment and spatial context
+- Suggested Approach: Create a sense of place and introduction""",
+            "deep_dive": """- Narrative Role: Investigation, detailed exploration of subject matter
+- Emotional Tone: Intense, analytical, focused
+- Visual Focus: Specific details, key elements, intricate aspects
+- Suggested Approach: Highlight important subjects with emphasis""",
+            "conclusion": """- Narrative Role: Reflection, closure, resolution
+- Emotional Tone: Contemplative, hopeful, lingering
+- Visual Focus: Sense of completion, emotional resonance
+- Suggested Approach: Create reflective atmosphere and closure"""
         }
         return guidance_map.get(segment_type, guidance_map["deep_dive"])
     
@@ -329,23 +362,29 @@ Create a SYMBOLIC, eye-catching representation that maximizes click-through rate
     def _get_fallback_thumbnail_prompt(
         self,
         theme: str,
-        visual_palette: Optional[VisualPalette] = None
+        visual_identity: Optional[VisualIdentity] = None
     ) -> str:
         """Get fallback thumbnail prompt if generation fails
         
         Args:
             theme: Video theme
-            visual_palette: Optional color palette
+            visual_identity: Optional visual identity
         
         Returns:
             str: Fallback thumbnail prompt
         """
-        color_desc = visual_palette.to_prompt_fragment() if visual_palette else self.DEFAULT_COLOR_PALETTE
+        # Issue #1 fix: No isinstance check needed
+        if visual_identity:
+            color_desc = visual_identity.to_color_fragment()
+            aesthetic_desc = visual_identity.to_aesthetic_fragment()
+        else:
+            color_desc = self.DEFAULT_COLOR_PALETTE
+            aesthetic_desc = f"{DEFAULT_AESTHETIC} aesthetic"
         
         return (
-            f"A dramatic cyberpunk scene representing '{theme}', "
-            f"neon-lit futuristic environment with holographic displays, "
+            f"A dramatic scene representing '{theme}', "
             f"bathed in {color_desc}, "
+            f"{aesthetic_desc}, "
             f"dynamic composition with depth, "
             f"shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
         )
@@ -353,28 +392,36 @@ Create a SYMBOLIC, eye-catching representation that maximizes click-through rate
     def _get_fallback_prompt(
         self,
         segment: ScriptSegment,
-        visual_palette: Optional[VisualPalette] = None
+        visual_identity: Optional[VisualIdentity] = None
     ) -> str:
         """Get fallback prompt if generation fails
         
         Args:
             segment: Script segment
-            visual_palette: Optional color palette
+            visual_identity: Optional visual identity
         
         Returns:
             str: Fallback prompt
         """
-        # Map segment type to generic scene
+        # Map segment type to generic scene (without specific camera angles)
         scene_map = {
-            "intro": "A futuristic radio studio with neon lights and holographic displays, wide establishing shot",
-            "deep_dive": "A cyberpunk research laboratory with glowing screens and data visualizations, close-up focused view",
-            "conclusion": "A vaporwave sunset cityscape with neon-lit buildings, pull-back reflective shot",
+            "intro": "A futuristic radio studio with neon lights and holographic displays",
+            "deep_dive": "A research laboratory with glowing screens and data visualizations",
+            "conclusion": "A cityscape with neon-lit buildings at dusk",
         }
         
-        scene = scene_map.get(segment.segment_type, "A cyberpunk cityscape at night")
-        color_desc = visual_palette.to_prompt_fragment() if visual_palette else self.DEFAULT_COLOR_PALETTE
+        scene = scene_map.get(segment.segment_type, "A futuristic cityscape")
+        
+        # Issue #1 fix: No isinstance check needed
+        if visual_identity:
+            color_desc = visual_identity.to_color_fragment()
+            aesthetic_desc = visual_identity.to_aesthetic_fragment()
+        else:
+            color_desc = self.DEFAULT_COLOR_PALETTE
+            aesthetic_desc = f"{DEFAULT_AESTHETIC} aesthetic"
         
         return (
             f"{scene}, bathed in {color_desc}, "
+            f"{aesthetic_desc}, "
             f"shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
         )
