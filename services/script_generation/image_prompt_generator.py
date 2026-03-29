@@ -1,5 +1,6 @@
 """Image prompt generator for FLUX.1 background images"""
 import logging
+from typing import Optional
 
 from google import genai
 from google.genai import types
@@ -35,6 +36,26 @@ Return ONLY the English prompt text, no explanations or additional text.
 
 EXAMPLE OUTPUT:
 "A futuristic cyberpunk cityscape at night, neon-lit skyscrapers reflecting in rain-soaked streets, cinematic wide shot, 35mm lens, shallow depth of field, dramatic cinematic lighting, neon reflections, chiaroscuro, shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
+"""
+    
+    THUMBNAIL_SYSTEM_PROMPT = """You are a professional cinematographer specializing in creating eye-catching YouTube thumbnail backgrounds.
+
+Your task is to generate a detailed English prompt for FLUX.1 that creates a visually striking, attention-grabbing background image.
+
+REQUIREMENTS:
+- Style: vaporwave / cyberpunk aesthetic (MANDATORY)
+- Shot type: cinematic wide shot, 35mm lens, shallow depth of field (MANDATORY)
+- Lighting: dramatic cinematic lighting, neon reflections, chiaroscuro (MANDATORY)
+- Film quality: shot on Kodak Portra 400 film, subtle film grain, highly detailed (MANDATORY)
+- Focus: Create a SYMBOLIC representation of the video's theme
+- Impact: Maximum visual impact for thumbnail click-through rate
+- ALWAYS end with: "no text" (MANDATORY)
+
+OUTPUT FORMAT:
+Return ONLY the English prompt text, no explanations.
+
+EXAMPLE:
+"A dramatic cyberpunk medical facility with holographic displays showing glucose data, neon-lit laboratory equipment, futuristic health monitoring devices, cinematic wide shot, 35mm lens, shallow depth of field, dramatic cinematic lighting, neon reflections, chiaroscuro, shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
 """
     
     def __init__(self, config: AppConfig):
@@ -145,6 +166,119 @@ Generate a vaporwave/cyberpunk aesthetic prompt following the requirements."""
                 context_parts.append(f"Discussion: {dialogue_sample[:200]}...")
         
         return "\n".join(context_parts) if context_parts else "General radio discussion"
+    
+    async def generate_thumbnail_prompt(
+        self,
+        theme: str,
+        script_summary: str,
+        topic_title: Optional[str] = None
+    ) -> str:
+        """Generate eye-catching thumbnail background prompt
+        
+        Args:
+            theme: Video theme
+            script_summary: Script summary (200-300 chars)
+            topic_title: Optional topic title
+        
+        Returns:
+            str: English prompt for FLUX.1 thumbnail background
+        """
+        # Build user message
+        user_message = f"""Generate a visually striking thumbnail background prompt for this video:
+
+Theme: {theme}
+Topic: {topic_title or theme}
+
+Summary:
+{script_summary[:300]}
+
+Create a SYMBOLIC, eye-catching representation that maximizes click-through rate."""
+        
+        logger.info(f"Generating thumbnail prompt for theme: {theme}")
+        console.print(f"[cyan]Generating thumbnail background prompt...[/cyan]")
+        
+        try:
+            response = await self.client.aio.models.generate_content(
+                model=self.model_name,
+                contents=[
+                    types.Content(
+                        role="user",
+                        parts=[types.Part(text=self.THUMBNAIL_SYSTEM_PROMPT + "\n\n" + user_message)]
+                    )
+                ],
+                config=types.GenerateContentConfig(
+                    temperature=0.9,  # Higher creativity for thumbnails
+                    max_output_tokens=256,
+                )
+            )
+            
+            prompt = response.text.strip()
+            
+            # Enforce mandatory keywords
+            prompt = self._enforce_mandatory_keywords(prompt)
+            
+            logger.info(f"Generated thumbnail prompt: {prompt[:100]}...")
+            console.print(f"[dim]Thumbnail prompt: {prompt[:80]}...[/dim]")
+            
+            return prompt
+            
+        except Exception as e:
+            logger.error(f"Thumbnail prompt generation failed: {e}")
+            console.print(f"[red]✗ Thumbnail prompt generation failed: {e}[/red]")
+            
+            # Fallback to generic thumbnail prompt
+            fallback = self._get_fallback_thumbnail_prompt(theme)
+            console.print(f"[yellow]Using fallback thumbnail prompt[/yellow]")
+            return fallback
+    
+    def _enforce_mandatory_keywords(self, prompt: str) -> str:
+        """Enforce mandatory style keywords in prompt
+        
+        Args:
+            prompt: Generated prompt
+        
+        Returns:
+            str: Prompt with mandatory keywords enforced
+        """
+        mandatory_keywords = [
+            "cinematic wide shot",
+            "35mm lens",
+            "shallow depth of field",
+            "dramatic cinematic lighting",
+            "neon reflections",
+            "chiaroscuro",
+            "shot on Kodak Portra 400 film",
+            "subtle film grain",
+            "highly detailed"
+        ]
+        
+        # Add missing keywords
+        for keyword in mandatory_keywords:
+            if keyword.lower() not in prompt.lower():
+                prompt += f", {keyword}"
+        
+        # Ensure "no text" is at the end
+        if "no text" not in prompt.lower():
+            prompt += ", no text"
+        
+        return prompt
+    
+    def _get_fallback_thumbnail_prompt(self, theme: str) -> str:
+        """Get fallback thumbnail prompt if generation fails
+        
+        Args:
+            theme: Video theme
+        
+        Returns:
+            str: Fallback thumbnail prompt
+        """
+        return (
+            f"A dramatic cyberpunk scene representing '{theme}', "
+            f"neon-lit futuristic environment with holographic displays, "
+            f"cinematic wide shot, 35mm lens, shallow depth of field, "
+            f"dramatic cinematic lighting, neon reflections, chiaroscuro, "
+            f"shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
+        )
     
     def _get_fallback_prompt(self, segment: ScriptSegment) -> str:
         """Get fallback prompt if generation fails

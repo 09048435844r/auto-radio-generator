@@ -163,7 +163,6 @@ class VideoRendererConfig(BaseModel):
     output_audio_codec: str = "aac"
     output_audio_bitrate: str = "192k"
     use_gpu: bool = True  # GPU加速（NVENC）を使用
-    background_mode: Literal["static", "dynamic"] = "static"  # Background image mode
     bgm_volume: float = 0.15
     bgm_fade_in_sec: float = 3.0
     bgm_fade_out_sec: float = 3.0
@@ -171,6 +170,9 @@ class VideoRendererConfig(BaseModel):
     enable_spectrum: bool = True
     spectrum_color: str = "0x00FF88"
     spectrum_mode: str = "cline"
+    # 背景画像生成設定
+    background_mode: str = "static"  # "static" or "dynamic"
+    thumbnail_background_mode: str = "static"  # "static" or "dynamic"
 
 
 class FluxConfig(BaseModel):

@@ -32,7 +32,7 @@ from core.interfaces import ResearchResult
 from core.settings_manager import SettingsManager
 from services.research import PerplexityResearcher
 from services.script_generation import GeminiClient
-from services.media_processing import ThumbnailGenerator
+from services.media_processing import ThumbnailGenerator, ThumbnailBackgroundGenerator
 from google.genai import types
 import json
 import os
@@ -1867,8 +1867,87 @@ def regenerate_thumbnail_from_state(
         # エラーハンドリングと詳細ログ
         import traceback
         error_detail = traceback.format_exc()
-        error_log = f"❌ サムネイル再作成中にエラーが発生しました:\n{str(e)}\n\n詳細:\n{error_detail}"
-        return None, None, None, state, error_log
+        log_messages.append(f"❌ エラー発生: {str(e)}")
+        log_messages.append(f"詳細:\n{error_detail}")
+        return None, None, None, None, "\n".join(log_messages)
+
+
+async def regenerate_thumbnail_background_async(
+    state: Optional[ThumbnailRegenerationState]
+) -> tuple[Optional[str], Optional[str], str]:
+    """Regenerate thumbnail background using FLUX.1
+    
+    Args:
+        state: Thumbnail regeneration state
+    
+    Returns:
+        tuple: (thumbnail_bg_path, thumbnail_path, log_message)
+    """
+    log_messages = []
+    
+    if state is None:
+        return None, None, "⚠️ 動画生成が完了していません。先にメインの動画生成を実行してください。"
+    
+    # Validate required fields
+    required_fields = ['theme', 'output_dir', 'background_path', 'base_title']
+    missing_fields = [field for field in required_fields if not getattr(state, field, None)]
+    if missing_fields:
+        return None, None, f"⚠️ 必要な情報が不足しています: {', '.join(missing_fields)}"
+    
+    try:
+        log_messages.append("🎨 サムネイル背景を再生成中（FLUX.1）...")
+        log_messages.append(f"テーマ: {state.theme}")
+        
+        config = load_config()
+        
+        # Generate background
+        thumbnail_bg_generator = ThumbnailBackgroundGenerator(config)
+        output_dir = Path(state.output_dir)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        thumbnail_bg_path = output_dir / f"thumbnail_bg_regenerated_{timestamp}.png"
+        
+        # Use script summary or theme
+        script_summary = state.script_summary[:300] if state.script_summary else state.theme
+        
+        background_image = await thumbnail_bg_generator.generate_background(
+            theme=state.theme,
+            script_summary=script_summary,
+            output_path=thumbnail_bg_path,
+            topic_title=state.base_title
+        )
+        
+        log_messages.append(f"✓ 背景生成完了: {background_image.name}")
+        
+        # Regenerate thumbnail with new background
+        log_messages.append("🖼️ 新しい背景でサムネイルを生成中...")
+        thumbnail_generator = ThumbnailGenerator()
+        thumbnail_path, video_title, thumbnail_title = thumbnail_generator.regenerate_with_new_title(
+            theme=state.theme,
+            script_summary=script_summary,
+            output_dir=state.output_dir,
+            background_path=str(background_image),
+            base_title=state.base_title,
+            generation_count=state.generation_count
+        )
+        
+        log_messages.append(f"✓ サムネイル生成完了: {Path(thumbnail_path).name}")
+        log_messages.append(f"動画タイトル: {video_title}")
+        log_messages.append(f"サムネイル文字: {thumbnail_title}")
+        
+        # Return consistent str types for both paths
+        return str(background_image), str(thumbnail_path), "\n".join(log_messages)
+        
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        log_messages.append(f"❌ エラー発生: {str(e)}")
+        log_messages.append(f"詳細:\n{error_detail}")
+        return None, None, "\n".join(log_messages)
+
+
+def regenerate_thumbnail_background(state):
+    """Sync wrapper for async function"""
+    return asyncio.run(regenerate_thumbnail_background_async(state))
 
 
 def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
@@ -2139,6 +2218,25 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
                             regenerated_title = gr.Textbox(label="生成されたタイトル", interactive=False, lines=2)
                             regenerated_thumbnail_title = gr.Textbox(label="サムネイル文字", interactive=False)
                             regenerate_status = gr.Textbox(label="処理ログ", lines=5, interactive=False)
+                
+                with gr.Accordion("🎨 サムネイル背景再生成（FLUX.1）", open=False):
+                    gr.Markdown(
+                        """
+                        **FLUX.1で新しい背景画像を生成**
+                        - 動画のテーマに基づいて、インパクトのある背景を自動生成
+                        - 生成後、新しいタイトルでサムネイルも再作成されます
+                        - ⚠️ Forge APIが起動している必要があります
+                        """
+                    )
+                    
+                    regenerate_bg_btn = gr.Button("🎨 背景を再生成（FLUX.1）", variant="primary", size="lg")
+                    
+                    with gr.Row():
+                        with gr.Column():
+                            bg_preview = gr.Image(label="生成された背景", interactive=False)
+                        with gr.Column():
+                            bg_thumbnail_preview = gr.Image(label="新しいサムネイル", interactive=False)
+                            bg_status = gr.Textbox(label="処理ログ", lines=5, interactive=False)
         
         # リサーチJSON表示（横いっぱいに表示）
         with gr.Accordion("🔍 リサーチ結果生データ (JSON)", open=False):
@@ -2378,6 +2476,10 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
         "regenerated_title": regenerated_title,
         "regenerated_thumbnail_title": regenerated_thumbnail_title,
         "regenerate_status": regenerate_status,
+        "regenerate_bg_btn": regenerate_bg_btn,
+        "bg_preview": bg_preview,
+        "bg_thumbnail_preview": bg_thumbnail_preview,
+        "bg_status": bg_status,
         # ステップモードコンポーネント（手動タブから統合）
         "step_load_research_btn": step_load_research_btn,
         "step_research_input": step_research_input,
@@ -2651,6 +2753,17 @@ def create_ui() -> gr.Blocks:
                 generator_components["regenerated_thumbnail_title"],
                 thumbnail_state,  # Stateを更新
                 generator_components["regenerate_status"],  # ログ出力を追加
+            ]
+        )
+        
+        # サムネイル背景再生成（FLUX.1）
+        generator_components["regenerate_bg_btn"].click(
+            fn=regenerate_thumbnail_background,
+            inputs=[thumbnail_state],
+            outputs=[
+                generator_components["bg_preview"],
+                generator_components["bg_thumbnail_preview"],
+                generator_components["bg_status"],
             ]
         )
 

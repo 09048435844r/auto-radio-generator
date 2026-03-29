@@ -429,7 +429,10 @@ video_renderer:
   bgm_fade_out_sec: 3.0      # フェードアウト時間（秒）
   
   # セグメント単位の背景画像切り替え設定
-  background_mode: "static"  # "static": ローカルアセット選択 | "dynamic": DALL-E 3動的生成
+  background_mode: "static"  # "static": ローカルアセット選択 | "dynamic": FLUX.1動的生成
+  
+  # サムネイル背景生成設定
+  thumbnail_background_mode: "static"  # "static": 既存画像使用 | "dynamic": FLUX.1動的生成
   
   # ジングル設定（セグメント境界での演出）
   enable_jingles: true       # ジングル挿入を有効化
