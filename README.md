@@ -14,7 +14,12 @@ Perplexity + **複数LLM (Gemini/OpenAI/Anthropic)** + VOICEVOX + FFmpeg + **FLU
 - ✅ **フォールバック機能の強化**: FLUX.1失敗時に静的背景画像へ自動切り替え
 
 ### コード品質の向上
-- ✅ **Visual Paletteリファクタリング**: 型安全性の向上とアーキテクチャのクリーンアップ
+- ✅ **Visual Identity リファクタリング完了**: 型安全性の向上とアーキテクチャのクリーンアップ
+  - `VisualPalette` を Type Alias に変更し、`isinstance()` チェックを不要に
+  - デフォルト値を定数化し、複数箇所での不整合を防止
+  - `to_prompt_fragment()` が色+aestheticを返すように修正（真の後方互換性）
+  - 冗長なパラメータを削除し、インターフェースを簡素化
+  - すべての型アノテーションを `Optional[VisualIdentity]` に統一
 - ✅ **データの不変性確保**: Phase 2.5を廃止し、適切な非同期コンテキストで処理
 - ✅ **DRY原則の適用**: 重複コードを定数化し保守性を向上
 
