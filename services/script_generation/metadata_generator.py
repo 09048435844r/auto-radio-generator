@@ -258,7 +258,7 @@ class MetadataGenerator:
                 # YouTube投稿時のエラーを防ぐため、空文字列ではなく意味のある値を返す
                 fallback_title = f"{theme}について" if len(theme) <= 40 else f"{theme[:37]}..."
                 fallback_thumbnail = theme[:15] if len(theme) <= 15 else theme[:12] + "..."
-                fallback_description = f"「{theme}」に関する解説動画です。\n\n※ メタデータ生成に失敗したため、デフォルト値を使用しています。"
+                fallback_description = f"「{theme}」について、ずんだもんとめたんが詳しく解説します。"
                 fallback_hashtags = ["解説", "ラジオ", "AI生成"]
                 
                 return _MetadataSchema(

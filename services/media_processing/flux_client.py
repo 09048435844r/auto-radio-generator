@@ -118,13 +118,58 @@ class FluxClient:
         import time
         gen_start = time.time()
         
+        # Configure timeout with separate connect/read limits
+        timeout_config = httpx.Timeout(
+            connect=10.0,  # Connection timeout: 10 seconds
+            read=self.timeout,  # Read timeout: from config (default 300s)
+            write=10.0,  # Write timeout: 10 seconds
+            pool=5.0  # Pool timeout: 5 seconds
+        )
+        
+        # Retry logic for timeout exceptions
+        max_retries = 2
+        last_exception = None
+        
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=timeout_config) as client:
+                    response = await client.post(
+                        f"{self.base_url}/sdapi/v1/txt2img",
+                        json=payload
+                    )
+                    response.raise_for_status()
+                    break  # Success, exit retry loop
+            except httpx.TimeoutException as e:
+                last_exception = e
+                if attempt < max_retries - 1:
+                    logger.warning(f"FLUX.1 timeout on attempt {attempt + 1}/{max_retries}, retrying...")
+                    console.print(f"[yellow]⚠ Timeout ({attempt + 1}/{max_retries}), retrying...[/yellow]")
+                    continue
+                else:
+                    # Final attempt failed
+                    error_msg = f"Forge API timeout after {self.timeout}s (all {max_retries} attempts failed)"
+                    logger.error(error_msg)
+                    console.print(f"[red]✗ {error_msg}[/red]")
+                    raise RuntimeError(error_msg) from e
+            except (httpx.HTTPStatusError, Exception) as e:
+                # Non-timeout errors: fail immediately without retry
+                last_exception = e
+                break
+        
+        # Handle non-timeout errors after retry loop
+        if last_exception and not isinstance(last_exception, httpx.TimeoutException):
+            if isinstance(last_exception, httpx.HTTPStatusError):
+                error_msg = f"Forge API error: {last_exception.response.status_code}"
+                logger.error(error_msg)
+                console.print(f"[red]✗ {error_msg}[/red]")
+                raise RuntimeError(error_msg) from last_exception
+            else:
+                error_msg = f"Image generation failed: {last_exception}"
+                logger.error(error_msg)
+                console.print(f"[red]✗ {error_msg}[/red]")
+                raise RuntimeError(error_msg) from last_exception
+        
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                response = await client.post(
-                    f"{self.base_url}/sdapi/v1/txt2img",
-                    json=payload
-                )
-                response.raise_for_status()
                 
                 result = response.json()
                 
@@ -177,22 +222,12 @@ class FluxClient:
                 )
                 
                 return output_path, metadata
-                
-        except httpx.TimeoutException:
-            error_msg = f"Forge API timeout after {self.timeout}s"
-            logger.error(error_msg)
-            console.print(f"[red]✗ {error_msg}[/red]")
-            raise RuntimeError(error_msg)
-        except httpx.HTTPStatusError as e:
-            error_msg = f"Forge API error: {e.response.status_code}"
-            logger.error(error_msg)
-            console.print(f"[red]✗ {error_msg}[/red]")
-            raise RuntimeError(error_msg)
         except Exception as e:
-            error_msg = f"Image generation failed: {e}"
+            # Catch any errors during image processing (after successful API call)
+            error_msg = f"Image processing failed: {e}"
             logger.error(error_msg)
             console.print(f"[red]✗ {error_msg}[/red]")
-            raise RuntimeError(error_msg)
+            raise RuntimeError(error_msg) from e
     
     def _extract_seed_from_response(self, response_data: dict) -> int:
         """Extract actual seed value from Forge API response

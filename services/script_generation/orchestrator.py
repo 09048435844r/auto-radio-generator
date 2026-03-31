@@ -7,6 +7,7 @@ Hierarchical Agentic Workflow の司令塔。
 
 文脈の連続性は各セグメントの context_summary を次セグメントに渡すことで維持する。
 """
+import asyncio
 import logging
 import time
 from typing import Optional, Callable, TYPE_CHECKING
@@ -277,7 +278,7 @@ class ScriptOrchestrator(IScriptOrchestrator):
                 if attempt < max_retries - 1:
                     wait = 2 ** attempt
                     log(f"[yellow]⚠ {label} 失敗 ({attempt + 1}/{max_retries})。{wait}秒後にリトライ: {e}[/yellow]")
-                    time.sleep(wait)
+                    await asyncio.sleep(wait)
                 else:
                     log(f"[red]✗ {label} リトライ上限到達: {e}[/red]")
         raise last_exc

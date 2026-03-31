@@ -4,6 +4,7 @@ Hierarchical Agentic Workflow の Step 1。
 膨大なリサーチデータを受け取り、ずんだもんとめたんが深く語り合うべき
 2〜3個のトピックを意外性・具体性・議論性の3軸で評価・選定する。
 """
+import asyncio
 import json
 import logging
 from typing import Optional, TYPE_CHECKING
@@ -82,7 +83,7 @@ class TopicCurator:
         user_prompt = self._build_curation_user_prompt(research_data, count)
 
         try:
-            response_text, usage = self._call_api(system_prompt, user_prompt)
+            response_text, usage = await self._call_api(system_prompt, user_prompt)
             self.last_usage = usage
             result = self._parse_curation_response(response_text)
 
@@ -130,9 +131,8 @@ class TopicCurator:
         )
         return prompt
 
-    def _call_api(self, system_prompt: str, user_prompt: str) -> tuple[str, LLMUsage]:
+    async def _call_api(self, system_prompt: str, user_prompt: str) -> tuple[str, LLMUsage]:
         """Gemini APIを呼び出してキュレーション結果を取得"""
-        import time
 
         config_params = {
             "max_output_tokens": 8192,  # JSON途中切断を防ぐため増量
@@ -143,6 +143,7 @@ class TopicCurator:
         }
 
         max_retries = 2
+        response = None
         for attempt in range(max_retries):
             try:
                 response = self.client.models.generate_content(
@@ -162,7 +163,7 @@ class TopicCurator:
                         and attempt < max_retries - 1:
                     wait_time = 2 ** attempt
                     console.print(f"[yellow]接続エラー ({attempt + 1}/{max_retries})。{wait_time}秒後にリトライ...[/yellow]")
-                    time.sleep(wait_time)
+                    await asyncio.sleep(wait_time)
                     continue
                 raise
 
