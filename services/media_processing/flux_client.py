@@ -1,13 +1,16 @@
 """FLUX.1 image generation client for Stable Diffusion WebUI Forge API"""
 import base64
+import json
 import logging
 import tempfile
 from pathlib import Path
+from typing import Tuple
 
 import httpx
 from rich.console import Console
 
 from core.models import AppConfig
+from core.models.generation_metadata import GenerationMetadata
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -69,15 +72,27 @@ class FluxClient:
             console.print(f"[yellow]⚠ Forge API not available: {e}[/yellow]")
         return False
     
-    async def generate_image(self, prompt: str, output_path: Path) -> Path:
-        """Generate image via Forge API
+    async def generate_image(
+        self,
+        prompt: str,
+        output_path: Path,
+        context_type: str = "segment",
+        segment_id: str = None,
+        segment_type: str = None,
+        visual_identity: dict = None,
+    ) -> Tuple[Path, GenerationMetadata]:
+        """Generate image via Forge API and return metadata
         
         Args:
             prompt: English prompt for image generation
             output_path: Path to save generated image
+            context_type: Context type ("segment" or "thumbnail")
+            segment_id: Optional segment identifier
+            segment_type: Optional segment type
+            visual_identity: Optional visual identity dict
         
         Returns:
-            Path: Path to generated image
+            Tuple[Path, GenerationMetadata]: Generated image path and metadata
         
         Raises:
             RuntimeError: If image generation fails
@@ -99,6 +114,9 @@ class FluxClient:
         logger.info(f"Generating image: {self.width}x{self.height}, {self.steps} steps")
         console.print(f"[cyan]Generating image via FLUX.1 [schnell]...[/cyan]")
         console.print(f"[dim]Prompt: {prompt[:80]}...[/dim]")
+        
+        import time
+        gen_start = time.time()
         
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -138,10 +156,27 @@ class FluxClient:
                 # Atomic rename (replaces existing file if present)
                 tmp_path.replace(output_path)
                 
+                gen_time = time.time() - gen_start
+                
                 logger.info(f"Image saved: {output_path}")
                 console.print(f"[green]✓ Image generated: {output_path.name}[/green]")
                 
-                return output_path
+                # Extract actual seed from API response
+                actual_seed = self._extract_seed_from_response(result)
+                
+                # Build metadata
+                metadata = self._build_metadata(
+                    image_path=str(output_path),
+                    context_type=context_type,
+                    segment_id=segment_id,
+                    segment_type=segment_type,
+                    prompt=prompt,
+                    visual_identity=visual_identity or {},
+                    seed=actual_seed,
+                    generation_time_sec=gen_time,
+                )
+                
+                return output_path, metadata
                 
         except httpx.TimeoutException:
             error_msg = f"Forge API timeout after {self.timeout}s"
@@ -158,3 +193,94 @@ class FluxClient:
             logger.error(error_msg)
             console.print(f"[red]✗ {error_msg}[/red]")
             raise RuntimeError(error_msg)
+    
+    def _extract_seed_from_response(self, response_data: dict) -> int:
+        """Extract actual seed value from Forge API response
+        
+        Args:
+            response_data: Full API response dict
+        
+        Returns:
+            int: Actual seed used (-1 if extraction fails)
+        """
+        try:
+            # Forge API returns 'info' as a JSON string
+            info_str = response_data.get("info", "")
+            if not info_str:
+                logger.warning("No 'info' field in Forge API response, using seed=-1")
+                return -1
+            
+            # Parse info JSON
+            info_data = json.loads(info_str)
+            
+            # Extract seed
+            seed = info_data.get("seed", -1)
+            
+            if seed == -1:
+                logger.warning("No 'seed' field in Forge API info, using seed=-1")
+            else:
+                logger.debug(f"Extracted actual seed from Forge API: {seed}")
+            
+            return seed
+            
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse Forge API 'info' field: {e}, using seed=-1")
+            return -1
+        except Exception as e:
+            logger.warning(f"Unexpected error extracting seed: {e}, using seed=-1")
+            return -1
+    
+    def _build_metadata(
+        self,
+        image_path: str,
+        context_type: str,
+        segment_id: str,
+        segment_type: str,
+        prompt: str,
+        visual_identity: dict,
+        seed: int,
+        generation_time_sec: float,
+    ) -> GenerationMetadata:
+        """Build GenerationMetadata from generation parameters
+        
+        Args:
+            image_path: Path to generated image
+            context_type: Context type
+            segment_id: Segment identifier
+            segment_type: Segment type
+            prompt: Full prompt
+            visual_identity: Visual identity dict
+            seed: Actual seed used
+            generation_time_sec: Generation time
+        
+        Returns:
+            GenerationMetadata: Metadata instance
+        """
+        resolution = f"{self.width}x{self.height}"
+        
+        if context_type == "segment":
+            return GenerationMetadata.create_from_segment(
+                image_path=image_path,
+                segment_id=segment_id,
+                segment_type=segment_type,
+                prompt=prompt,
+                visual_identity=visual_identity,
+                seed=seed,
+                generation_time_sec=generation_time_sec,
+                resolution=resolution,
+                steps=self.steps,
+                sampler=self.sampler_name,
+                cfg_scale=self.cfg_scale,
+            )
+        else:
+            return GenerationMetadata.create_from_thumbnail(
+                image_path=image_path,
+                prompt=prompt,
+                visual_identity=visual_identity,
+                seed=seed,
+                generation_time_sec=generation_time_sec,
+                resolution=resolution,
+                steps=self.steps,
+                sampler=self.sampler_name,
+                cfg_scale=self.cfg_scale,
+            )

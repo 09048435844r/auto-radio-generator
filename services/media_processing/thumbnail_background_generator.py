@@ -9,6 +9,7 @@ from core.models import AppConfig
 from core.models.visual import VisualIdentity, VisualPalette
 from services.media_processing.flux_client import FluxClient
 from services.script_generation.image_prompt_generator import ImagePromptGenerator
+from services.media_processing.prompt_ops_logger import PromptOpsLogger
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -21,15 +22,24 @@ class ThumbnailBackgroundGenerator:
     based on video theme and script content.
     """
     
-    def __init__(self, config: AppConfig):
+    def __init__(self, config: AppConfig, output_dir: Optional[Path] = None):
         """Initialize thumbnail background generator
         
         Args:
             config: Application configuration
+            output_dir: Optional output directory for PromptOps logging
         """
         self.config = config
         self.prompt_generator = ImagePromptGenerator(config)
         self.flux_client = FluxClient(config)
+        
+        # Initialize PromptOps logger (optional, fail-safe)
+        self.logger = None
+        if output_dir:
+            try:
+                self.logger = PromptOpsLogger(output_dir)
+            except Exception as e:
+                logger.warning(f"Failed to initialize PromptOps logger (non-fatal): {e}")
     
     async def generate(
         self,
@@ -73,11 +83,29 @@ class ThumbnailBackgroundGenerator:
         
         console.print(f"[dim]Prompt: {prompt[:80]}...[/dim]")
         
-        # 2. Generate image via FLUX.1
-        image_path = await self.flux_client.generate_image(prompt, output_path)
+        # Prepare visual identity dict for metadata
+        vi_dict = {}
+        if identity:
+            vi_dict = {
+                "primary_color": identity.primary_color,
+                "secondary_color": identity.secondary_color,
+                "aesthetic": identity.aesthetic,
+            }
+        
+        # 2. Generate image via FLUX.1 with metadata
+        image_path, metadata = await self.flux_client.generate_image(
+            prompt=prompt,
+            output_path=output_path,
+            context_type="thumbnail",
+            visual_identity=vi_dict,
+        )
         
         console.print(f"[green]✓ Thumbnail background generated: {image_path.name}[/green]")
         logger.info(f"Thumbnail background generated: {image_path}")
+        
+        # Log to PromptOps (fail-safe)
+        if self.logger:
+            self.logger.log_generation(metadata)
         
         return image_path
     

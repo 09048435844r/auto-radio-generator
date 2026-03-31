@@ -35,7 +35,6 @@ async def mux_tracks(
         "-c:v", "copy",  # No re-encoding (fast)
         "-c:a", "aac",   # Convert to AAC for MP4 compatibility
         "-b:a", "192k",  # Audio bitrate
-        "-shortest",     # Stop at shortest stream
         str(output_path)
     ]
     

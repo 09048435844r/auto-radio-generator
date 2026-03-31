@@ -146,6 +146,7 @@ class VideoTrackRenderer:
             "-crf", "23",
             "-r", str(timeline.fps),
             "-pix_fmt", "yuv420p",
+            "-t", str(timeline.total_duration_sec),  # Explicit duration to match audio
             "-an",  # No audio
             str(output_path)
         ]

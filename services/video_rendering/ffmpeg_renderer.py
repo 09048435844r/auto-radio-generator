@@ -219,7 +219,9 @@ class FfmpegRenderer(IVideoRenderer):
             # ========== Phase A: Timeline Calculation ==========
             console.print("[cyan]Phase A: タイムライン計算中...[/cyan]")
             
-            image_provider = ImageProvider(self.config, visual_identity=visual_identity)
+            # Extract output_dir from output_path for PromptOps logging
+            output_dir = output_path.parent
+            image_provider = ImageProvider(self.config, visual_identity=visual_identity, output_dir=output_dir)
             jingle_provider = JingleProvider()
             
             timeline = await self.timeline_calculator.calculate_timeline(

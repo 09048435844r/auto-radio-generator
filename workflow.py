@@ -1741,7 +1741,7 @@ def run_workflow_sync(
                     script_summary = scripting_result.script.description[:300] if scripting_result.script.description else theme
                     
                     # Generate background via FLUX.1
-                    thumbnail_bg_generator = ThumbnailBackgroundGenerator(config)
+                    thumbnail_bg_generator = ThumbnailBackgroundGenerator(config, output_dir=output_base)
                     thumbnail_bg_path = output_base / "thumbnail_bg.png"
                     
                     # Use await instead of asyncio.run() to avoid nested event loop error

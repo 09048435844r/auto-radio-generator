@@ -20,6 +20,7 @@ from rich.console import Console
 from core.models import AppConfig
 from core.models.curation import ScriptSegment
 from core.models.visual import VisualIdentity, VisualPalette
+from services.media_processing.prompt_ops_logger import PromptOpsLogger
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -32,12 +33,13 @@ class ImageProvider:
     Supports static (local assets) and dynamic (DALL-E 3) modes.
     """
     
-    def __init__(self, config: AppConfig, visual_identity: Optional[VisualIdentity] = None):
+    def __init__(self, config: AppConfig, visual_identity: Optional[VisualIdentity] = None, output_dir: Optional[Path] = None):
         """Initialize image provider
         
         Args:
             config: Application configuration
             visual_identity: Optional visual identity for brand consistency
+            output_dir: Optional output directory for PromptOps logging
         """
         self.config = config
         # Issue #2, #6 fix: Single parameter for clarity
@@ -49,6 +51,14 @@ class ImageProvider:
         self.static_images_dir = Path("assets/backgrounds")
         self.cache_dir = Path("output/.image_cache")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Initialize PromptOps logger (optional, fail-safe)
+        self.logger = None
+        if output_dir:
+            try:
+                self.logger = PromptOpsLogger(output_dir)
+            except Exception as e:
+                logger.warning(f"Failed to initialize PromptOps logger (non-fatal): {e}")
         
         # Track wall-clock time for all image generation
         self._generation_start_time: Optional[float] = None
@@ -144,15 +154,34 @@ class ImageProvider:
             return cache_path
         
         # 3. Generate image via FluxClient
-        gen_start = time.time()
         try:
             console.print(f"[cyan]Generating image for {segment.segment_id}...[/cyan]")
             
-            image_path = await self.flux_client.generate_image(prompt, cache_path)
+            # Prepare visual identity dict for metadata
+            vi_dict = {}
+            if self.visual_identity:
+                vi_dict = {
+                    "primary_color": self.visual_identity.primary_color,
+                    "secondary_color": self.visual_identity.secondary_color,
+                    "aesthetic": self.visual_identity.aesthetic,
+                }
             
-            gen_time = time.time() - gen_start
-            console.print(f"[green]✓ Generated: {image_path.name} ({gen_time:.1f}s)[/green]")
-            logger.info(f"Image generated for segment {segment.segment_id}: {image_path} ({gen_time:.1f}s)")
+            # Generate image with metadata
+            image_path, metadata = await self.flux_client.generate_image(
+                prompt=prompt,
+                output_path=cache_path,
+                context_type="segment",
+                segment_id=segment.segment_id,
+                segment_type=segment.segment_type,
+                visual_identity=vi_dict,
+            )
+            
+            console.print(f"[green]✓ Generated: {image_path.name} ({metadata.generation_time_sec:.1f}s)[/green]")
+            logger.info(f"Image generated for segment {segment.segment_id}: {image_path} ({metadata.generation_time_sec:.1f}s)")
+            
+            # Log to PromptOps (fail-safe)
+            if self.logger:
+                self.logger.log_generation(metadata)
             
             # Update end time for wall-clock tracking
             self._generation_end_time = time.time()
@@ -161,11 +190,10 @@ class ImageProvider:
             
         except Exception as e:
             # Track time even on failure
-            gen_time = time.time() - gen_start
             self._generation_end_time = time.time()
             
-            logger.error(f"Dynamic image generation failed after {gen_time:.1f}s: {e}, falling back to static mode")
-            console.print(f"[yellow]⚠ Generation failed ({gen_time:.1f}s), using static fallback[/yellow]")
+            logger.error(f"Dynamic image generation failed: {e}, falling back to static mode")
+            console.print(f"[yellow]⚠ Generation failed, using static fallback[/yellow]")
             return self._select_static_image(segment)
     
     def _select_static_image(self, segment: ScriptSegment) -> Path:
