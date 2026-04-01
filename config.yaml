@@ -428,6 +428,10 @@ video_renderer:
   bgm_fade_in_sec: 3.0       # フェードイン時間（秒）
   bgm_fade_out_sec: 3.0      # フェードアウト時間（秒）
   
+  # BGMダッキング設定（ジングル再生中のBGM抑制）
+  enable_bgm_ducking: true   # ジングル再生中のBGM抑制を有効化
+  bgm_ducking_level: 0.04    # ダッキング時のBGM音量（通常の約1/4、-12dB相当）
+  
   # セグメント単位の背景画像切り替え設定
   background_mode: "dynamic"  # "static": ローカルアセット選択 | "dynamic": FLUX.1動的生成
   

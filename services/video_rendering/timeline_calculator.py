@@ -90,6 +90,15 @@ class TimelineCalculator:
                         f"at {jingle_start:.2f}s (duration: {jingle_duration:.2f}s, no overlap)"
                     )
             
+            # Calculate video timing (for jingle-synchronized transitions)
+            # If jingle exists, extend video display until jingle ends
+            if jingle_path and jingle_duration and jingle_duration > 0:
+                video_duration = timing.duration_sec + jingle_duration
+                video_cut_time = timing.end_sec + jingle_duration
+            else:
+                video_duration = timing.duration_sec
+                video_cut_time = timing.end_sec
+            
             timeline_entries.append(SegmentTimelineEntry(
                 segment_id=segment.segment_id,
                 segment_type=segment.segment_type,
@@ -97,6 +106,8 @@ class TimelineCalculator:
                 audio_start_sec=timing.start_sec,
                 audio_end_sec=timing.end_sec,
                 duration_sec=timing.duration_sec,
+                video_duration_sec=video_duration,
+                video_cut_time_sec=video_cut_time,
                 background_image_path=bg_image,
                 jingle_path=jingle_path,
                 jingle_start_sec=jingle_start,

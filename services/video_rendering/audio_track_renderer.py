@@ -34,6 +34,11 @@ class AudioTrackRenderer:
         """
         self.config = config
         self.ffmpeg_path = self._find_ffmpeg()
+        
+        # Cache video config settings for BGM ducking
+        video_config = getattr(config.yaml, "video_renderer", None)
+        self.enable_ducking = getattr(video_config, "enable_bgm_ducking", False) if video_config else False
+        self.ducking_level = getattr(video_config, "bgm_ducking_level", 0.04) if video_config else 0.04
     
     def _find_ffmpeg(self) -> str:
         """Find FFmpeg executable path"""
@@ -151,7 +156,7 @@ class AudioTrackRenderer:
         return cmd
     
     def _build_bgm_filter(self, timeline: VideoTimeline) -> str:
-        """Build BGM filter with volume and fade in/out
+        """Build BGM filter with volume, fade in/out, and ducking during jingles
         
         Args:
             timeline: Video timeline
@@ -160,12 +165,64 @@ class AudioTrackRenderer:
             str: BGM filter string
         """
         fade_out_start = max(0, timeline.total_duration_sec - timeline.fade_out_sec)
+        normal_level = timeline.bgm_volume
         
-        return (
-            f"[1:a]volume={timeline.bgm_volume},"
-            f"afade=t=in:st=0:d={timeline.fade_in_sec},"
-            f"afade=t=out:st={fade_out_start}:d={timeline.fade_out_sec}[bgm]"
-        )
+        # Collect jingle periods for ducking
+        jingle_periods = []
+        if self.enable_ducking:
+            for seg in timeline.segments:
+                if seg.jingle_start_sec is not None and seg.jingle_duration_sec is not None:
+                    start = seg.jingle_start_sec
+                    end = start + seg.jingle_duration_sec
+                    jingle_periods.append((start, end))
+        
+        # Build filter with or without ducking
+        if jingle_periods:
+            # Guard against division by zero
+            if normal_level <= 0:
+                logger.warning(
+                    f"BGM volume is zero or negative ({normal_level}), ducking disabled"
+                )
+                # No ducking (fallback to original behavior)
+                return (
+                    f"[1:a]volume={timeline.bgm_volume},"
+                    f"afade=t=in:st=0:d={timeline.fade_in_sec},"
+                    f"afade=t=out:st={fade_out_start}:d={timeline.fade_out_sec}[bgm]"
+                )
+            
+            # Validate ducking level to prevent volume increase
+            ducking_level = self.ducking_level
+            if ducking_level >= normal_level:
+                logger.warning(
+                    f"Ducking level ({ducking_level}) >= normal level ({normal_level}), "
+                    f"clamping to {normal_level * 0.25:.4f}"
+                )
+                ducking_level = normal_level * 0.25
+            
+            # Calculate ducking multiplier (ratio to apply during jingle periods)
+            ducking_multiplier = ducking_level / normal_level
+            
+            # Build between conditions using + for OR (FFmpeg expression syntax)
+            between_conditions = "+".join(
+                f"between(t,{start},{end})" for start, end in jingle_periods
+            )
+            
+            # Two-stage volume control:
+            # 1. Set base volume to normal level
+            # 2. Apply ducking multiplier during jingle periods
+            return (
+                f"[1:a]volume={normal_level},"
+                f"volume={ducking_multiplier}:enable='{between_conditions}',"
+                f"afade=t=in:st=0:d={timeline.fade_in_sec},"
+                f"afade=t=out:st={fade_out_start}:d={timeline.fade_out_sec}[bgm]"
+            )
+        else:
+            # No ducking (original behavior)
+            return (
+                f"[1:a]volume={timeline.bgm_volume},"
+                f"afade=t=in:st=0:d={timeline.fade_in_sec},"
+                f"afade=t=out:st={fade_out_start}:d={timeline.fade_out_sec}[bgm]"
+            )
     
     def _build_jingle_filters(self, jingle_segments: list) -> list[str]:
         """Build jingle filters with delay for correct timing

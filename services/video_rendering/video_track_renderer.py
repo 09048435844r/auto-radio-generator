@@ -113,11 +113,12 @@ class VideoTrackRenderer:
         width, height = timeline.resolution.split('x')
         
         # Input files: one image per segment
+        # Use video_duration_sec (includes jingle duration) for jingle-synchronized cuts
         input_args = []
         for seg in timeline.segments:
             input_args.extend([
                 "-loop", "1",
-                "-t", str(seg.duration_sec),
+                "-t", str(seg.video_duration_sec),
                 "-i", str(seg.background_image_path)
             ])
         

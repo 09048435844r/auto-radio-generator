@@ -24,7 +24,11 @@ class SegmentTimelineEntry:
     # Timing information
     audio_start_sec: float                    # Segment audio start time
     audio_end_sec: float                      # Segment audio end time
-    duration_sec: float                       # Segment duration
+    duration_sec: float                       # Segment duration (audio only)
+    
+    # Video timing information (for jingle-synchronized transitions)
+    video_duration_sec: float                 # Video display duration (includes jingle if present)
+    video_cut_time_sec: float                 # Time when video cuts to next segment
     
     # Asset information
     background_image_path: Path               # Background image for this segment
