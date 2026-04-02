@@ -87,6 +87,11 @@
 - [x] **Cost Calculator** — API 使用量トラッキング + コストレポート生成
 
 ### Recent Achievements（直近の達成事項）
+- [x] **BGM Ducking Robustness (2026-04)** — ジングル再生中のBGM抑制機能の堅牢性を大幅に向上
+  - ゼロ除算バグの修正（BGM音量が0の場合のクラッシュを防止）
+  - 音量逆転バグの修正（ダッキングレベル検証により、ジングル中にBGMが大きくなる異常を防止）
+  - 設定アクセスの最適化（初期化時にキャッシュし、メソッド呼び出しごとの冗長な処理を削減）
+  - ジングル尺ゼロの安全チェック（不正な音声ファイルによるビデオタイミング計算の異常を防止）
 - [x] **Unit Testing Environment** — `pytest` + `pytest-mock` を導入し、`tests/` 配下で単体テストを実行可能化
 - [x] **CI/CD Foundation (pre-commit)** — `git commit` 時に `pytest` を自動実行し、失敗時はコミットをブロックするフックを導入
 - [x] **Regression Prevention (FFmpeg Path Handling)** — Windows向けパスエスケープ処理をヘルパーメソッド化し、変換ロジックの回帰テストを追加

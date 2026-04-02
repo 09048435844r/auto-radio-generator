@@ -1,84 +1,92 @@
-# Changelog
+# 変更履歴
 
-All notable changes to this project will be documented in this file.
+このプロジェクトの全ての重要な変更はこのファイルに記録されます。
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+フォーマットは [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) に基づいており、
+このプロジェクトは [Semantic Versioning](https://semver.org/spec/v2.0.0.html) に準拠しています。
 
 ## [Unreleased]
 
-### Fixed
-- **Video truncation issue**: Fixed video ending 5 seconds early due to post-roll not being included in segment timing calculations
-  - Modified `services/audio_synthesis/voicevox_segment_timing.py` to add post-roll duration (5s) to the last segment
-  - Video duration now matches audio duration exactly (e.g., 497.6s audio → 497.6s video instead of 478.1s)
-  - Resolves issue where audio would cut off abruptly at the end of videos
-  
-- **FLUX.1 timeout issues**: Optimized FLUX.1 image generation settings for low VRAM environments
-  - Increased timeout from 120s to 300s to handle GPU performance degradation
-  - Reduced inference steps from 20 to 10 (FLUX.1 schnell performs well with 4-10 steps)
-  - Lowered resolution from 1344×768 to 1024×576 (50% VRAM reduction, maintains 16:9 aspect ratio)
-  - Expected processing time improvement: 211s → 50-60s per image
-  - Modified `config.yaml` FLUX settings with detailed comments explaining optimizations
-  
-- **Dynamic mode fallback failure**: Fixed ImageProvider not scanning static images when in dynamic mode
-  - Modified `services/media_processing/image_provider.py` to always scan static images regardless of mode
-  - Enables automatic fallback to static images when FLUX.1 generation fails or times out
-  - Prevents "No background images found" errors during fallback
+### 修正
+- **BGMダッキングの堅牢性向上**: ジングル再生中のBGM抑制機能における重大なバグを修正
+  - **ゼロ除算の防止**: BGM音量がゼロまたは負の値の場合のランタイムクラッシュを防ぐガードを追加
+  - **音量逆転バグの修正**: ジングル再生中にBGM音量が増加するのを防ぐため、ダッキングレベルの検証を修正
+  - **設定アクセスの最適化**: 繰り返しの `getattr` 呼び出しの代わりに、`__init__` でダッキング設定をキャッシュするようリファクタリング
+  - **ジングル尺ゼロの安全性**: 破損した音声ファイルによる不正なビデオタイミングを防ぐ検証を追加
+  - `services/video_rendering/audio_track_renderer.py` と `timeline_calculator.py` を変更
+  - 全ての変更を `python -m py_compile` で構文チェック済み
 
-### Refactored
-- **Visual Palette architecture cleanup**: Improved code quality and maintainability of visual identity system
-  - Fixed critical type annotation bugs (`Any` import missing, `any` → `Any` corrections)
-  - Moved palette generation from Phase 2.5 into `execute_scripting_phase` for proper async context
-  - Eliminated post-hoc mutation of `ScriptingPhaseResult` to maintain data immutability
-  - Extracted duplicate fallback color strings to `DEFAULT_COLOR_PALETTE` class constant (DRY principle)
-  - Updated error messages to accurately reflect actual behavior (fallback to component defaults)
-  - All changes verified with `python -m py_compile` for syntax correctness
+- **動画切断問題の修正**: ポストロールがセグメントタイミング計算に含まれていないため、動画が5秒早く終了する問題を修正
+  - `services/audio_synthesis/voicevox_segment_timing.py` を変更し、最後のセグメントにポストロール時間（5秒）を追加
+  - 動画の長さが音声の長さと完全に一致するように修正（例: 497.6秒の音声 → 478.1秒ではなく497.6秒の動画）
+  - 動画の最後で音声が突然切れる問題を解決
+  
+- **FLUX.1タイムアウト問題の修正**: 低VRAM環境向けにFLUX.1画像生成設定を最適化
+  - GPU性能低下に対応するため、タイムアウトを120秒から300秒に延長
+  - 推論ステップ数を20から10に削減（FLUX.1 schnellは4〜10ステップで良好な性能を発揮）
+  - 解像度を1344×768から1024×576に低減（VRAM使用量50%削減、16:9アスペクト比を維持）
+  - 処理時間の改善見込み: 211秒 → 50〜60秒/画像
+  - `config.yaml` のFLUX設定を最適化の詳細説明付きで変更
+  
+- **動的モードフォールバック失敗の修正**: 動的モード時にImageProviderが静的画像をスキャンしない問題を修正
+  - `services/media_processing/image_provider.py` を変更し、モードに関わらず常に静的画像をスキャンするように修正
+  - FLUX.1生成が失敗またはタイムアウトした場合の静的画像への自動フォールバックを有効化
+  - フォールバック時の「背景画像が見つかりません」エラーを防止
+
+### リファクタリング
+- **ビジュアルパレットアーキテクチャのクリーンアップ**: ビジュアルアイデンティティシステムのコード品質と保守性を改善
+  - 重大な型アノテーションバグを修正（`Any` のインポート不足、`any` → `Any` の修正）
+  - 適切な非同期コンテキストのため、パレット生成をPhase 2.5から `execute_scripting_phase` 内に移動
+  - データの不変性を維持するため、`ScriptingPhaseResult` の事後変更を排除
+  - 重複するフォールバックカラー文字列を `DEFAULT_COLOR_PALETTE` クラス定数に抽出（DRY原則）
+  - 実際の動作を正確に反映するようエラーメッセージを更新（コンポーネントデフォルトへのフォールバック）
+  - 全ての変更を `python -m py_compile` で構文チェック済み
 
 ## [3.5.0] - 2026-02-15
 
-### Added
-- Hierarchical Agentic Workflow for long-form script generation
-- Topic curation with multi-dimensional scoring
-- Segment-based generation (intro/deep_dive/conclusion)
-- Context continuity across segments
+### 追加
+- 長尺台本生成のための階層的エージェントワークフロー
+- 多次元スコアリングによるトピックキュレーション
+- セグメントベース生成（intro/deep_dive/conclusion）
+- セグメント間のコンテキスト継続性
 
 ## [3.4.0] - 2026-01-XX
 
-### Added
-- Multi-LLM provider support (Gemini/OpenAI/Anthropic)
-- Factory pattern for provider selection
-- OpenAI Structured Outputs integration
-- Anthropic Tool Calling integration
+### 追加
+- マルチLLMプロバイダーサポート（Gemini/OpenAI/Anthropic）
+- プロバイダー選択のためのファクトリーパターン
+- OpenAI Structured Outputs統合
+- Anthropic Tool Calling統合
 
 ## [3.3.2] - 2025-12-XX
 
-### Added
-- Two-part episode mode
-- API health check functionality
-- Automatic speaker swap detection and correction
-- Retry logic for API failures
+### 追加
+- 2部構成エピソードモード
+- APIヘルスチェック機能
+- 話者入れ替わりの自動検出と修正
+- API失敗時のリトライロジック
 
 ## [3.3.1] - 2025-12-XX
 
-### Added
-- Perplexity API call hard limit
-- Session-based research result caching
+### 追加
+- Perplexity API呼び出しハードリミット
+- セッションベースのリサーチ結果キャッシュ
 
 ## [3.3.0] - 2025-11-XX
 
-### Added
-- Negative prompt (avoid topics) functionality
-- Loudness normalization (-14 LUFS)
-- Visual progress bar with Gradio
-- Mock mode for development
-- NVENC GPU acceleration
+### 追加
+- ネガティブプロンプト（回避トピック）機能
+- ラウドネス正規化（-14 LUFS）
+- Gradioによるビジュアル進捗バー
+- 開発用モックモード
+- NVENC GPU高速化
 
 ## [3.2.0] - 2025-10-XX
 
-### Added
-- Initial release with core functionality
-- Perplexity research integration
-- Gemini script generation
-- VOICEVOX audio synthesis
-- FFmpeg video rendering
-- Thumbnail generation
+### 追加
+- コア機能を含む初回リリース
+- Perplexityリサーチ統合
+- Gemini台本生成
+- VOICEVOX音声合成
+- FFmpeg動画レンダリング
+- サムネイル生成
