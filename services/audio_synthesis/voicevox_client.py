@@ -37,6 +37,7 @@ class VoicevoxClient(IAudioSynthesizer):
         video_config = getattr(config.yaml, "video_renderer", None)
         self.enable_jingles = getattr(video_config, "enable_jingles", True) if video_config else True
         self.jingle_overlap_sec = getattr(video_config, "jingle_overlap_sec", 1.0) if video_config else 1.0
+        self.pre_jingle_pause_sec = getattr(video_config, "pre_jingle_pause_sec", 0.5) if video_config else 0.5
     
     async def check_engine_status(self) -> bool:
         """VOICEVOXエンジンの状態を確認"""
@@ -249,6 +250,10 @@ class VoicevoxClient(IAudioSynthesizer):
     def _calculate_segment_pauses(self, segments: Optional[list]) -> dict[str, tuple[float, Optional[Path]]]:
         """Calculate pause duration after each segment based on jingle length
         
+        Pause structure: [pre-jingle pause] + [jingle duration]
+        - Pre-jingle pause: A brief breathing space before jingle starts (e.g., 0.5s)
+        - Jingle duration: Full jingle playback time
+        
         Args:
             segments: List of ScriptSegment objects
         
@@ -266,12 +271,13 @@ class VoicevoxClient(IAudioSynthesizer):
             jingle_path = self.jingle_provider.get_random_jingle()
             if jingle_path:
                 jingle_duration = self.jingle_provider.get_jingle_duration(jingle_path)
-                # Pause = full jingle duration (no overlap, perfect sync)
-                pause_sec = jingle_duration
+                # Pause = pre-jingle pause + full jingle duration (no overlap, perfect sync)
+                pause_sec = self.pre_jingle_pause_sec + jingle_duration
                 pauses[segment.segment_id] = (pause_sec, jingle_path)
                 console.print(
                     f"[dim]  Segment {segment.segment_id}: jingle={jingle_path.name} "
-                    f"({jingle_duration:.2f}s), pause={pause_sec:.2f}s (no overlap)[/dim]"
+                    f"({jingle_duration:.2f}s), pre-pause={self.pre_jingle_pause_sec:.2f}s, "
+                    f"total_pause={pause_sec:.2f}s[/dim]"
                 )
             else:
                 pauses[segment.segment_id] = (0.0, None)

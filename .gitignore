@@ -162,3 +162,5 @@ output/**/*.webp
 # But ignore any generated HTML/PDF if added later
 docs/**/*.html
 docs/**/*.pdf
+assets/jingles/素材/Life Update Radio.vvproj
+.gitignore

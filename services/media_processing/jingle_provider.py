@@ -33,17 +33,24 @@ class JingleProvider:
         self._load_jingles()
     
     def _load_jingles(self):
-        """Scan jingles directory and cache available files"""
+        """Scan jingles directory and cache available files
+        
+        Only scans root-level files, excluding subdirectories (e.g., アーカイブ/, 素材/)
+        to prevent unintended material files from being selected.
+        """
         if not self.jingles_dir.exists():
             logger.warning(f"Jingles directory not found: {self.jingles_dir}")
             console.print(f"[yellow]⚠ Jingles directory not found: {self.jingles_dir}[/yellow]")
             console.print(f"[yellow]  Jingle insertion will be disabled[/yellow]")
             return
         
-        # Scan for audio files (.mp3, .wav, .ogg, .m4a)
+        # Scan for audio files (.mp3, .wav, .ogg, .m4a) in root directory only
         audio_extensions = ["*.mp3", "*.wav", "*.ogg", "*.m4a"]
         for ext in audio_extensions:
-            self._jingles_cache.extend(self.jingles_dir.glob(ext))
+            for file_path in self.jingles_dir.glob(ext):
+                # Only include files directly in root directory (exclude subdirectories)
+                if file_path.parent == self.jingles_dir:
+                    self._jingles_cache.append(file_path)
         
         if self._jingles_cache:
             console.print(f"[dim]Loaded {len(self._jingles_cache)} jingles from {self.jingles_dir}[/dim]")

@@ -32,10 +32,11 @@ class TimelineCalculator:
         """
         self.config = config
         
-        # Get jingle overlap setting from config (default: 3 seconds)
+        # Get jingle settings from config
         video_config = getattr(config.yaml, "video_renderer", None)
         self.jingle_overlap_sec = getattr(video_config, "jingle_overlap_sec", 3.0) if video_config else 3.0
         self.enable_jingles = getattr(video_config, "enable_jingles", True) if video_config else True
+        self.pre_jingle_pause_sec = getattr(video_config, "pre_jingle_pause_sec", 0.5) if video_config else 0.5
     
     async def calculate_timeline(
         self,
@@ -82,19 +83,21 @@ class TimelineCalculator:
                 jingle_path = jingle_provider.get_random_jingle()
                 if jingle_path:
                     jingle_duration = jingle_provider.get_jingle_duration(jingle_path)
-                    # Start jingle exactly at segment end (no overlap, perfect sync)
-                    # Pause is already inserted in main audio with full jingle duration
-                    jingle_start = timing.end_sec
+                    # Start jingle after pre-jingle pause (breathing space before jingle)
+                    # Pause structure: [segment end] + [pre-pause] + [jingle]
+                    jingle_start = timing.end_sec + self.pre_jingle_pause_sec
                     logger.debug(
                         f"Jingle for segment {segment.segment_id}: {jingle_path.name} "
-                        f"at {jingle_start:.2f}s (duration: {jingle_duration:.2f}s, no overlap)"
+                        f"at {jingle_start:.2f}s (pre-pause: {self.pre_jingle_pause_sec:.2f}s, "
+                        f"duration: {jingle_duration:.2f}s)"
                     )
             
             # Calculate video timing (for jingle-synchronized transitions)
-            # If jingle exists, extend video display until jingle ends
+            # If jingle exists, extend video display until jingle ends (including pre-pause)
             if jingle_path and jingle_duration and jingle_duration > 0:
-                video_duration = timing.duration_sec + jingle_duration
-                video_cut_time = timing.end_sec + jingle_duration
+                total_pause_duration = self.pre_jingle_pause_sec + jingle_duration
+                video_duration = timing.duration_sec + total_pause_duration
+                video_cut_time = timing.end_sec + total_pause_duration
             else:
                 video_duration = timing.duration_sec
                 video_cut_time = timing.end_sec

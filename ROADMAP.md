@@ -87,6 +87,11 @@
 - [x] **Cost Calculator** — API 使用量トラッキング + コストレポート生成
 
 ### Recent Achievements（直近の達成事項）
+- [x] **Pre-Jingle Pause Feature (2026-04)** — ジングル再生前に自然な一拍（間）を挿入する機能を追加
+  - `config.yaml` に `pre_jingle_pause_sec` 設定を追加（デフォルト: 0.5秒）
+  - セグメント終了からジングル開始までの間に呼吸するような自然なポーズを挿入
+  - 音声トラック（VoicevoxClient）とビデオタイムライン（TimelineCalculator）の両方で対応
+  - リスナー体験の向上（ジングルが唐突に始まらず、より聴きやすい構成に）
 - [x] **BGM Ducking Robustness (2026-04)** — ジングル再生中のBGM抑制機能の堅牢性を大幅に向上
   - ゼロ除算バグの修正（BGM音量が0の場合のクラッシュを防止）
   - 音量逆転バグの修正（ダッキングレベル検証により、ジングル中にBGMが大きくなる異常を防止）
