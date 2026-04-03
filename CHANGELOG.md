@@ -34,6 +34,13 @@
     - テキスト切断ロジックを堅牢化（句点が見つからない場合の処理を明確化）
     - サムネイルプロンプトの指示を統一（SYMBOLIC → CONCRETE, SUBJECT-DRIVENに変更し、LLMの混乱を防止）
 
+- **AI生成画像の謎文字（Gibberish Text）抑制強化**: FLUX.1画像生成時に意図しない文字やロゴが混入する問題を徹底的に防止
+  - **FLUX APIのネガティブプロンプト強化**: `"no text"` から `"text, gibberish, fake text, distorted letters, writing, watermark, signature, logo, words, characters, alphabet"` へ拡張
+  - **LLMプロンプト制約の強化**: `SYSTEM_PROMPT_TEMPLATE` と `THUMBNAIL_SYSTEM_PROMPT_TEMPLATE` の制約を `"no text, no writing, no watermarks"` に強化
+  - **フォールバック処理の統一**: `_enforce_quality_keywords()` でも同様の制約を適用
+  - `services/media_processing/flux_client.py` と `services/script_generation/image_prompt_generator.py` を変更
+  - **期待効果**: 画像の視覚的クリーンさが向上し、プロフェッショナルな仕上がりを実現
+
 - **ジングル前ポーズ機能**: セグメント境界でジングル再生前に自然な一拍（間）を挿入
   - `config.yaml` に `pre_jingle_pause_sec` 設定を追加（デフォルト: 0.5秒）
   - `VoicevoxClient` でジングル前ポーズを音声トラックに挿入

@@ -100,7 +100,7 @@ class FluxClient:
         # Build payload with FLUX.1 [schnell] golden settings
         payload = {
             "prompt": prompt,
-            "negative_prompt": "no text",
+            "negative_prompt": "text, gibberish, fake text, distorted letters, writing, watermark, signature, logo, words, characters, alphabet",
             "steps": self.steps,
             "width": self.width,
             "height": self.height,

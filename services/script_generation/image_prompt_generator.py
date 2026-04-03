@@ -68,7 +68,7 @@ CREATIVE FREEDOM:
 CONSTRAINTS (MANDATORY):
 - ALWAYS start with a SPECIFIC, CONCRETE subject description (not abstract spaces)
 - ALWAYS incorporate the color palette and aesthetic
-- ALWAYS end with: "no text"
+- ALWAYS end with: "no text, no writing, no watermarks"
 - ALWAYS include film quality keywords
 
 OUTPUT FORMAT:
@@ -115,7 +115,7 @@ REQUIREMENTS:
 - Focus: Create a CONCRETE, SUBJECT-DRIVEN representation (not abstract symbolism)
 - Impact: Maximum visual impact through clear, bold subject presentation
 - Composition: Dynamic framing that showcases the hero subject
-- ALWAYS end with: "no text" (MANDATORY)
+- ALWAYS end with: "no text, no writing, no watermarks" (MANDATORY)
 
 OUTPUT FORMAT:
 Return ONLY the English prompt text, no explanations.
@@ -230,9 +230,9 @@ Generate the prompt now:"""
             
             prompt = response.text.strip()
             
-            # Ensure "no text" is at the end
+            # Ensure "no text, no writing, no watermarks" is at the end
             if "no text" not in prompt.lower():
-                prompt += ", no text"
+                prompt += ", no text, no writing, no watermarks"
             
             logger.info(f"Generated prompt: {prompt[:100]}...")
             console.print(f"[dim]Prompt: {prompt[:80]}...[/dim]")
@@ -476,9 +476,9 @@ Create a CONCRETE, SUBJECT-DRIVEN representation that maximizes click-through ra
             if keyword.lower() not in prompt.lower():
                 prompt += f", {keyword}"
         
-        # Ensure "no text" is at the end
+        # Ensure "no text, no writing, no watermarks" is at the end
         if "no text" not in prompt.lower():
-            prompt += ", no text"
+            prompt += ", no text, no writing, no watermarks"
         
         return prompt
     
