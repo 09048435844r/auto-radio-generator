@@ -262,10 +262,32 @@ python app.py
 Mock実行は、Settingsタブの **Developer Options** にある
 **「🧪 モックで動画を作成」** ボタンを利用してください。
 
-**CLI版**
+**CLI版（パイプライン分離対応）**
+
 ```bash
-python main.py
+# 一気通貫モード（全フェーズ実行）
+python main.py --theme "持続血糖測定器CGMについて" --mode lecture
+
+# フェーズ単位での実行
+# 1. リサーチフェーズのみ実行
+python main.py --phase research --theme "持続血糖測定器CGMについて" --mode lecture
+
+# 2. 台本作成フェーズのみ実行（既存セッション使用）
+python main.py --phase script --session 20260404_065500
+
+# 3. 動画生成フェーズのみ実行（既存セッション使用）
+python main.py --phase render --session 20260404_065500
+
+# 外部ファイルから読み込んで実行
+python main.py --phase script --research-brief workspace/20260404_065500/research_brief.json
+python main.py --phase render --script workspace/20260404_065500/script_artifact.json
 ```
+
+**パイプライン分離の利点**:
+- **フェーズ単位のデバッグ**: 失敗したフェーズのみを再実行可能
+- **コスト削減**: 全体を再実行せず、特定フェーズのみを修正・再実行
+- **柔軟な開発**: 各フェーズを独立して改善・テスト可能
+- **セッション管理**: `workspace/{session_id}/` 配下に中間成果物を永続化
 
 ## 🔑 YouTube API のセットアップ
 

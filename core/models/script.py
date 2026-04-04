@@ -181,3 +181,50 @@ def create_chapter_marker(
         section=section,
         chapter_title=chapter_title
     )
+
+
+class RadioScriptArtifact(BaseModel):
+    """台本作成フェーズの出力成果物
+    
+    動画生成フェーズへの入力として使用される。
+    各フェーズを独立実行可能にするための中間成果物。
+    """
+    # Metadata
+    session_id: str = Field(..., description="Session ID")
+    created_at: str = Field(
+        default_factory=lambda: __import__('datetime').datetime.now().isoformat(),
+        description="Creation timestamp"
+    )
+    
+    # Script content
+    script: Script = Field(..., description="Generated script")
+    
+    # Segment information (when Orchestrator is enabled)
+    segments: Optional[List[dict]] = Field(
+        None,
+        description="Segment information (ScriptSegment in dict format)"
+    )
+    
+    # Visual identity (for dynamic background mode)
+    visual_identity: Optional[dict] = Field(
+        None,
+        description="Visual identity (VisualIdentity in dict format)"
+    )
+    
+    # Reference to original research
+    research_brief_path: Optional[str] = Field(
+        None,
+        description="Relative path to original ResearchBrief file"
+    )
+    
+    # Usage and cost tracking
+    llm_usage: Optional[dict] = Field(None, description="LLM API usage for script generation")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "session_id": "20260404_065500",
+                "script": {"title": "...", "sections": []},
+                "research_brief_path": "research_brief.json"
+            }
+        }

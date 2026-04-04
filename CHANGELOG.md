@@ -8,6 +8,33 @@
 ## [Unreleased]
 
 ### 追加
+- **パイプライン分離アーキテクチャ（Pipeline Decoupling Architecture）**: モノリシックな動画生成パイプラインを「リサーチ」「台本作成」「動画生成」の3つの独立したフェーズに分離
+  - **中間成果物のデータモデル**:
+    - `ResearchBrief`: リサーチフェーズの出力成果物（検索クエリ、リサーチ内容、キュレーション結果を含む）
+    - `RadioScriptArtifact`: 台本作成フェーズの出力成果物（台本、セグメント情報、ビジュアルアイデンティティを含む）
+    - `core/models/artifacts.py` を新規作成
+    - `core/models/script.py` に `RadioScriptArtifact` を追加
+  - **セッション管理システム**:
+    - `SessionManager`: `workspace/{session_id}/` 配下でのファイルI/Oを管理
+    - 各フェーズの中間成果物を永続化し、フェーズ単位での実行・再開を可能に
+    - `core/session_manager.py` を新規作成
+  - **フェーズ分離サービス**:
+    - `execute_research_phase()`: 企画（検索計画作成）とリサーチ（情報収集）を実行
+    - `execute_scripting_phase()`: ResearchBriefから台本を生成
+    - `execute_production_phase()`: RadioScriptArtifactから音声合成と動画レンダリングを実行
+    - `services/pipeline/` ディレクトリを新規作成
+  - **CLI再設計**:
+    - `--phase` オプション: `all`（一気通貫）、`research`（リサーチのみ）、`script`（台本作成のみ）、`render`（動画生成のみ）
+    - `--session` オプション: 既存セッションIDを指定して続きから実行
+    - `--research-brief` / `--script` オプション: 外部ファイルから読み込んで実行
+    - `main.py` に引数パース機能を追加
+  - **期待効果**:
+    - フェーズ単位でのデバッグ・テストが可能に
+    - 失敗したフェーズのみを再実行可能（コスト削減）
+    - 各フェーズを独立して改善・置き換え可能（拡張性向上）
+    - 将来的なエージェンティックAI導入の基盤を構築
+  - **後方互換性**: 既存の一気通貫モード（`--phase all`）も維持
+
 - **Subject-Driven画像生成アーキテクチャ（パラダイムシフト）**: FLUX.1画像プロンプト生成を「Style偏重」から「Subject最優先」へ抜本的に再設計
   - **Context Hydration（文脈の十分な供給）**:
     - `_build_segment_context()` を全面リファクタリング
