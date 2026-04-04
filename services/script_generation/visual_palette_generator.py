@@ -179,8 +179,16 @@ Create a visually distinctive brand (color palette + aesthetic) that captures th
                 )
             )
             
+            # Debug: Log raw response
+            logger.debug(f"Visual identity API response: {response}")
+            logger.debug(f"Response text: '{response.text}'")
+            logger.debug(f"Response text length: {len(response.text) if response.text else 0}")
+            
             # Parse JSON response
             import json
+            if not response.text or not response.text.strip():
+                raise ValueError("Empty response from API")
+            
             identity_data = json.loads(response.text)
             
             identity = VisualIdentity(

@@ -101,7 +101,7 @@ async def execute_research_phase(
         research_mode=mode,
         research_content=research_data.content,
         research_sources=[
-            _to_json_safe(asdict(source)) for source in (research_data.sources or [])
+            _to_json_safe(source.model_dump()) for source in (research_data.sources or [])
         ],
         queries=plan.queries,
         angle=plan.angle,

@@ -153,8 +153,8 @@ async def execute_scripting_phase(
     script_artifact = RadioScriptArtifact(
         session_id=session_manager.session_id,
         script=script,
-        segments=[_to_json_safe(asdict(seg)) for seg in segments] if segments else None,
-        visual_identity=_to_json_safe(asdict(visual_identity)) if visual_identity else None,
+        segments=[_to_json_safe(seg.model_dump()) for seg in segments] if segments else None,
+        visual_identity=_to_json_safe(visual_identity.model_dump()) if visual_identity else None,
         research_brief_path="research_brief.json",
         llm_usage=_to_json_safe(asdict(llm_usage)) if llm_usage else None,
     )

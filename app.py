@@ -34,6 +34,20 @@ from services.research import PerplexityResearcher
 from services.script_generation import GeminiClient
 from services.media_processing import ThumbnailGenerator, ThumbnailBackgroundGenerator
 from google.genai import types
+from app_hitl import create_hitl_tab
+from app_hitl_handlers import (
+    hitl_execute_research,
+    _show_research_preview,
+    hitl_approve_research,
+    hitl_redo_research,
+    hitl_import_research,
+    hitl_import_script,
+    hitl_execute_scripting,
+    hitl_save_script_edits,
+    hitl_approve_script,
+    hitl_execute_production,
+    hitl_regenerate_script
+)
 import json
 import os
 import socket
@@ -793,146 +807,6 @@ def load_research_json_file(filepath: str | None) -> str:
         return f"❌ JSON解析エラー: {str(e)}"
     except Exception as e:
         return f"❌ ファイル読み込みエラー: {str(e)}"
-
-
-def synthesize_audio_from_script(
-    script_json: str,
-    progress=gr.Progress()
-) -> tuple[str | None, str | None, str, str | None, str | None]:
-    """台本JSONから音声を合成
-    
-    Args:
-        script_json: 台本のJSON文字列
-        progress: Gradio進捗バー
-    
-    Returns:
-        (音声ファイルパス, 字幕ファイルパス, ログ出力, 音声ファイルパス(Step C用), 字幕ファイルパス(Step C用))
-    """
-    import asyncio
-    from pathlib import Path
-    from datetime import datetime
-    from services.audio_synthesis import VoicevoxClient
-    
-    # ログをクリア
-    clear_logs()
-    append_log("音声合成を開始します...")
-    append_log("=" * 40)
-    
-    # 入力検証
-    if not script_json or not script_json.strip():
-        error_msg = "エラー: 台本が入力されていません。"
-        append_log(f"❌ {error_msg}")
-        return None, None, get_logs(), None, None
-    
-    try:
-        # JSONパース
-        progress(0.1, desc="台本をパース中...")
-        append_log("台本JSONをパース中...")
-        
-        script_dict = json.loads(script_json)
-        
-        # Scriptオブジェクトに変換
-        from core.models.script import Script, DialogueLine
-        
-        dialogue_lines = []
-        for line_dict in script_dict.get("dialogue", []):
-            # speaker_idからspeakerへの変換（後方互換性）
-            speaker = line_dict.get("speaker")
-            if not speaker:
-                # 古い形式のspeaker_idをspeakerに変換
-                speaker_id = line_dict.get("speaker_id", "main")
-                speaker = "A" if speaker_id == "main" else "B"
-            dialogue_lines.append(DialogueLine(
-                speaker=speaker,
-                text=line_dict.get("text", ""),
-                section=line_dict.get("section")
-            ))
-        
-        script = Script(
-            title=script_dict.get("title", "無題"),
-            thumbnail_title=script_dict.get("thumbnail_title", script_dict.get("title", "無題")),
-            description=script_dict.get("description", ""),
-            dialogue=dialogue_lines
-        )
-        
-        append_log(f"✓ 台本パース完了: {script.title}")
-        append_log(f"  セリフ数: {len(script.dialogue)}")
-        
-    except json.JSONDecodeError as e:
-        error_msg = f"JSON形式エラー: {str(e)}"
-        append_log(f"❌ {error_msg}")
-        append_log("ヒント: カンマやカッコの閉じ忘れがないか確認してください")
-        return None, None, get_logs(), None, None
-    except Exception as e:
-        error_msg = f"台本の解析に失敗しました: {str(e)}"
-        append_log(f"❌ {error_msg}")
-        return None, None, get_logs(), None, None
-    
-    try:
-        # 設定読み込み
-        progress(0.2, desc="設定を読み込み中...")
-        config = load_config(PROJECT_ROOT)
-        
-        # 出力ディレクトリを準備
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_dir = PROJECT_ROOT / "output" / "manual_builds" / timestamp
-        output_dir.mkdir(parents=True, exist_ok=True)
-        append_log(f"出力ディレクトリ: {output_dir}")
-        
-        # VOICEVOXクライアント作成
-        progress(0.3, desc="VOICEVOXに接続中...")
-        append_log("VOICEVOXエンジンに接続中...")
-        voicevox = VoicevoxClient(config)
-        
-        # 非同期処理を実行
-        async def synthesize():
-            # エンジン状態確認
-            if not await voicevox.check_engine_status():
-                raise RuntimeError("VOICEVOXエンジンに接続できません。エンジンを起動してください。")
-            append_log("✓ VOICEVOXエンジン接続OK")
-            
-            # 音声合成
-            progress(0.4, desc="音声を合成中...")
-            append_log(f"\n== 音声合成 ==")
-            append_log(f"セリフ数: {len(script.dialogue)}")
-            
-            # 進捗コールバック
-            def synthesis_progress(current: int, total: int):
-                ratio = 0.4 + (current / total) * 0.5  # 0.4 -> 0.9
-                progress(ratio, desc=f"音声合成中... ({current}/{total})")
-                if current % 5 == 0:  # 5行ごとにログ出力
-                    append_log(f"  進捗: {current}/{total}")
-            
-            result = await voicevox.synthesize(
-                script=script,
-                output_dir=output_dir,
-                speed_scale_override=1.1  # デフォルト話速
-            )
-            
-            return result
-        
-        # 非同期実行
-        result = asyncio.run(synthesize())
-        
-        progress(0.95, desc="完了処理中...")
-        append_log(f"\n✓ 音声合成完了")
-        append_log(f"  音声ファイル: {result.audio_path.name}")
-        append_log(f"  字幕ファイル: {result.subtitle_path.name}")
-        append_log(f"  総時間: {result.total_duration_sec:.1f}秒")
-        
-        progress(1.0, desc="完了!")
-        
-        # Step BとStep Cの両方に同じパスを返す
-        audio_path_str = str(result.audio_path)
-        subtitle_path_str = str(result.subtitle_path)
-        return audio_path_str, subtitle_path_str, get_logs(), audio_path_str, subtitle_path_str
-        
-    except Exception as e:
-        error_msg = f"音声合成中にエラーが発生しました: {str(e)}"
-        append_log(f"\n❌ {error_msg}")
-        import traceback
-        append_log(f"\n詳細:\n{traceback.format_exc()}")
-        return None, None, get_logs(), None, None
 
 
 def render_video_from_assets(
@@ -1952,14 +1826,7 @@ def regenerate_thumbnail_background(state):
 
 def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
     """Create Generator tab UI and return component references."""
-    # モード選択ラジオボタン（タブ最上部）
-    mode_selector = gr.Radio(
-        choices=["🚀 全自動モード", "🛠️ ステップモード"],
-        value="🚀 全自動モード",
-        label="🎥 制作モード",
-        info="全自動: テーマ入力のみで動画完成 / ステップ: 各工程を個別に実行・調整可能",
-    )
-
+    # 全自動モードのみ（ステップモードは削除済み）
     with gr.Column(visible=True) as auto_mode_column:
         gr.Markdown("""
         ### 🚀 全自動モード
@@ -2145,14 +2012,7 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
                             "🚀 動画を生成する",
                             variant="primary",
                             size="lg",
-                            scale=2,
                             elem_classes="primary-btn",
-                        )
-                        script_only_btn = gr.Button(
-                            "📝 台本のみ作成",
-                            variant="secondary",
-                            size="lg",
-                            scale=1,
                         )
                     
                     with gr.Row():
@@ -2254,187 +2114,8 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
                 interactive=False
             )
 
-    # ========== ステップモードUI（手動制作タブから統合） ==========
-    with gr.Column(visible=False) as step_mode_column:
-        gr.Markdown("""
-        ### 🛠️ ステップモード
-        各工程を個別に実行・調整できます。リサーチデータの読み込みや、LLMモデル比較も可能です。
-        """)
-
-        gr.Markdown("### 📝 Step A: リサーチ結果から台本生成")
-
-        with gr.Row():
-            step_load_research_btn = gr.Button(
-                "📂 最新のリサーチデータを読み込む",
-                variant="secondary",
-                size="sm"
-            )
-
-        step_research_input = gr.Textbox(
-            label="Perplexity等のリサーチ結果を貼り付け",
-            placeholder="ここにリサーチ結果のテキストを貼り付けてください...",
-            lines=10,
-            info="Perplexityや他のソースで得たリサーチ結果を貼り付け",
-        )
-        step_theme_input = gr.Textbox(
-            label="テーマ/タイトル",
-            placeholder="例: AIの倫理的課題について",
-            info="台本のテーマまたはタイトルを入力してください",
-        )
-
-        # モデル選択ドロップダウン
-        from services.script_generation.llm_factory import get_available_models
-        try:
-            _available_models = get_available_models(load_config(PROJECT_ROOT))
-            _default_model = _available_models[0] if _available_models else "gemini-1.5-pro"
-        except Exception:
-            _available_models = ["gemini-1.5-pro", "gpt-4o-mini", "claude-sonnet-4-6"]
-            _default_model = "gemini-1.5-pro"
-
-        step_llm_model = gr.Dropdown(
-            label="🤖 台本生成モデル",
-            choices=_available_models,
-            value=_default_model,
-            info="台本生成に使用するLLMモデルを選択（モデル比較に便利）",
-        )
-
-        step_generate_script_btn = gr.Button("📝 この内容で台本を作成", variant="primary", size="lg")
-        step_script_output = gr.Code(label="生成された台本", language="json", lines=20, interactive=True)
-
-        # 比較用State
-        step_comparison_state = gr.State(value=[])
-
-        # 比較レポート表示エリア
-        with gr.Row():
-            step_comparison_report = gr.Markdown(
-                label="📊 台本比較レポート",
-                value="*複数のモデルで台本を生成すると、ここに比較レポートが表示されます*",
-            )
-
-        # 復元UI
-        with gr.Row():
-            with gr.Column(scale=3):
-                step_restore_dropdown = gr.Dropdown(
-                    label="📋 過去の生成結果から復元",
-                    choices=[],
-                    interactive=True,
-                    info="比較セッション内の任意のモデルの台本をエディタに復元"
-                )
-            with gr.Column(scale=1):
-                step_restore_btn = gr.Button(
-                    "↩️ 復元",
-                    variant="secondary",
-                    size="sm"
-                )
-
-        # 比較操作ボタン
-        with gr.Row():
-            step_clear_comparison_btn = gr.Button(
-                "🗑️ 比較データをクリア",
-                variant="secondary",
-                size="sm"
-            )
-            step_export_session_btn = gr.Button(
-                "💾 比較セッションを保存",
-                variant="primary",
-                size="sm"
-            )
-
-        step_export_status = gr.Textbox(
-            label="保存ステータス",
-            interactive=False,
-            visible=False
-        )
-
-        gr.Markdown("---")
-        gr.Markdown("### 🎤 Step B: 音声合成 (Audio Synthesis)")
-        step_script_editor = gr.Code(
-            label="台本JSON (編集可能) - Step Aで生成された台本を編集できます",
-            language="json",
-            lines=15,
-            interactive=True,
-        )
-        step_synthesize_btn = gr.Button("🎤 この台本で音声を合成する", variant="primary", size="lg")
-
-        with gr.Row():
-            with gr.Column():
-                step_audio_output = gr.Audio(label="生成された音声", interactive=False)
-                step_subtitle_output = gr.File(label="字幕ファイル (.ass)", interactive=False)
-            with gr.Column():
-                step_synthesis_log = gr.Textbox(label="処理ログ", lines=10, interactive=False)
-
-        gr.Markdown("---")
-        gr.Markdown("### 🎬 Step C: 動画書き出し (Rendering)")
-
-        with gr.Row():
-            with gr.Column():
-                step_audio_input = gr.Audio(label="音声ファイル", sources=["upload"], type="filepath", interactive=True)
-                step_subtitle_input = gr.File(
-                    label="字幕ファイル (.ass)",
-                    file_types=[".ass"],
-                    type="filepath",
-                    interactive=True,
-                )
-            with gr.Column():
-                step_background_input = gr.Image(
-                    label="背景/サムネイル画像 (1920x1080推奨)",
-                    sources=["upload"],
-                    type="filepath",
-                    interactive=True,
-                )
-                step_bgm_dropdown = gr.Dropdown(
-                    label="BGM",
-                    choices=assets.get("bgm", ["default.mp3"]),
-                    value=assets.get("bgm", ["default.mp3"])[0] if assets.get("bgm") else None,
-                    info="assets/bgm/ 内の音声",
-                )
-
-        step_render_btn = gr.Button("🎬 動画を生成する (Render Video)", variant="primary", size="lg")
-
-        with gr.Row():
-            with gr.Column():
-                step_video_output = gr.Video(label="完成動画", interactive=False)
-                step_video_file_output = gr.File(label="動画ファイルダウンロード", interactive=False)
-            with gr.Column():
-                step_render_log = gr.Textbox(label="処理ログ", lines=10, interactive=False)
-
-        gr.Markdown("""
-        ### 📖 使い方
-
-        **Step A: 台本生成**
-        1. Perplexity等でリサーチした結果を上のテキストボックスに貼り付け
-        2. テーマ/タイトルを入力
-        3. 「この内容で台本を作成」ボタンをクリック
-
-        **Step B: 音声合成**
-        1. 生成された台本が自動的にエディタに反映されます
-        2. 必要に応じて台本を編集
-        3. 「この台本で音声を合成する」ボタンをクリック
-
-        **Step C: 動画レンダリング**
-        1. Step Bの音声と字幕が自動的にセットされます
-        2. 背景画像をアップロード
-        3. BGMを選択
-        4. 「動画を生成する」ボタンをクリック
-        """)
-
-    # モード切り替えイベントハンドラ（create_generator_tab内で直接配線）
-    def _toggle_mode(mode):
-        if mode == "🚀 全自動モード":
-            return gr.update(visible=True), gr.update(visible=False)
-        else:
-            return gr.update(visible=False), gr.update(visible=True)
-
-    mode_selector.change(
-        fn=_toggle_mode,
-        inputs=[mode_selector],
-        outputs=[auto_mode_column, step_mode_column]
-    )
-
     return {
-        "mode_selector": mode_selector,
         "auto_mode_column": auto_mode_column,
-        "step_mode_column": step_mode_column,
         # 全自動モードコンポーネント
         "theme_input": theme_input,
         "research_mode_dropdown": research_mode_dropdown,
@@ -2459,7 +2140,6 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
         "check_api_btn": check_api_btn,
         "youtube_upload_checkbox": youtube_upload_checkbox,
         "generate_btn": generate_btn,
-        "script_only_btn": script_only_btn,
         "research_only_btn": research_only_btn,
         "research_output": research_output,
         "research_json_file": research_json_file,
@@ -2480,33 +2160,6 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
         "bg_preview": bg_preview,
         "bg_thumbnail_preview": bg_thumbnail_preview,
         "bg_status": bg_status,
-        # ステップモードコンポーネント（手動タブから統合）
-        "step_load_research_btn": step_load_research_btn,
-        "step_research_input": step_research_input,
-        "step_theme_input": step_theme_input,
-        "step_llm_model": step_llm_model,
-        "step_generate_script_btn": step_generate_script_btn,
-        "step_script_output": step_script_output,
-        "step_comparison_state": step_comparison_state,
-        "step_comparison_report": step_comparison_report,
-        "step_restore_dropdown": step_restore_dropdown,
-        "step_restore_btn": step_restore_btn,
-        "step_clear_comparison_btn": step_clear_comparison_btn,
-        "step_export_session_btn": step_export_session_btn,
-        "step_export_status": step_export_status,
-        "step_script_editor": step_script_editor,
-        "step_synthesize_btn": step_synthesize_btn,
-        "step_audio_output": step_audio_output,
-        "step_subtitle_output": step_subtitle_output,
-        "step_synthesis_log": step_synthesis_log,
-        "step_audio_input": step_audio_input,
-        "step_subtitle_input": step_subtitle_input,
-        "step_background_input": step_background_input,
-        "step_bgm_dropdown": step_bgm_dropdown,
-        "step_render_btn": step_render_btn,
-        "step_video_output": step_video_output,
-        "step_video_file_output": step_video_file_output,
-        "step_render_log": step_render_log,
     }
 
 
@@ -2542,27 +2195,29 @@ def create_ui() -> gr.Blocks:
         thumbnail_state = gr.State(value=None)
         
         generator_components: dict[str, object] = {}
+        hitl_components: dict[str, object] = {}
         dashboard_components: dict[str, gr.components.Component] = {}
         settings_components: dict[str, gr.components.Component] = {}
 
         # タブ切り替え
         with gr.Tabs():
-            with gr.TabItem("🎬 動画生成", id="generator"):
+            with gr.TabItem("🚀 全自動モード", id="auto_mode"):
                 generator_components = create_generator_tab(saved_settings=saved_settings, assets=assets)
+            
+            with gr.TabItem("🎯 HITLモード", id="hitl_mode"):
+                hitl_components = create_hitl_tab(assets=assets)
 
-            # Tab 2: Dashboard
+            # Tab 3: Dashboard
             with gr.TabItem("📊 ダッシュボード", id="dashboard"):
                 dashboard_components = create_dashboard_tab()
 
-            # Tab 3: Settings
+            # Tab 4: Settings
             with gr.TabItem("⚙️ 設定", id="settings"):
                 settings_components = create_settings_tab(
                     config=config,
                     default_upload_enabled=default_enable_upload,
                     default_footer_text=default_footer_text,
                 )
-            
-        # 手動制作タブは動画生成タブのステップモードに統合されました
         
         # フッター
         gr.Markdown(
@@ -2851,14 +2506,6 @@ def create_ui() -> gr.Blocks:
             outputs=[generator_components["generate_btn"]]
         )
         
-        # 台本のみ作成（AIプロデューサーモード）
-        generator_components["script_only_btn"].click(
-            fn=generate_script_only,
-            inputs=[generator_components["theme_input"], generator_components["research_mode_dropdown"]],
-            outputs=[generator_components["step_script_editor"], generator_components["log_output"]],
-            show_progress="full"
-        )
-        
         # リサーチのみ実行
         generator_components["research_only_btn"].click(
             fn=research_only,
@@ -2882,110 +2529,207 @@ def create_ui() -> gr.Blocks:
             outputs=[generator_components["research_json_output"]]
         )
         
-        # ========== ステップモードのイベントハンドラ ==========
-
-        # 台本生成 (Step A)
-        generator_components["step_generate_script_btn"].click(
-            fn=generate_script_from_research,
+        # ========== HITLモードのイベントハンドラ ==========
+        
+        # Gate 1: Research
+        # Step 1: Execute research and populate child components (Column still hidden)
+        # Step 2 (.then): Show the preview Column + enable approve button
+        # This split avoids a Gradio bug where toggling Column visibility
+        # in the same return as child component values causes values to be lost.
+        _research_outputs = [
+            hitl_components["hitl_session_state"],
+            hitl_components["hitl_research_progress"],
+            hitl_components["hitl_research_angle"],
+            hitl_components["hitl_research_queries"],
+            hitl_components["hitl_research_content"],
+            hitl_components["hitl_research_sources"],
+            hitl_components["hitl_research_brief_state"],
+        ]
+        hitl_components["hitl_research_btn"].click(
+            fn=hitl_execute_research,
             inputs=[
-                generator_components["step_research_input"],
-                generator_components["step_theme_input"],
-                generator_components["step_llm_model"],
-                generator_components["step_comparison_state"]
+                hitl_components["hitl_theme_input"],
+                hitl_components["hitl_mode_dropdown"],
+                hitl_components["hitl_session_state"]
             ],
+            outputs=_research_outputs
+        ).then(
+            fn=_show_research_preview,
+            inputs=_research_outputs,
             outputs=[
-                generator_components["step_script_output"],
-                generator_components["step_script_editor"],
-                generator_components["step_comparison_report"],
-                generator_components["step_comparison_state"],
-                generator_components["step_restore_dropdown"]
-            ],
-            show_progress="full"
-        )
-
-        # リサーチデータ読み込み
-        generator_components["step_load_research_btn"].click(
-            fn=load_latest_research,
-            inputs=[],
-            outputs=[
-                generator_components["step_research_input"],
-                generator_components["step_theme_input"]
+                hitl_components["hitl_research_preview_section"],
+                hitl_components["hitl_research_approve_btn"]
             ]
-        )
-
-        # 比較データクリア
-        generator_components["step_clear_comparison_btn"].click(
-            fn=clear_comparison_data,
-            inputs=[],
-            outputs=[
-                generator_components["step_comparison_report"],
-                generator_components["step_comparison_state"]
-            ]
-        )
-
-        # 復元機能
-        generator_components["step_restore_btn"].click(
-            fn=restore_script_from_comparison,
-            inputs=[
-                generator_components["step_restore_dropdown"],
-                generator_components["step_comparison_state"]
-            ],
-            outputs=[
-                generator_components["step_script_output"],
-                generator_components["step_script_editor"]
-            ]
-        )
-
-        # エクスポート機能
-        generator_components["step_export_session_btn"].click(
-            fn=export_comparison_session,
-            inputs=[
-                generator_components["step_comparison_state"],
-                generator_components["step_research_input"],
-                generator_components["step_theme_input"]
-            ],
-            outputs=[
-                generator_components["step_export_status"],
-                generator_components["step_export_status"]
-            ]
-        )
-
-        # 音声合成 (Step B)
-        generator_components["step_synthesize_btn"].click(
-            fn=synthesize_audio_from_script,
-            inputs=[generator_components["step_script_editor"]],
-            outputs=[
-                generator_components["step_audio_output"],
-                generator_components["step_subtitle_output"],
-                generator_components["step_synthesis_log"],
-                generator_components["step_audio_input"],
-                generator_components["step_subtitle_input"],
-            ],
-            show_progress="full"
-        )
-
-        # 動画レンダリング (Step C)
-        generator_components["step_render_btn"].click(
-            fn=render_video_from_assets,
-            inputs=[
-                generator_components["step_audio_input"],
-                generator_components["step_subtitle_input"],
-                generator_components["step_background_input"],
-                generator_components["step_bgm_dropdown"],
-            ],
-            outputs=[
-                generator_components["step_video_output"],
-                generator_components["step_video_file_output"],
-                generator_components["step_render_log"],
-            ],
-            show_progress="full"
         )
         
-        # こだわりステップモード（旧）は削除済み - ステップモードはcreate_generator_tabに統合
+        hitl_components["hitl_research_approve_btn"].click(
+            fn=hitl_approve_research,
+            inputs=[hitl_components["hitl_session_state"]],
+            outputs=[
+                hitl_components["gate2_accordion"],
+                hitl_components["hitl_research_progress"]
+            ]
+        ).then(
+            # Auto-start script generation after approval
+            fn=hitl_execute_scripting,
+            inputs=[
+                hitl_components["hitl_session_state"],
+                hitl_components["hitl_provider_dropdown"],
+                hitl_components["hitl_avoid_topics"]
+            ],
+            outputs=[
+                hitl_components["hitl_script_progress"],
+                hitl_components["hitl_script_editor_section"],
+                hitl_components["hitl_script_turns_editor"],
+                hitl_components["hitl_script_json_editor"],
+                hitl_components["hitl_script_title"],
+                hitl_components["hitl_script_thumbnail_title"],
+                hitl_components["hitl_script_description"],
+                hitl_components["hitl_script_approve_btn"]
+            ]
+        )
+        
+        hitl_components["hitl_research_redo_btn"].click(
+            fn=hitl_redo_research,
+            inputs=[],
+            outputs=[
+                hitl_components["hitl_research_preview_section"],
+                hitl_components["hitl_research_progress"]
+            ]
+        )
+        
+        # Import existing research data (import only, no script generation)
+        hitl_components["hitl_import_research_btn"].click(
+            fn=hitl_import_research,
+            inputs=[hitl_components["hitl_import_research_file"]],
+            outputs=[
+                hitl_components["hitl_session_state"],
+                hitl_components["hitl_research_progress"],
+                hitl_components["hitl_research_angle"],
+                hitl_components["hitl_research_queries"],
+                hitl_components["hitl_research_content"],
+                hitl_components["hitl_research_sources"],
+                hitl_components["hitl_research_brief_state"]
+            ]
+        ).then(
+            fn=_show_research_preview,
+            inputs=[
+                hitl_components["hitl_session_state"],
+                hitl_components["hitl_research_progress"],
+                hitl_components["hitl_research_angle"],
+                hitl_components["hitl_research_queries"],
+                hitl_components["hitl_research_content"],
+                hitl_components["hitl_research_sources"],
+                hitl_components["hitl_research_brief_state"]
+            ],
+            outputs=[
+                hitl_components["hitl_research_preview_section"],
+                hitl_components["hitl_research_approve_btn"]
+            ]
+        )
+        
+        # Gate 2: Scripting
+        hitl_components["hitl_script_generate_btn"].click(
+            fn=hitl_execute_scripting,
+            inputs=[
+                hitl_components["hitl_session_state"],
+                hitl_components["hitl_provider_dropdown"],
+                hitl_components["hitl_avoid_topics"]
+            ],
+            outputs=[
+                hitl_components["hitl_script_progress"],
+                hitl_components["hitl_script_editor_section"],
+                hitl_components["hitl_script_turns_editor"],
+                hitl_components["hitl_script_json_editor"],
+                hitl_components["hitl_script_title"],
+                hitl_components["hitl_script_thumbnail_title"],
+                hitl_components["hitl_script_description"],
+                hitl_components["hitl_script_approve_btn"]
+            ]
+        )
+        
+        # Import existing script data
+        hitl_components["hitl_import_script_btn"].click(
+            fn=hitl_import_script,
+            inputs=[hitl_components["hitl_import_script_file"]],
+            outputs=[
+                hitl_components["hitl_session_state"],
+                hitl_components["hitl_script_progress"],
+                hitl_components["hitl_script_editor_section"],
+                hitl_components["hitl_script_turns_editor"],
+                hitl_components["hitl_script_json_editor"],
+                hitl_components["hitl_script_title"],
+                hitl_components["hitl_script_thumbnail_title"],
+                hitl_components["hitl_script_description"],
+                hitl_components["hitl_script_approve_btn"]
+            ]
+        )
+        
+        hitl_components["hitl_script_save_btn"].click(
+            fn=hitl_save_script_edits,
+            inputs=[
+                hitl_components["hitl_session_state"],
+                hitl_components["hitl_script_turns_editor"],
+                hitl_components["hitl_script_title"],
+                hitl_components["hitl_script_thumbnail_title"],
+                hitl_components["hitl_script_description"]
+            ],
+            outputs=[hitl_components["hitl_script_save_status"]]
+        )
+        
+        hitl_components["hitl_script_approve_btn"].click(
+            fn=hitl_approve_script,
+            inputs=[hitl_components["hitl_session_state"]],
+            outputs=[
+                hitl_components["gate3_accordion"],
+                hitl_components["hitl_script_progress"]
+            ]
+        )
+        
+        hitl_components["hitl_script_regenerate_btn"].click(
+            fn=hitl_regenerate_script,
+            inputs=[
+                hitl_components["hitl_session_state"],
+                hitl_components["hitl_provider_dropdown"],
+                hitl_components["hitl_avoid_topics"]
+            ],
+            outputs=[
+                hitl_components["hitl_script_progress"],
+                hitl_components["hitl_script_editor_section"],
+                hitl_components["hitl_script_turns_editor"],
+                hitl_components["hitl_script_json_editor"],
+                hitl_components["hitl_script_title"],
+                hitl_components["hitl_script_thumbnail_title"],
+                hitl_components["hitl_script_description"],
+                hitl_components["hitl_script_approve_btn"]
+            ]
+        )
+        
+        # Gate 3: Production
+        hitl_components["hitl_render_btn"].click(
+            fn=hitl_execute_production,
+            inputs=[
+                hitl_components["hitl_session_state"],
+                hitl_components["hitl_bg_dropdown"],
+                hitl_components["hitl_bgm_dropdown"],
+                hitl_components["hitl_speed_slider"],
+                hitl_components["hitl_bgm_volume_slider"]
+            ],
+            outputs=[
+                hitl_components["hitl_render_progress"],
+                hitl_components["hitl_output_section"],
+                hitl_components["hitl_video_output"],
+                hitl_components["hitl_video_file"],
+                hitl_components["hitl_audio_output"],
+                hitl_components["hitl_subtitle_file"],
+                hitl_components["hitl_metadata_output"]
+            ]
+        )
     
     return app
 
 
 if __name__ == "__main__":
     app = create_ui()
+    app.queue()  # Enable queue for proper async handling
     app.launch()
