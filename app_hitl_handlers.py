@@ -354,18 +354,25 @@ async def hitl_import_script(
         
         # Also create script_artifact.json with visual identity and segments
         # This allows production phase to work immediately after import
-        from core.models.visual import VisualIdentity
+        from core.models.visual import (
+            VisualIdentity,
+            DEFAULT_PRIMARY_COLOR,
+            DEFAULT_SECONDARY_COLOR,
+            DEFAULT_COLOR_MOOD,
+            DEFAULT_AESTHETIC,
+            DEFAULT_VISUAL_KEYWORDS
+        )
         
         # Use imported visual_identity if available, otherwise create default
         if imported_visual_identity:
             visual_identity_dict = imported_visual_identity
         else:
             visual_identity = VisualIdentity(
-                primary_color="electric cyan",
-                secondary_color="hot magenta",
-                color_mood="cyberpunk futuristic",
-                aesthetic="Neon Cyberpunk",
-                visual_keywords=["neon", "futuristic", "cyberpunk"]
+                primary_color=DEFAULT_PRIMARY_COLOR,
+                secondary_color=DEFAULT_SECONDARY_COLOR,
+                color_mood=DEFAULT_COLOR_MOOD,
+                aesthetic=DEFAULT_AESTHETIC,
+                visual_keywords=DEFAULT_VISUAL_KEYWORDS.copy()
             )
             visual_identity_dict = visual_identity.model_dump()
         
@@ -658,24 +665,30 @@ def hitl_save_script_edits(
         return "❌ エラー: セッションが見つかりません。"
     
     # Debug: Log what we received from Gradio
-    logger.info(f"hitl_save_script_edits: Received turns_data type={type(turns_data).__name__}")
+    logger.debug(f"hitl_save_script_edits: Received turns_data type={type(turns_data).__name__}")
     
     # Handle pandas DataFrame (Gradio may pass DataFrame instead of List[List])
-    import pandas as pd
-    if isinstance(turns_data, pd.DataFrame):
-        logger.info(f"hitl_save_script_edits: Received DataFrame with {len(turns_data)} rows")
-        logger.info(f"hitl_save_script_edits: DataFrame columns: {turns_data.columns.tolist()}")
-        if len(turns_data) > 0:
-            logger.info(f"hitl_save_script_edits: First row: {turns_data.iloc[0].tolist()}")
-            logger.info(f"hitl_save_script_edits: Last row: {turns_data.iloc[-1].tolist()}")
-        # Convert DataFrame to List[List]
-        turns_data = turns_data.values.tolist()
-        logger.info(f"hitl_save_script_edits: Converted to list with {len(turns_data)} rows")
-    else:
-        logger.info(f"hitl_save_script_edits: Received {len(turns_data) if turns_data else 0} rows")
+    try:
+        import pandas as pd
+        if isinstance(turns_data, pd.DataFrame):
+            logger.debug(f"hitl_save_script_edits: Received DataFrame with {len(turns_data)} rows")
+            logger.debug(f"hitl_save_script_edits: DataFrame columns: {turns_data.columns.tolist()}")
+            if len(turns_data) > 0:
+                logger.debug(f"hitl_save_script_edits: First row: {turns_data.iloc[0].tolist()}")
+                logger.debug(f"hitl_save_script_edits: Last row: {turns_data.iloc[-1].tolist()}")
+            # Convert DataFrame to List[List]
+            turns_data = turns_data.values.tolist()
+            logger.debug(f"hitl_save_script_edits: Converted to list with {len(turns_data)} rows")
+        else:
+            logger.debug(f"hitl_save_script_edits: Received {len(turns_data) if turns_data else 0} rows")
+            if turns_data and len(turns_data) > 0:
+                logger.debug(f"hitl_save_script_edits: First row: {turns_data[0]}")
+                logger.debug(f"hitl_save_script_edits: Last row: {turns_data[-1]}")
+    except ImportError:
+        # pandas not installed, assume turns_data is already List[List]
+        logger.debug(f"hitl_save_script_edits: pandas not available, assuming List[List] format")
         if turns_data and len(turns_data) > 0:
-            logger.info(f"hitl_save_script_edits: First row: {turns_data[0]}")
-            logger.info(f"hitl_save_script_edits: Last row: {turns_data[-1]}")
+            logger.debug(f"hitl_save_script_edits: Received {len(turns_data)} rows")
     
     try:
         # Initialize SessionManager

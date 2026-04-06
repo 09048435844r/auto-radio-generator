@@ -181,10 +181,10 @@ class AudioTrackRenderer:
         
         # Build filter with or without ducking
         if jingle_periods:
-            # Guard against division by zero
-            if normal_level <= 0:
+            # Guard against invalid volume settings
+            if normal_level <= 0 or self.ducking_level < 0:
                 logger.warning(
-                    f"BGM volume is zero or negative ({normal_level}), ducking disabled"
+                    f"Invalid volume settings (normal={normal_level}, ducking={self.ducking_level}), ducking disabled"
                 )
                 # No ducking (fallback to original behavior)
                 return (

@@ -36,7 +36,11 @@ class SessionManager:
             self.session_id = session_id
         
         self.session_dir = self.workspace_root / self.session_id
-        self.session_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.session_dir.mkdir(parents=True, exist_ok=True)
+        except FileExistsError:
+            # Already created by another process, safe to ignore
+            pass
     
     def get_research_brief_path(self) -> Path:
         """Get path to ResearchBrief file"""

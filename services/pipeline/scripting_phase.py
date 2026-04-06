@@ -150,9 +150,23 @@ async def execute_scripting_phase(
             await asyncio.sleep(0)  # Yield to event loop for Gradio progress flush
         except Exception as e:
             cb.log(f"⚠ Visual identity generation failed: {e}")
-            cb.log("[INFO] Falling back to default colors")
-            visual_identity = None
-            cb.progress(0.80, "⚠️ Using fallback visual identity")
+            cb.log("[INFO] Using default visual identity")
+            from core.models.visual import (
+                VisualIdentity,
+                DEFAULT_PRIMARY_COLOR,
+                DEFAULT_SECONDARY_COLOR,
+                DEFAULT_COLOR_MOOD,
+                DEFAULT_AESTHETIC,
+                DEFAULT_VISUAL_KEYWORDS
+            )
+            visual_identity = VisualIdentity(
+                primary_color=DEFAULT_PRIMARY_COLOR,
+                secondary_color=DEFAULT_SECONDARY_COLOR,
+                color_mood=DEFAULT_COLOR_MOOD,
+                aesthetic=DEFAULT_AESTHETIC,
+                visual_keywords=DEFAULT_VISUAL_KEYWORDS.copy()
+            )
+            cb.progress(0.80, "⚠️ Using default visual identity")
             await asyncio.sleep(0)  # Yield to event loop for Gradio progress flush
     else:
         cb.log("[INFO] Static mode: Skipping visual identity generation")

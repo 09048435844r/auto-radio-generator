@@ -140,7 +140,6 @@ class FluxClient:
                     response.raise_for_status()
                     break  # Success, exit retry loop
             except httpx.TimeoutException as e:
-                last_exception = e
                 if attempt < max_retries - 1:
                     logger.warning(f"FLUX.1 timeout on attempt {attempt + 1}/{max_retries}, retrying...")
                     console.print(f"[yellow]⚠ Timeout ({attempt + 1}/{max_retries}), retrying...[/yellow]")
@@ -151,23 +150,18 @@ class FluxClient:
                     logger.error(error_msg)
                     console.print(f"[red]✗ {error_msg}[/red]")
                     raise RuntimeError(error_msg) from e
-            except (httpx.HTTPStatusError, Exception) as e:
-                # Non-timeout errors: fail immediately without retry
-                last_exception = e
-                break
-        
-        # Handle non-timeout errors after retry loop
-        if last_exception and not isinstance(last_exception, httpx.TimeoutException):
-            if isinstance(last_exception, httpx.HTTPStatusError):
-                error_msg = f"Forge API error: {last_exception.response.status_code}"
+            except httpx.HTTPStatusError as e:
+                # Non-timeout HTTP errors: fail immediately
+                error_msg = f"Forge API error: {e.response.status_code}"
                 logger.error(error_msg)
                 console.print(f"[red]✗ {error_msg}[/red]")
-                raise RuntimeError(error_msg) from last_exception
-            else:
-                error_msg = f"Image generation failed: {last_exception}"
+                raise RuntimeError(error_msg) from e
+            except Exception as e:
+                # Other errors: fail immediately
+                error_msg = f"Image generation failed: {e}"
                 logger.error(error_msg)
                 console.print(f"[red]✗ {error_msg}[/red]")
-                raise RuntimeError(error_msg) from last_exception
+                raise RuntimeError(error_msg) from e
         
         try:
                 

@@ -83,14 +83,20 @@ class TimelineCalculator:
                 jingle_path = jingle_provider.get_random_jingle()
                 if jingle_path:
                     jingle_duration = jingle_provider.get_jingle_duration(jingle_path)
-                    # Start jingle after pre-jingle pause (breathing space before jingle)
-                    # Pause structure: [segment end] + [pre-pause] + [jingle]
-                    jingle_start = timing.end_sec + self.pre_jingle_pause_sec
-                    logger.debug(
-                        f"Jingle for segment {segment.segment_id}: {jingle_path.name} "
-                        f"at {jingle_start:.2f}s (pre-pause: {self.pre_jingle_pause_sec:.2f}s, "
-                        f"duration: {jingle_duration:.2f}s)"
-                    )
+                    # Validate jingle duration
+                    if jingle_duration is None or jingle_duration <= 0:
+                        logger.warning(f"Invalid jingle duration ({jingle_duration}) for {jingle_path.name}, skipping jingle")
+                        jingle_path = None
+                        jingle_duration = None
+                    else:
+                        # Start jingle after pre-jingle pause (breathing space before jingle)
+                        # Pause structure: [segment end] + [pre-pause] + [jingle]
+                        jingle_start = timing.end_sec + self.pre_jingle_pause_sec
+                        logger.debug(
+                            f"Jingle for segment {segment.segment_id}: {jingle_path.name} "
+                            f"at {jingle_start:.2f}s (pre-pause: {self.pre_jingle_pause_sec:.2f}s, "
+                            f"duration: {jingle_duration:.2f}s)"
+                        )
             
             # Calculate video timing (for jingle-synchronized transitions)
             # If jingle exists, extend video display until jingle ends (including pre-pause)

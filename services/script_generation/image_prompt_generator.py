@@ -289,7 +289,8 @@ Generate the prompt now:"""
                 # Add 2-3 turns from middle only if they're not already included in first 12
                 if mid_point >= 12:
                     sample_turns.extend(segment.turns[mid_point:mid_point+2])
-                # Add last 2 turns only if they're not already included in first 12
+                # Add last 2 turns only if segment is long enough to avoid overlap
+                # (total_turns > 14 ensures last 2 turns are beyond first 12)
                 if total_turns > 14:
                     sample_turns.extend(segment.turns[-2:])
             

@@ -118,7 +118,13 @@ class ImageProvider:
             Path: Background image path
         """
         if self.mode == "dynamic":
-            return await self._generate_dynamic_image(segment)
+            try:
+                return await self._generate_dynamic_image(segment)
+            except Exception as e:
+                logger.error(f"Dynamic image generation failed: {e}")
+                logger.info("Falling back to static image selection")
+                console.print(f"[yellow]⚠ Dynamic generation failed, using static fallback[/yellow]")
+                return self._select_static_image(segment)
         else:
             return self._select_static_image(segment)
     
