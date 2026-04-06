@@ -909,12 +909,35 @@ async def execute_production_phase(
     
     # ========== Step 3: サムネイル生成 ==========
     cb.log(f"\n== Phase 3-3: サムネイル生成 ==")
+    
+    # サムネイル背景画像を決定（dynamic/static）
+    thumbnail_bg_mode = config.yaml.video_renderer.thumbnail_background_mode
+    if thumbnail_bg_mode == "dynamic" and visual_identity:
+        # FLUX.1で動的生成
+        cb.log("FLUX.1でサムネイル背景を生成中...")
+        thumbnail_bg_generator = ThumbnailBackgroundGenerator(config, output_dir=output_dir)
+        
+        # Generate script summary for thumbnail prompt
+        script_summary = script.description[:300] if script.description else script.title
+        
+        thumbnail_bg_output = output_dir / f"thumbnail_background_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        thumbnail_bg_path = await thumbnail_bg_generator.generate(
+            theme=script.title,
+            script_summary=script_summary,
+            output_path=thumbnail_bg_output,
+            visual_identity=visual_identity
+        )
+        cb.log(f"✓ サムネイル背景生成完了: {thumbnail_bg_path.name}")
+    else:
+        # 静的背景画像を使用
+        thumbnail_bg_path = background_image
+    
     thumbnail_generator = ThumbnailGenerator()
     thumbnail_path = output_dir / "thumbnail.png"
     thumbnail_generator.generate(
         title=script.title,
         thumbnail_title=script.thumbnail_title,
-        background_path=background_image,
+        background_path=thumbnail_bg_path,
         output_path=thumbnail_path
     )
     cb.log(f"✓ サムネイル画像生成: {thumbnail_path.name}")
