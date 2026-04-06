@@ -1,8 +1,8 @@
 # Auto Radio Generator - Development Roadmap
 
 > **Created:** 2026-02-07  
-> **Base Version:** v3.5.0 (Hierarchical Agentic Workflow)  
-> **Last Updated:** 2026-03-22  
+> **Base Version:** v3.6.1 (HITL Mode + Bug Fixes)  
+> **Last Updated:** 2026-04-06  
 > **Author:** AI Tech Lead (Cascade)
 
 ---
@@ -24,7 +24,7 @@
 
 ---
 
-## 📊 Current Status (v3.5.0)
+## 📊 Current Status (v3.6.1)
 
 ### Core Pipeline
 - [x] **Research Phase** — Perplexity API による5モード対応リサーチ（debate / voices / trivia / weekly_digest / lecture）
@@ -361,7 +361,7 @@
 
 ## 🧩 Tech Stack Overview
 
-### Current（v3.3.0）
+### Current（v3.6.1）
 
 | Layer | Technology | Role |
 |-------|-----------|------|
@@ -401,4 +401,4 @@
 
 ---
 
-*Auto Radio Generator v3.3.0 | "Input Minimal, Data Maximal"*
+*Auto Radio Generator v3.6.1 | "Input Minimal, Data Maximal"*

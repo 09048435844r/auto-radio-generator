@@ -39,7 +39,7 @@ from core.models.research import ResearchSource
 from services.execution_logger import ExecutionLogger
 
 # アプリケーションバージョン
-APP_VERSION = "v3.3.2"
+APP_VERSION = "v3.6.1"
 
 
 ReferenceEntry = str | ResearchSource

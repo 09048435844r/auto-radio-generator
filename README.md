@@ -1,4 +1,4 @@
-# 🎙️ 自動ラジオ動画生成システム v3.5.0+
+# 🎙️ 自動ラジオ動画生成システム v3.6.1
 
 Perplexity + **複数LLM (Gemini/OpenAI/Anthropic)** + VOICEVOX + FFmpeg + **FLUX.1** を連携し、
 リサーチから台本生成、音声合成、動画レンダリング、YouTube投稿用メタデータ作成までを一気通貫で自動化するプロジェクトです。

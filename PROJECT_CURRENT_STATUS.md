@@ -1,8 +1,8 @@
 # プロジェクト現況レポート: Auto Radio Generator
 
-**生成日時**: 2026-03-30 02:40:00
-**バージョン**: v3.5.0+ (unreleased fixes)
-**ブランチ**: main
+**生成日時**: 2026-04-06 22:10:00
+**バージョン**: v3.6.1
+**ブランチ**: fix-json
 
 ---
 
@@ -153,7 +153,7 @@ VOICEVOX_BASE_URL=http://localhost:50021
 #### `app.py` — Gradio Web UI (1885行)
 
 ```python
-"""自動ラジオ動画生成システム - Gradio Web UI v3.2.0"""
+"""自動ラジオ動画生成システム - Gradio Web UI v3.6.1"""
 import gradio as gr
 from workflow import UIOverrides, run_workflow_sync, WorkflowResult, scan_assets, create_script_generator, load_config
 from core.models import Script
