@@ -1,6 +1,6 @@
 # プロジェクト現況レポート
-**生成日時**: 2026-04-04  
-**プロジェクト名**: 自動ラジオ動画生成システム v3.6  
+**生成日時**: 2026-04-06  
+**プロジェクト名**: 自動ラジオ動画生成システム v3.6.1  
 **対象読者**: 設計・要件定義担当AI (Gemini/ChatGPT等)
 
 ---
@@ -675,6 +675,63 @@ class FfmpegRenderer(IVideoRenderer):
 
 ### 4.1 最近の変更履歴
 
+#### ✅ 完了した機能追加・バグ修正 (2026-04-06)
+
+1. **HITLモード: 台本インポート機能の拡張**
+   - `script_artifact.json`を直接インポート可能に
+   - `segments`（セグメント情報）と`visual_identity`（ビジュアルアイデンティティ）を保持
+   - インポート時に自動的に`RadioScriptArtifact`を生成
+   - ファイル: `app_hitl_handlers.py` (hitl_import_script)
+
+2. **FLUX.1動的背景画像生成の完全対応**
+   - セグメント背景画像の動的生成（既存機能の確認）
+   - サムネイル背景画像の動的生成（新規追加）
+   - `thumbnail_background_mode: "dynamic"`設定時にFLUX.1でサムネイル背景を生成
+   - ファイル: `workflow.py` (execute_production_phase)
+
+3. **HITLモード: 台本保存のバグ修正**
+   - Gradio DataFrameが`pandas.DataFrame`型で値を渡す問題に対応
+   - `.values.tolist()`で`List[List]`に変換してから処理
+   - 台本保存時のPydantic検証エラーを解消
+   - ファイル: `app_hitl_handlers.py` (hitl_save_script_edits)
+
+4. **デバッグログの追加**
+   - インポート処理のデバッグログ追加（`script.json` vs `script_artifact.json`の判定）
+   - セグメント数とビジュアルアイデンティティの有無をログ出力
+   - ファイル: `app_hitl_handlers.py`
+
+#### 📝 変更詳細
+
+**台本インポート機能の改善**
+```python
+# script_artifact.json検出ロジック
+is_artifact = 'session_id' in data and 'script' in data
+
+if is_artifact:
+    # segments と visual_identity を保持
+    script = Script(**data['script'])
+    imported_segments = data.get('segments')
+    imported_visual_identity = data.get('visual_identity')
+else:
+    # 通常のscript.jsonとして処理
+    script = Script(**data)
+    imported_segments = None
+    imported_visual_identity = None
+```
+
+**サムネイル背景画像の動的生成**
+```python
+# thumbnail_background_mode: "dynamic" の場合
+if thumbnail_bg_mode == "dynamic" and visual_identity:
+    thumbnail_bg_generator = ThumbnailBackgroundGenerator(config, output_dir=output_dir)
+    thumbnail_bg_path = await thumbnail_bg_generator.generate(
+        theme=script.title,
+        script_summary=script.description[:300],
+        output_path=thumbnail_bg_output,
+        visual_identity=visual_identity
+    )
+```
+
 #### ✅ 完了した機能追加 (2026-01-16)
 
 1. **講座モード (lecture) の追加**
@@ -697,15 +754,6 @@ class FfmpegRenderer(IVideoRenderer):
    - README.md: 5つのリサーチモード、リサーチモード比較表を追加
    - config.yaml: 講座モードのドキュメント追加
    - コードクリーンアップ: type hints追加、PEP 8準拠
-
-#### 📝 コミット履歴
-```
-fed212e - Refactor: Code cleanup and docs update (2026-01-16)
-  - README.md: 講座モード追加、リサーチモード比較表追加
-  - config.yaml: 講座モード設定追加
-  - lecture_prompt.py: type hints追加
-  - time_expressions.py: ドキュメント更新
-```
 
 ---
 
@@ -829,19 +877,32 @@ fed212e - Refactor: Code cleanup and docs update (2026-01-16)
 ## 6. Summary
 
 ### プロジェクトの現状
-- **バージョン**: v3.0 (安定版)
-- **主要機能**: 5つのリサーチモード、3つの台本形式、音声合成、動画生成、YouTubeチャプター対応
-- **技術スタック**: Python 3.10+, Gradio, Pydantic, VOICEVOX, FFmpeg
-- **開発状況**: 基本機能は完成、講座モードのチャプタータイトル改善が残課題
+- **バージョン**: v3.6.1 (安定版)
+- **主要機能**: 
+  - 5つのリサーチモード（ディベート、世間の声、トリビア、週次ダイジェスト、講座）
+  - HITLモード（Human-in-the-Loop）による台本編集・レビュー
+  - FLUX.1による動的背景画像生成（セグメント背景・サムネイル背景）
+  - 音声合成（VOICEVOX）、動画生成（FFmpeg）、YouTubeチャプター対応
+- **技術スタック**: Python 3.10+, Gradio, Pydantic, VOICEVOX, FFmpeg, FLUX.1 (Stable Diffusion WebUI Forge)
+- **開発状況**: 
+  - ✅ HITLモードの台本インポート・編集機能が完全動作
+  - ✅ FLUX.1動的背景画像生成が完全対応（セグメント・サムネイル）
+  - ✅ Gradio UI関連のバグ修正完了
+
+### 最近の改善点 (2026-04-06)
+1. **台本インポート機能の拡張**: `script_artifact.json`を直接インポート可能に、セグメント情報を保持
+2. **FLUX.1サムネイル背景生成**: サムネイル背景画像もFLUX.1で動的生成可能に
+3. **Gradio DataFrameバグ修正**: 台本保存時の`pandas.DataFrame`型変換問題を解決
 
 ### 次のマイルストーン候補
 1. 講座モードのチャプタータイトル生成を根本的に改善
 2. マニュアル制作モードのプレビュー機能追加
 3. テスト自動化の導入
 4. パフォーマンス最適化（API呼び出しの並列化）
+5. FLUX.1プロンプト生成の最適化
 
 ---
 
 **レポート作成者**: Cascade AI (Tech Lead)  
 **対象読者**: 設計・要件定義担当AI (Gemini/ChatGPT等)  
-**更新日**: 2026-01-16
+**更新日**: 2026-04-06
