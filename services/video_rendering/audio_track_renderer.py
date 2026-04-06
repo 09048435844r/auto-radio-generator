@@ -88,8 +88,11 @@ class AudioTrackRenderer:
         if process.returncode != 0:
             error_msg = stderr.decode('utf-8', errors='replace')
             logger.error(f"Audio track rendering failed: {error_msg}")
+            logger.error(f"FFmpeg command: {' '.join(cmd)}")
             console.print(f"[red]✗ Audio track rendering failed[/red]")
-            raise RuntimeError(f"FFmpeg audio rendering failed with code {process.returncode}")
+            console.print(f"[red]FFmpeg error output:[/red]")
+            console.print(f"[dim]{error_msg}[/dim]")
+            raise RuntimeError(f"FFmpeg audio rendering failed with code {process.returncode}\n\nFFmpeg error:\n{error_msg}")
         
         console.print(f"[green]✓ Audio track rendered: {output_path.name}[/green]")
         return output_path

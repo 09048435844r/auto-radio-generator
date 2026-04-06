@@ -18,7 +18,6 @@ def create_hitl_tab(assets: dict) -> dict[str, object]:
     # Session state variables
     hitl_session_state = gr.State(value=None)
     hitl_research_brief_state = gr.State(value=None)
-    hitl_script_artifact_state = gr.State(value=None)
     
     gr.Markdown("""
     ## 🎯 HITL モード (Human-in-the-Loop)
@@ -184,7 +183,8 @@ def create_hitl_tab(assets: dict) -> dict[str, object]:
                         col_count=(4, "fixed"),
                         row_count=(20, "dynamic"),
                         interactive=True,
-                        wrap=True
+                        wrap=True,
+                        value=[]  # Initialize with empty list to enable gr.update(value=...)
                     )
                 
                 with gr.TabItem("🔧 JSONエディタ（上級者向け）"):
@@ -305,7 +305,6 @@ def create_hitl_tab(assets: dict) -> dict[str, object]:
         # State variables
         "hitl_session_state": hitl_session_state,
         "hitl_research_brief_state": hitl_research_brief_state,
-        "hitl_script_artifact_state": hitl_script_artifact_state,
         
         # Gate 1 components
         "gate1_accordion": gate1_accordion,

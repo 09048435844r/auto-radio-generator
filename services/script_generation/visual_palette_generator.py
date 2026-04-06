@@ -1,4 +1,5 @@
 """Visual palette generator for dynamic color-driven image generation"""
+import json
 import logging
 from typing import Optional
 
@@ -128,7 +129,7 @@ Theme: "Lo-fiヒップホップの魅力"
         
         # Use Gemini Flash for fast, low-cost palette generation
         gemini_config = getattr(config.yaml.script_generator, "gemini", None)
-        self.model_name = getattr(gemini_config, "flash_model", "gemini-2.0-flash-exp") if gemini_config else "gemini-2.0-flash-exp"
+        self.model_name = getattr(gemini_config, "flash_model", "gemini-3-flash-preview") if gemini_config else "gemini-3-flash-preview"
         
         logger.info(f"VisualPaletteGenerator initialized with model: {self.model_name}")
     
@@ -164,32 +165,42 @@ Summary:
 Create a visually distinctive brand (color palette + aesthetic) that captures the essence of this theme."""
         
         try:
-            response = await self.client.aio.models.generate_content(
-                model=self.model_name,
-                contents=[
-                    types.Content(
-                        role="user",
-                        parts=[types.Part(text=self.SYSTEM_PROMPT + "\n\n" + user_message)]
+            import asyncio
+            
+            prompt_text = self.SYSTEM_PROMPT + "\n\n" + user_message
+            
+            # Run sync client in a thread to avoid blocking the event loop.
+            # asyncio.wait_for only works reliably with asyncio.to_thread (not aio client).
+            def _sync_call() -> str:
+                response = self.client.models.generate_content(
+                    model=self.model_name,
+                    contents=prompt_text,
+                    config=types.GenerateContentConfig(
+                        temperature=0.9,
+                        max_output_tokens=512,
                     )
-                ],
-                config=types.GenerateContentConfig(
-                    temperature=0.9,  # High creativity for diverse palettes
-                    max_output_tokens=256,
-                    response_mime_type="application/json",
                 )
+                return response.text or ""
+            
+            response_text_raw = await asyncio.wait_for(
+                asyncio.to_thread(_sync_call),
+                timeout=10.0
             )
-            
-            # Debug: Log raw response
-            logger.debug(f"Visual identity API response: {response}")
-            logger.debug(f"Response text: '{response.text}'")
-            logger.debug(f"Response text length: {len(response.text) if response.text else 0}")
-            
             # Parse JSON response
-            import json
-            if not response.text or not response.text.strip():
-                raise ValueError("Empty response from API")
+            if not response_text_raw or not response_text_raw.strip():
+                raise ValueError("Visual identity API returned empty response.")
             
-            identity_data = json.loads(response.text)
+            # Clean response text (remove markdown code blocks if present)
+            response_text = response_text_raw.strip()
+            if response_text.startswith("```json"):
+                response_text = response_text[7:]  # Remove ```json
+            if response_text.startswith("```"):
+                response_text = response_text[3:]  # Remove ```
+            if response_text.endswith("```"):
+                response_text = response_text[:-3]  # Remove trailing ```
+            response_text = response_text.strip()
+            
+            identity_data = json.loads(response_text)
             
             identity = VisualIdentity(
                 primary_color=identity_data["primary_color"],
@@ -200,14 +211,15 @@ Create a visually distinctive brand (color palette + aesthetic) that captures th
                 reasoning=identity_data.get("reasoning", "")
             )
             
-            logger.info(f"Generated visual identity: {identity}")
-            console.print(f"[green]✓ Visual identity generated: {identity}[/green]")
+            logger.info(f"Generated visual identity: {identity.primary_color}, {identity.secondary_color}")
+            console.print(f"[green]✓ Visual identity generated[/green]")
             console.print(f"[dim]Reasoning: {identity.reasoning}[/dim]")
             
             return identity
             
         except Exception as e:
-            logger.error(f"Visual identity generation failed: {e}")
+            logger.error(f"Failed to generate visual identity: {e}")
+            logger.debug(f"Theme: {theme}")
             console.print(f"[red]✗ Visual identity generation failed: {e}[/red]")
             
             # Fallback to default cyberpunk identity

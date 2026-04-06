@@ -263,7 +263,7 @@ script_generator:
   gemini:
     model: "gemini-3.1-pro-preview"              # メインモデル（高品質・最新）
     fallback_model: "gemini-2.5-pro"     # フォールバックモデル（高速）
-    flash_model: "gemini-2.5-flash"      # 軽量モデル（サムネイル再作成用）
+    flash_model: "gemini-3-flash-preview"      # 軽量モデル（サムネイル再作成用）
     max_tokens: 16384                     # 最大トークン数（台本の長さ）
     # 料金情報（USD per 1M tokens）
     costs:

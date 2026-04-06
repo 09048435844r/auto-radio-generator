@@ -8,6 +8,40 @@
 ## [Unreleased]
 
 ### 追加
+- **HITLモード（Human-in-the-Loop）**: ユーザーが各フェーズで介入・編集できる新しいワークフローモード
+  - リサーチ結果のプレビューと承認機能
+  - 台本のリアルタイム編集機能（テキストエディタ/JSONエディタ）
+  - 既存データのインポート機能（research_brief.json / script.json）
+  - 3つのGate（Research → Script → Production）による段階的な制作フロー
+  - `app_hitl.py` と `app_hitl_handlers.py` を新規作成
+
+### 修正
+- **HITLモードのUX改善**: Human-in-the-Loopの思想に沿った明示的なユーザー介入を実現
+  - リサーチ承認後の自動台本生成を廃止（`.then()`チェーンを削除）
+  - 各フェーズの実行はユーザーが明示的にボタンをクリックした時のみ開始
+  - 意図しないAPI呼び出しとコスト発生を防止
+  - `app.py` のイベントハンドラを変更
+
+- **セキュアなエラーハンドリング**: 本番環境でのセキュリティリスクを排除
+  - UIに表示するエラーメッセージを簡潔化（`str(e)`のみ）
+  - 詳細なスタックトレースは`logger.error()`でサーバーログにのみ記録
+  - 全8箇所のエラーハンドリングを見直し（research/script/production各フェーズ）
+  - 機密情報（ファイルパス、環境変数等）の露出を防止
+  - `app_hitl_handlers.py` を変更
+
+### リファクタリング
+- **コード品質の改善**: Pythonベストプラクティスへの準拠とデッドコードの削除
+  - `import json`をファイル冒頭に移動（PEP 8準拠）
+  - 過剰なデバッグログを削除（`logger.debug()`の整理）
+  - 空レスポンス時のエラーメッセージを具体化（"Visual identity API returned empty response. Check API key and model availability."）
+  - 未使用の`hitl_script_artifact_state`変数を削除
+  - `services/script_generation/visual_palette_generator.py` と `app_hitl.py` を変更
+
+- **Git管理の適正化**: テスト実行結果の混入を防止
+  - `.gitignore`に`workspace/`ディレクトリを追加
+  - セッション単位のワークスペースファイルをバージョン管理から除外
+
+### 追加
 - **パイプライン分離アーキテクチャ（Pipeline Decoupling Architecture）**: モノリシックな動画生成パイプラインを「リサーチ」「台本作成」「動画生成」の3つの独立したフェーズに分離
   - **中間成果物のデータモデル**:
     - `ResearchBrief`: リサーチフェーズの出力成果物（検索クエリ、リサーチ内容、キュレーション結果を含む）

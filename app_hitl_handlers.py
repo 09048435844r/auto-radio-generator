@@ -3,9 +3,13 @@
 HITLモードのイベントハンドラとバックエンド連動ロジック
 """
 import gradio as gr
+import logging
 from pathlib import Path
 from typing import Optional, Tuple, List
 from datetime import datetime
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 from core.session_manager import SessionManager
 from core.models.artifacts import ResearchBrief
@@ -126,7 +130,12 @@ async def hitl_execute_research(
         
     except Exception as e:
         import traceback
-        error_msg = f"❌ リサーチ中にエラーが発生しました:\n{str(e)}\n\n{traceback.format_exc()}"
+        # Log detailed error to server logs
+        logger.error(f"Research execution failed: {str(e)}")
+        logger.error(traceback.format_exc())
+        
+        # Return concise error message to UI
+        error_msg = f"❌ リサーチ中にエラーが発生しました: {str(e)}"
         return (
             session_state or "",
             error_msg,
@@ -271,7 +280,12 @@ async def hitl_import_research(
         
     except Exception as e:
         import traceback
-        error_msg = f"❌ インポート中にエラーが発生しました:\n{str(e)}\n\n{traceback.format_exc()}"
+        # Log detailed error to server logs
+        logger.error(f"Research import failed: {str(e)}")
+        logger.error(traceback.format_exc())
+        
+        # Return concise error message to UI
+        error_msg = f"❌ インポート中にエラーが発生しました: {str(e)}"
         return (
             "", error_msg,
             "", "", "", [], ""
@@ -281,7 +295,7 @@ async def hitl_import_research(
 async def hitl_import_script(
     filepath: str | None,
     progress=gr.Progress()
-) -> Tuple[str, str, gr.update, List, str, str, str, str, gr.update]:
+) -> Tuple[str, str, List, str, str, str, str]:
     """Import existing script data and display in editor
     
     Args:
@@ -289,13 +303,12 @@ async def hitl_import_script(
         progress: Gradio progress bar
         
     Returns:
-        Tuple of (session_id, progress_text, editor_section_update, turns_data, 
-                  json_data, title, thumbnail_title, description, approve_btn_update)
+        Tuple of (session_id, progress_text, turns_data, json_data, title, thumbnail_title, description)
     """
     if not filepath:
         return (
             "", "❌ エラー: ファイルを選択してください。",
-            gr.update(visible=False), [], "", "", "", "", gr.update(interactive=False)
+            [], "", "", "", ""
         )
     
     try:
@@ -346,21 +359,24 @@ async def hitl_import_script(
         return (
             session_manager.session_id,  # hitl_session_state
             progress_text,  # hitl_script_progress
-            gr.update(visible=True),  # hitl_script_editor_section
             turns_data,  # hitl_script_turns_editor
             json_data,  # hitl_script_json_editor
             title,  # hitl_script_title
             thumbnail_title,  # hitl_script_thumbnail_title
             description,  # hitl_script_description
-            gr.update(interactive=True)  # hitl_script_approve_btn
         )
         
     except Exception as e:
         import traceback
-        error_msg = f"❌ インポート中にエラーが発生しました:\n{str(e)}\n\n{traceback.format_exc()}"
+        # Log detailed error to server logs
+        logger.error(f"Script import failed: {str(e)}")
+        logger.error(traceback.format_exc())
+        
+        # Return concise error message to UI
+        error_msg = f"❌ インポート中にエラーが発生しました: {str(e)}"
         return (
             "", error_msg,
-            gr.update(visible=False), [], "", "", "", "", gr.update(interactive=False)
+            [], "", "", "", ""
         )
 
 
@@ -369,7 +385,7 @@ async def hitl_execute_scripting(
     provider: str,
     avoid_topics: str,
     progress=gr.Progress()
-) -> Tuple[str, gr.update, List, str, str, str, str, gr.update]:
+):
     """Execute scripting phase and display editor
     
     Args:
@@ -379,13 +395,18 @@ async def hitl_execute_scripting(
         progress: Gradio progress bar
         
     Returns:
-        Tuple of (progress_text, editor_section_update, turns_data, json_data, title, thumbnail_title, description, approve_btn_update)
+        Tuple of (progress_text, editor_section, turns_editor, json_editor, title, thumbnail_title, description, approve_btn)
     """
     if not session_state:
         return (
             "❌ エラー: セッションが見つかりません。まずリサーチを実行してください。",
             gr.update(visible=False),
-            [], "", "", "", "", gr.update(interactive=False)
+            gr.update(value=[]),
+            gr.update(value=""),
+            gr.update(value=""),
+            gr.update(value=""),
+            gr.update(value=""),
+            gr.update(interactive=False)
         )
     
     try:
@@ -406,13 +427,16 @@ async def hitl_execute_scripting(
         progress_text += "台本生成を開始します...\n"
         
         # Progress callback
+        # Note: Internal progress updates go to log only (not Gradio progress bar).
+        # Sending fine-grained progress(ratio) from within execute_scripting_phase
+        # causes Gradio's progress overlay to persist over output components.
         log_messages = []
         
         def log_callback(msg: str):
             log_messages.append(msg)
         
         def progress_callback(ratio: float, description: str):
-            progress(ratio, desc=description)
+            log_messages.append(f"[{ratio*100:.0f}%] {description}")
         
         callbacks = ProgressCallback(
             log_callback=log_callback,
@@ -430,10 +454,13 @@ async def hitl_execute_scripting(
             callbacks=callbacks
         )
         
+        logger.info(f"hitl_execute_scripting: Script generated with {len(script_artifact.script.sections)} sections")
+        
         progress(0.9, desc="エディタ準備中...")
         
         # Convert Script to DataFrame format
         turns_data = script_to_dataframe(script_artifact.script)
+        logger.info(f"hitl_execute_scripting: Converted to {len(turns_data)} DataFrame rows")
         
         # Convert Script to JSON
         json_data = script_artifact.script.model_dump_json(indent=2)
@@ -443,15 +470,23 @@ async def hitl_execute_scripting(
         thumbnail_title = script_artifact.script.thumbnail_title
         description = script_artifact.script.description
         
+        # Debug: Log turns_data details
+        logger.info(f"hitl_execute_scripting: Returning {len(turns_data)} dialogue turns")
+        logger.info(f"hitl_execute_scripting: turns_data type={type(turns_data).__name__}")
+        if len(turns_data) > 0:
+            logger.info(f"hitl_execute_scripting: First row sample: {turns_data[0]}")
+        
         progress_text += "\n".join(log_messages[-10:])
         progress_text += f"\n\n✅ 台本生成完了！"
+        progress_text += f"\n📊 DEBUG: 生成された対話ターン数: {len(turns_data)}行"
+        progress_text += f"\n📊 DEBUG: 返却データ型: {type(turns_data).__name__}"
         
         progress(1.0, desc="完了!")
         
         return (
             progress_text,
             gr.update(visible=True),
-            turns_data,
+            turns_data,  # Return raw list directly, not gr.update(value=...)
             json_data,
             title,
             thumbnail_title,
@@ -461,11 +496,27 @@ async def hitl_execute_scripting(
         
     except Exception as e:
         import traceback
-        error_msg = f"❌ 台本生成中にエラーが発生しました:\n{str(e)}\n\n{traceback.format_exc()}"
+        # Log detailed error to server logs
+        error_trace = traceback.format_exc()
+        logger.error(f"Script generation failed: {str(e)}")
+        logger.error(f"Exception type: {type(e).__name__}")
+        logger.error(f"Full traceback:\n{error_trace}")
+        
+        # Return detailed error message to UI for debugging
+        error_msg = f"❌ 台本生成中にエラーが発生しました\n"
+        error_msg += f"エラー種別: {type(e).__name__}\n"
+        error_msg += f"エラー内容: {str(e)}\n"
+        error_msg += f"詳細はターミナルログを確認してください"
+        
         return (
             error_msg,
             gr.update(visible=False),
-            [], "", "", "", "", gr.update(interactive=False)
+            [],  # Return raw empty list
+            "",
+            "",
+            "",
+            "",
+            gr.update(interactive=False)
         )
 
 
@@ -564,6 +615,26 @@ def hitl_save_script_edits(
     if not session_state:
         return "❌ エラー: セッションが見つかりません。"
     
+    # Debug: Log what we received from Gradio
+    logger.info(f"hitl_save_script_edits: Received turns_data type={type(turns_data).__name__}")
+    
+    # Handle pandas DataFrame (Gradio may pass DataFrame instead of List[List])
+    import pandas as pd
+    if isinstance(turns_data, pd.DataFrame):
+        logger.info(f"hitl_save_script_edits: Received DataFrame with {len(turns_data)} rows")
+        logger.info(f"hitl_save_script_edits: DataFrame columns: {turns_data.columns.tolist()}")
+        if len(turns_data) > 0:
+            logger.info(f"hitl_save_script_edits: First row: {turns_data.iloc[0].tolist()}")
+            logger.info(f"hitl_save_script_edits: Last row: {turns_data.iloc[-1].tolist()}")
+        # Convert DataFrame to List[List]
+        turns_data = turns_data.values.tolist()
+        logger.info(f"hitl_save_script_edits: Converted to list with {len(turns_data)} rows")
+    else:
+        logger.info(f"hitl_save_script_edits: Received {len(turns_data) if turns_data else 0} rows")
+        if turns_data and len(turns_data) > 0:
+            logger.info(f"hitl_save_script_edits: First row: {turns_data[0]}")
+            logger.info(f"hitl_save_script_edits: Last row: {turns_data[-1]}")
+    
     try:
         # Initialize SessionManager
         session_manager = SessionManager(
@@ -587,7 +658,12 @@ def hitl_save_script_edits(
         
     except Exception as e:
         import traceback
-        return f"❌ 保存中にエラーが発生しました:\n{str(e)}\n\n{traceback.format_exc()}"
+        # Log detailed error to server logs
+        logger.error(f"Script save failed: {str(e)}")
+        logger.error(traceback.format_exc())
+        
+        # Return concise error message to UI
+        return f"❌ 保存中にエラーが発生しました: {str(e)}"
 
 
 def hitl_approve_script(
@@ -707,7 +783,12 @@ async def hitl_execute_production(
         
     except Exception as e:
         import traceback
-        error_msg = f"❌ 動画生成中にエラーが発生しました:\n{str(e)}\n\n{traceback.format_exc()}"
+        # Log detailed error to server logs
+        logger.error(f"Production phase failed: {str(e)}")
+        logger.error(traceback.format_exc())
+        
+        # Return concise error message to UI
+        error_msg = f"❌ 動画生成中にエラーが発生しました: {str(e)}"
         return (
             error_msg,
             gr.update(visible=False),
@@ -720,7 +801,7 @@ async def hitl_regenerate_script(
     provider: str,
     avoid_topics: str,
     progress=gr.Progress()
-) -> Tuple[str, gr.update, List, str, str, str, str, gr.update]:
+):
     """Regenerate script with same research data but potentially different parameters
     
     Args:
@@ -730,13 +811,18 @@ async def hitl_regenerate_script(
         progress: Gradio progress bar
         
     Returns:
-        Tuple of (progress_text, editor_section_update, turns_data, json_data, title, thumbnail_title, description, approve_btn_update)
+        Tuple of (progress_text, editor_section, turns_editor, json_editor, title, thumbnail_title, description, approve_btn)
     """
     if not session_state:
         return (
             "❌ エラー: セッションが見つかりません。まずリサーチを実行してください。",
             gr.update(visible=False),
-            [], "", "", "", "", gr.update(interactive=False)
+            gr.update(value=[]),
+            gr.update(value=""),
+            gr.update(value=""),
+            gr.update(value=""),
+            gr.update(value=""),
+            gr.update(interactive=False)
         )
     
     try:
@@ -756,14 +842,14 @@ async def hitl_regenerate_script(
         progress_text = f"セッションID: {session_manager.session_id}\n"
         progress_text += "台本を再生成します...\n"
         
-        # Progress callback
+        # Progress callback (log only, not Gradio progress bar)
         log_messages = []
         
         def log_callback(msg: str):
             log_messages.append(msg)
         
         def progress_callback(ratio: float, description: str):
-            progress(ratio, desc=description)
+            log_messages.append(f"[{ratio*100:.0f}%] {description}")
         
         callbacks = ProgressCallback(
             log_callback=log_callback,
@@ -794,6 +880,12 @@ async def hitl_regenerate_script(
         thumbnail_title = script_artifact.script.thumbnail_title
         description = script_artifact.script.description
         
+        # Debug: Log turns_data details
+        logger.info(f"hitl_regenerate_script: Returning {len(turns_data)} dialogue turns")
+        logger.info(f"hitl_regenerate_script: turns_data type={type(turns_data).__name__}")
+        if len(turns_data) > 0:
+            logger.info(f"hitl_regenerate_script: First row sample: {turns_data[0]}")
+        
         progress_text += "\n".join(log_messages[-10:])
         progress_text += f"\n\n✅ 台本再生成完了！"
         
@@ -802,7 +894,7 @@ async def hitl_regenerate_script(
         return (
             progress_text,
             gr.update(visible=True),
-            turns_data,
+            turns_data,  # Return raw list directly, not gr.update(value=...)
             json_data,
             title,
             thumbnail_title,
@@ -812,9 +904,51 @@ async def hitl_regenerate_script(
         
     except Exception as e:
         import traceback
-        error_msg = f"❌ 台本再生成中にエラーが発生しました:\n{str(e)}\n\n{traceback.format_exc()}"
+        # Log detailed error to server logs
+        logger.error(f"Script regeneration failed: {str(e)}")
+        logger.error(traceback.format_exc())
+        
+        # Return concise error message to UI
+        error_msg = f"❌ 台本再生成中にエラーが発生しました: {str(e)}"
         return (
             error_msg,
             gr.update(visible=False),
-            [], "", "", "", "", gr.update(interactive=False)
+            [],  # Return raw empty list
+            "",
+            "",
+            "",
+            "",
+            gr.update(interactive=False)
         )
+
+
+def _show_script_editor(
+    progress_text: str,
+    turns_data: List,
+    title: str,
+) -> Tuple[gr.update, gr.update]:
+    """Show script editor section after data is populated
+
+    This is called via .then() AFTER scripting/import/regeneration handler
+    completes, to avoid Gradio bug where toggling parent Column visibility
+    together with child component values in a single return loses child values.
+
+    Returns:
+        Tuple of (editor_section_visibility, approve_btn_interactivity)
+    """
+    has_error = (not progress_text) or ("❌" in progress_text)
+    try:
+        has_turns = len(turns_data) > 0
+    except (TypeError, ValueError):
+        has_turns = False
+    has_title = bool(title and title.strip())
+
+    logger.info(
+        f"_show_script_editor: has_error={has_error}, "
+        f"has_turns={has_turns} (type={type(turns_data).__name__}), "
+        f"has_title={has_title} (title={title!r})"
+    )
+
+    if (not has_error) and has_turns and has_title:
+        return gr.update(visible=True), gr.update(interactive=True)
+    return gr.update(visible=False), gr.update(interactive=False)

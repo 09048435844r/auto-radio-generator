@@ -164,3 +164,6 @@ docs/**/*.html
 docs/**/*.pdf
 assets/jingles/素材/Life Update Radio.vvproj
 .gitignore
+
+# Session workspace directories
+workspace/

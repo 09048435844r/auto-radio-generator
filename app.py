@@ -46,7 +46,7 @@ from app_hitl_handlers import (
     hitl_save_script_edits,
     hitl_approve_script,
     hitl_execute_production,
-    hitl_regenerate_script
+    hitl_regenerate_script,
 )
 import json
 import os
@@ -2569,24 +2569,6 @@ def create_ui() -> gr.Blocks:
                 hitl_components["gate2_accordion"],
                 hitl_components["hitl_research_progress"]
             ]
-        ).then(
-            # Auto-start script generation after approval
-            fn=hitl_execute_scripting,
-            inputs=[
-                hitl_components["hitl_session_state"],
-                hitl_components["hitl_provider_dropdown"],
-                hitl_components["hitl_avoid_topics"]
-            ],
-            outputs=[
-                hitl_components["hitl_script_progress"],
-                hitl_components["hitl_script_editor_section"],
-                hitl_components["hitl_script_turns_editor"],
-                hitl_components["hitl_script_json_editor"],
-                hitl_components["hitl_script_title"],
-                hitl_components["hitl_script_thumbnail_title"],
-                hitl_components["hitl_script_description"],
-                hitl_components["hitl_script_approve_btn"]
-            ]
         )
         
         hitl_components["hitl_research_redo_btn"].click(
@@ -2644,7 +2626,7 @@ def create_ui() -> gr.Blocks:
                 hitl_components["hitl_script_title"],
                 hitl_components["hitl_script_thumbnail_title"],
                 hitl_components["hitl_script_description"],
-                hitl_components["hitl_script_approve_btn"]
+                hitl_components["hitl_script_approve_btn"],
             ]
         )
         
@@ -2655,13 +2637,11 @@ def create_ui() -> gr.Blocks:
             outputs=[
                 hitl_components["hitl_session_state"],
                 hitl_components["hitl_script_progress"],
-                hitl_components["hitl_script_editor_section"],
                 hitl_components["hitl_script_turns_editor"],
                 hitl_components["hitl_script_json_editor"],
                 hitl_components["hitl_script_title"],
                 hitl_components["hitl_script_thumbnail_title"],
                 hitl_components["hitl_script_description"],
-                hitl_components["hitl_script_approve_btn"]
             ]
         )
         
@@ -2701,7 +2681,7 @@ def create_ui() -> gr.Blocks:
                 hitl_components["hitl_script_title"],
                 hitl_components["hitl_script_thumbnail_title"],
                 hitl_components["hitl_script_description"],
-                hitl_components["hitl_script_approve_btn"]
+                hitl_components["hitl_script_approve_btn"],
             ]
         )
         

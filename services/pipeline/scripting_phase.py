@@ -2,6 +2,7 @@
 
 ResearchBriefを入力として台本を生成し、RadioScriptArtifactを生成する。
 """
+import asyncio
 import time
 from typing import Optional
 from dataclasses import asdict
@@ -115,6 +116,7 @@ async def execute_scripting_phase(
     cb.log(f"✓ Script generation completed: {len(script.sections)} phrases ({script_duration:.1f}s)")
     cb.log(f"Title: {script.title}")
     cb.progress(0.65, "✅ Script generation completed")
+    await asyncio.sleep(0)  # Yield to event loop for Gradio progress flush
     
     # Save script (backward compatibility)
     script_path = session_manager.session_dir / "script.json"
@@ -130,6 +132,8 @@ async def execute_scripting_phase(
         try:
             cb.log("\n== Scripting Phase: Visual Identity Generation ==")
             cb.log("[INFO] Generating visual brand (color + style) for FLUX.1...")
+            cb.progress(0.70, "🎨 Generating visual identity...")
+            await asyncio.sleep(0)  # Yield to event loop for Gradio progress flush
             
             from services.script_generation.visual_palette_generator import VisualPaletteGenerator
             
@@ -142,14 +146,21 @@ async def execute_scripting_phase(
             )
             
             cb.log(f"✓ Visual identity determined: {visual_identity}")
+            cb.progress(0.80, "✅ Visual identity generated")
+            await asyncio.sleep(0)  # Yield to event loop for Gradio progress flush
         except Exception as e:
             cb.log(f"⚠ Visual identity generation failed: {e}")
             cb.log("[INFO] Falling back to default colors")
             visual_identity = None
+            cb.progress(0.80, "⚠️ Using fallback visual identity")
+            await asyncio.sleep(0)  # Yield to event loop for Gradio progress flush
     else:
         cb.log("[INFO] Static mode: Skipping visual identity generation")
+        cb.progress(0.80, "⏭️ Skipping visual identity generation")
     
     # Step 3: Build RadioScriptArtifact
+    cb.progress(0.90, "📦 Building script artifact...")
+    await asyncio.sleep(0)  # Yield to event loop for Gradio progress flush
     script_artifact = RadioScriptArtifact(
         session_id=session_manager.session_id,
         script=script,
@@ -163,6 +174,7 @@ async def execute_scripting_phase(
     saved_path = session_manager.save_script_artifact(script_artifact)
     cb.log(f"✓ RadioScriptArtifact saved: {saved_path}")
     
+    cb.progress(1.0, "✅ Scripting phase completed")
     cb.log(f"✓ Scripting phase completed ({script_duration:.1f}s)")
     
     return script_artifact

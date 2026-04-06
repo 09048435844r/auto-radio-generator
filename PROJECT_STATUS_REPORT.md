@@ -1,6 +1,6 @@
 # プロジェクト現況レポート
-**生成日時**: 2026-01-16  
-**プロジェクト名**: 自動ラジオ動画生成システム v3.0  
+**生成日時**: 2026-04-04  
+**プロジェクト名**: 自動ラジオ動画生成システム v3.6  
 **対象読者**: 設計・要件定義担当AI (Gemini/ChatGPT等)
 
 ---
@@ -10,6 +10,8 @@
 ```
 auto_radio_generator/
 ├── app.py                          # Web UI エントリーポイント (Gradio)
+├── app_hitl.py                     # HITL モード UI コンポーネント
+├── app_hitl_handlers.py            # HITL モード イベントハンドラ
 ├── main.py                         # CLI エントリーポイント
 ├── workflow.py                     # 共通ワークフロー (CLI/Web UI共通)
 ├── config.yaml                     # 設定ファイル (リサーチ/台本/音声/動画)
@@ -26,6 +28,8 @@ auto_radio_generator/
 ├── core/                           # ドメイン層
 │   ├── __init__.py
 │   ├── settings_manager.py         # 設定永続化マネージャー
+│   ├── session_manager.py          # セッション管理（workspace/配下のI/O）
+│   ├── prompt_manager.py           # プロンプトテンプレート管理
 │   ├── interfaces/                 # 抽象インターフェース (ABC)
 │   │   ├── __init__.py
 │   │   ├── researcher.py           # IResearcher (リサーチャーIF)
@@ -35,13 +39,20 @@ auto_radio_generator/
 │   └── models/                     # Pydanticデータモデル
 │       ├── __init__.py
 │       ├── config.py               # AppConfig (設定モデル)
-│       ├── script.py               # Script, DialogueLine (台本モデル)
-│       ├── research.py             # ResearchResult (リサーチ結果)
+│       ├── script.py               # Script, DialogueLine, RadioScriptArtifact
+│       ├── artifacts.py            # ResearchBrief (中間成果物モデル)
+│       ├── research.py             # ResearchResult, ResearchPlan
+│       ├── visual.py               # VisualIdentity, VisualPalette
 │       └── usage.py                # 使用量・コストモデル
 │
 ├── services/                       # アプリケーション層
 │   ├── __init__.py
 │   ├── cost_calculator.py          # コスト計算サービス
+│   ├── pipeline/                   # フェーズ分離パイプライン
+│   │   ├── __init__.py
+│   │   ├── research_phase.py       # リサーチフェーズ実行
+│   │   ├── scripting_phase.py      # 台本作成フェーズ実行
+│   │   └── production_phase.py     # 動画生成フェーズ実行
 │   ├── research/                   # リサーチサービス
 │   │   ├── __init__.py
 │   │   └── perplexity_client.py    # Perplexity API実装
@@ -66,7 +77,15 @@ auto_radio_generator/
 │   └── bgm/                        # BGM音楽 (16曲以上)
 │       └── *.mp3
 │
-└── output/                         # 生成物
+├── workspace/                      # セッションワークスペース (gitignore)
+│   └── YYYYMMDD_HHMMSS/            # セッション単位のディレクトリ
+│       ├── research_brief.json     # リサーチ結果
+│       ├── script.json             # 台本データ
+│       ├── audio.wav               # 音声ファイル
+│       ├── subtitle.ass            # 字幕ファイル
+│       └── videos/                 # 動画出力
+│
+└── output/                         # 生成物（レガシー）
     ├── YYYYMMDD_HHMMSS/            # 自動生成モード
     └── manual_builds/              # マニュアル制作モード
 ```
@@ -219,17 +238,26 @@ def generate_video(
 
 def create_ui() -> gr.Blocks:
     """Gradio UIを構築"""
-    with gr.Blocks(title="自動ラジオ動画生成システム v3.0") as app:
+    with gr.Blocks(title="自動ラジオ動画生成システム v3.6") as app:
         with gr.Tabs():
-            # タブ1: 自動生成
-            with gr.Tab("🎬 自動生成"):
+            # タブ1: 全自動モード
+            with gr.Tab("🚀 全自動モード"):
+                # テーマ入力のみで動画完成
                 # ... UI定義
             
-            # タブ2: マニュアル制作
-            with gr.Tab("✍️ マニュアル制作"):
-                # Step A: 台本生成
-                # Step B: 音声合成
-                # Step C: 動画レンダリング
+            # タブ2: HITLモード (Human-in-the-Loop)
+            with gr.Tab("🎯 HITLモード"):
+                # Gate 1: Research & Review
+                # Gate 2: Script Generation & Editing
+                # Gate 3: Production (Rendering)
+                # ... UI定義
+            
+            # タブ3: ダッシュボード
+            with gr.Tab("📊 ダッシュボード"):
+                # ... UI定義
+            
+            # タブ4: 設定
+            with gr.Tab("⚙️ 設定"):
                 # ... UI定義
     
     return app
