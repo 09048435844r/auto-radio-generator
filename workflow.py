@@ -918,7 +918,20 @@ async def execute_production_phase(
         thumbnail_bg_generator = ThumbnailBackgroundGenerator(config, output_dir=output_dir)
         
         # Generate script summary for thumbnail prompt
-        script_summary = script.description[:300] if script.description else script.title
+        # Use actual dialogue content instead of just description for better topic matching
+        dialogue_turns = [
+            turn.text for turn in script.sections[:15] 
+            if turn.is_dialogue() and turn.text
+        ]
+        
+        if dialogue_turns:
+            # Use first 15 dialogue turns (captures intro + main topic introduction)
+            script_summary = " ".join(dialogue_turns)[:500]
+            cb.log(f"サムネイル用に台本の対話内容を使用（{len(dialogue_turns)}ターン、{len(script_summary)}文字）")
+        else:
+            # Fallback to description if no dialogue found
+            script_summary = script.description[:300] if script.description else script.title
+            cb.log("サムネイル用に台本の説明文を使用（フォールバック）")
         
         thumbnail_bg_output = output_dir / f"thumbnail_background_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         thumbnail_bg_path = await thumbnail_bg_generator.generate(
