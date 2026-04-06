@@ -336,6 +336,27 @@ async def hitl_import_script(
         with open(script_path, 'w', encoding='utf-8') as f:
             json.dump(script.model_dump(), f, ensure_ascii=False, indent=2)
         
+        # Also create script_artifact.json with default visual identity
+        # This allows production phase to work immediately after import
+        from core.models.script import RadioScriptArtifact
+        from core.models.visual import VisualIdentity
+        
+        visual_identity = VisualIdentity(
+            primary_color="electric cyan",
+            secondary_color="hot magenta",
+            color_mood="cyberpunk futuristic",
+            aesthetic="Neon Cyberpunk",
+            visual_keywords=["neon", "futuristic", "cyberpunk"]
+        )
+        
+        script_artifact = RadioScriptArtifact(
+            session_id=session_manager.session_id,
+            script=script,
+            visual_identity=visual_identity.model_dump()  # Convert to dict
+        )
+        
+        session_manager.save_script_artifact(script_artifact)
+        
         progress(0.5, desc="台本データのインポート完了")
         
         # Convert Script to DataFrame format
