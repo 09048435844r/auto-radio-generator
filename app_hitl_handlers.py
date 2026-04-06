@@ -314,7 +314,7 @@ async def hitl_import_script(
     try:
         import json
         from pathlib import Path
-        from core.models.script import Script
+        from core.models.script import Script, RadioScriptArtifact
         from core.session_manager import SessionManager
         
         progress(0.1, desc="台本データを読み込み中...")
@@ -323,7 +323,23 @@ async def hitl_import_script(
         with open(filepath, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
-        script = Script(**data)
+        # Check if this is a script_artifact.json (contains session_id, segments, visual_identity)
+        is_artifact = 'session_id' in data and 'script' in data
+        
+        if is_artifact:
+            # Import complete RadioScriptArtifact (preserves segments and visual_identity)
+            logger.info("✓ Detected script_artifact.json - importing with segments and visual_identity")
+            script = Script(**data['script'])
+            imported_segments = data.get('segments')
+            imported_visual_identity = data.get('visual_identity')
+            logger.info(f"  - Segments: {len(imported_segments) if imported_segments else 0} segments")
+            logger.info(f"  - Visual identity: {'present' if imported_visual_identity else 'missing'}")
+        else:
+            # Import plain script.json
+            logger.info("✓ Detected script.json - importing script only (no segments)")
+            script = Script(**data)
+            imported_segments = None
+            imported_visual_identity = None
         
         # Create new session for imported data
         session_manager = SessionManager(
@@ -336,23 +352,28 @@ async def hitl_import_script(
         with open(script_path, 'w', encoding='utf-8') as f:
             json.dump(script.model_dump(), f, ensure_ascii=False, indent=2)
         
-        # Also create script_artifact.json with default visual identity
+        # Also create script_artifact.json with visual identity and segments
         # This allows production phase to work immediately after import
-        from core.models.script import RadioScriptArtifact
         from core.models.visual import VisualIdentity
         
-        visual_identity = VisualIdentity(
-            primary_color="electric cyan",
-            secondary_color="hot magenta",
-            color_mood="cyberpunk futuristic",
-            aesthetic="Neon Cyberpunk",
-            visual_keywords=["neon", "futuristic", "cyberpunk"]
-        )
+        # Use imported visual_identity if available, otherwise create default
+        if imported_visual_identity:
+            visual_identity_dict = imported_visual_identity
+        else:
+            visual_identity = VisualIdentity(
+                primary_color="electric cyan",
+                secondary_color="hot magenta",
+                color_mood="cyberpunk futuristic",
+                aesthetic="Neon Cyberpunk",
+                visual_keywords=["neon", "futuristic", "cyberpunk"]
+            )
+            visual_identity_dict = visual_identity.model_dump()
         
         script_artifact = RadioScriptArtifact(
             session_id=session_manager.session_id,
             script=script,
-            visual_identity=visual_identity.model_dump()  # Convert to dict
+            segments=imported_segments,  # Preserve segments if available
+            visual_identity=visual_identity_dict
         )
         
         session_manager.save_script_artifact(script_artifact)
