@@ -580,6 +580,10 @@ def apply_overrides(config: AppConfig, overrides: UIOverrides) -> AppConfig:
     
     注意: Pydanticモデルはimmutableなので、新しい値で上書きする
     """
+    # LLM provider override
+    if overrides.llm_provider is not None:
+        config.yaml.script_generator.default_provider = overrides.llm_provider
+    
     if overrides.bgm_volume is not None:
         config.yaml.video_renderer.bgm_volume = overrides.bgm_volume
     
