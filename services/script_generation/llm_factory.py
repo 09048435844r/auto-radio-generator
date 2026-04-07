@@ -16,7 +16,7 @@ def create_script_generator(config: AppConfig, provider: str = "gemini") -> IScr
     
     Args:
         config: Application configuration
-        provider: Provider name ("gemini" | "openai" | "anthropic")
+        provider: Provider name ("gemini" | "openai" | "anthropic" | "ollama")
     
     Returns:
         IScriptGenerator: Provider-specific client instance
@@ -39,8 +39,12 @@ def create_script_generator(config: AppConfig, provider: str = "gemini") -> IScr
         from .anthropic_client import AnthropicClient
         return AnthropicClient(config)
     
+    elif provider == "ollama":
+        from .ollama_client import OllamaClient
+        return OllamaClient(config)
+    
     else:
-        available = ["gemini", "openai", "anthropic"]
+        available = ["gemini", "openai", "anthropic", "ollama"]
         raise ValueError(
             f"Invalid provider: {provider}. Available: {', '.join(available)}"
         )
@@ -50,10 +54,10 @@ def get_provider_from_model_name(model_name: str) -> str:
     """Infer provider name from model name
     
     Args:
-        model_name: Model name (e.g., "gpt-5.4", "gemini-3.1-pro", "claude-sonnet-4.6")
+        model_name: Model name (e.g., "gpt-5.4", "gemini-3.1-pro", "claude-sonnet-4.6", "gpt-oss:20b-long")
     
     Returns:
-        str: Provider name ("gemini" | "openai" | "anthropic")
+        str: Provider name ("gemini" | "openai" | "anthropic" | "ollama")
     
     Raises:
         ValueError: If unknown model name
@@ -64,6 +68,8 @@ def get_provider_from_model_name(model_name: str) -> str:
         return "openai"
     elif model_name.startswith("claude-"):
         return "anthropic"
+    elif model_name.startswith(("gpt-oss:", "llama3.", "phi3:", "mistral:", "mixtral:")):
+        return "ollama"
     else:
         raise ValueError(f"Unknown model name: {model_name}")
 
@@ -87,6 +93,9 @@ def get_available_providers(config: AppConfig) -> list[str]:
     
     if hasattr(config.env, 'anthropic_api_key') and config.env.anthropic_api_key:
         available.append("anthropic")
+    
+    # Ollama is always available (local server, no API key needed)
+    available.append("ollama")
     
     return available
 

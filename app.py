@@ -1856,7 +1856,7 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
                     with gr.Row():
                         llm_provider_dropdown = gr.Dropdown(
                             label="🤖 LLMプロバイダー",
-                            choices=["gemini", "openai", "anthropic"],
+                            choices=["gemini", "openai", "anthropic", "ollama"],
                             value="gemini",
                             info="台本生成に使用するAIモデルを選択",
                             scale=1,

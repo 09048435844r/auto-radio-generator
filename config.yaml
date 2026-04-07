@@ -352,6 +352,14 @@ script_generator:
         input: 0.25
         output: 1.25
   
+  # Ollama設定（ローカルLLM）
+  ollama:
+    model: "gpt-oss:20b-long" # ← Macに入っているモデル名
+    base_url: "http://192.168.0.73:11434/v1"  # ← MacのIPアドレス
+    max_tokens: 16384                      # 最大トークン数
+    temperature: 0.85                      # 創造性パラメータ
+    costs: {}                              # ローカル実行なのでコスト0
+  
   # 台本の構成比率（合計100%）
   # ラジオ番組の構成を3部に分割します。
   # ※週次ダイジェストと講座モードでは、この比率は使用されません。

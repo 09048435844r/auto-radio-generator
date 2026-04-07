@@ -40,6 +40,10 @@ class CostCalculator:
         # Determine provider from model name
         provider = self._get_provider_from_model_name(model_name)
         
+        # Ollama is local, zero cost
+        if provider == "ollama":
+            return 0.0, 0.0
+        
         # Get cost data from config
         if provider == "gemini":
             costs = self.config.yaml.script_generator.gemini.costs
@@ -71,7 +75,7 @@ class CostCalculator:
             model_name: Model name
         
         Returns:
-            str: Provider name ("gemini" | "openai" | "anthropic")
+            str: Provider name ("gemini" | "openai" | "anthropic" | "ollama")
         """
         if model_name.startswith("gemini-"):
             return "gemini"
@@ -79,6 +83,8 @@ class CostCalculator:
             return "openai"
         elif model_name.startswith("claude-"):
             return "anthropic"
+        elif model_name.startswith(("gpt-oss:", "llama3.", "phi3:", "mistral:", "mixtral:")):
+            return "ollama"
         else:
             return "gemini"  # Default
     
@@ -92,6 +98,9 @@ class CostCalculator:
         models.extend(self.config.yaml.script_generator.gemini.costs.keys())
         models.extend(self.config.yaml.script_generator.openai.costs.keys())
         models.extend(self.config.yaml.script_generator.anthropic.costs.keys())
+        # Add Ollama model if configured
+        if self.config.yaml.script_generator.ollama.model:
+            models.append(self.config.yaml.script_generator.ollama.model)
         return models
     
     def calculate(self, usage: TotalUsage) -> CostBreakdown:

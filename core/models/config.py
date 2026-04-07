@@ -84,6 +84,15 @@ class AnthropicConfig(BaseModel):
     costs: Dict[str, ModelCost] = Field(default_factory=dict)
 
 
+class OllamaConfig(BaseModel):
+    """Ollama（ローカルLLM）設定"""
+    model: str = "gpt-oss:20b-long"
+    base_url: str = "http://192.168.0.73:11434/v1"  # Production: Mac server IP
+    max_tokens: int = 16384  # Increased for long-form content
+    temperature: float = 0.85
+    costs: Dict[str, ModelCost] = Field(default_factory=dict)
+
+
 class ScriptStructureConfig(BaseModel):
     """台本構成比率"""
     main_topic_ratio: int = 70
@@ -134,6 +143,7 @@ class ScriptGeneratorConfig(BaseModel):
     gemini: GeminiConfig = Field(default_factory=GeminiConfig)
     openai: OpenAIConfig = Field(default_factory=OpenAIConfig)
     anthropic: AnthropicConfig = Field(default_factory=AnthropicConfig)
+    ollama: OllamaConfig = Field(default_factory=OllamaConfig)
     structure: ScriptStructureConfig = Field(default_factory=ScriptStructureConfig)
     currency: CurrencyConfig = Field(default_factory=CurrencyConfig)
     orchestrator: OrchestratorConfig = Field(default_factory=OrchestratorConfig)
