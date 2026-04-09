@@ -18,9 +18,11 @@ from core.interfaces.script_orchestrator import IScriptOrchestrator
 from core.models import AppConfig, Script, LLMUsage
 from core.models.curation import CurationResult, ScriptSegment
 from core.models.script import DialogueTurn, TurnType
+from core.models.execution_context import ExecutionContext
 from services.script_generation.topic_curator import TopicCurator
 from services.script_generation.segment_generator import SegmentGenerator
 from services.script_generation.metadata_generator import MetadataGenerator
+from services.script_generation.adapters.factory import LLMAdapterFactory
 
 if TYPE_CHECKING:
     from core.interfaces.researcher import ResearchResult
@@ -38,12 +40,44 @@ class ScriptOrchestrator(IScriptOrchestrator):
       Step 3 (Integrate):  全 DialogueTurn を統合 → Script
     """
 
-    def __init__(self, config: AppConfig):
-        super().__init__(config)
-        self.curator = TopicCurator(config)
-        self.generator = SegmentGenerator(config)
-        self.metadata_gen = MetadataGenerator(config)
-        self.orch_cfg = config.yaml.script_generator.orchestrator
+    def __init__(self, context: ExecutionContext):
+        """Initialize ScriptOrchestrator with execution context
+        
+        Args:
+            context: Execution context containing provider and configuration
+        """
+        super().__init__(context.config)
+        self._context = context
+        self.orch_cfg = context.config.yaml.script_generator.orchestrator
+        
+        # Create LLM ports for each component
+        # Curator uses lightweight model
+        curator_model = self.orch_cfg.curator_model
+        self._curator_port = LLMAdapterFactory.create(
+            context.config,
+            context.provider,
+            model_override=curator_model
+        )
+        
+        # Segment generator uses main model
+        segment_model = self.orch_cfg.segment_model or None
+        self._segment_port = LLMAdapterFactory.create(
+            context.config,
+            context.provider,
+            model_override=segment_model
+        )
+        
+        # Metadata generator uses lightweight model
+        self._metadata_port = LLMAdapterFactory.create(
+            context.config,
+            context.provider,
+            model_override=curator_model
+        )
+        
+        # Initialize components with LLM ports
+        self.curator = TopicCurator(self._curator_port, context.config)
+        self.generator = SegmentGenerator(self._segment_port, context.config)
+        self.metadata_gen = MetadataGenerator(self._metadata_port, context.config)
 
         # 累積 LLM 使用量（プロバイダー別 + 全体集計）
         self._usage_by_provider: dict[str, LLMUsage] = {}  # プロバイダー別の詳細
@@ -77,7 +111,7 @@ class ScriptOrchestrator(IScriptOrchestrator):
         start_time = time.time()
         log = self._make_log(progress_callback)
 
-        log("\n[bold cyan]== ScriptOrchestrator: 長尺台本生成開始 ==[/bold cyan]")
+        log(f"\n[bold cyan]== ScriptOrchestrator: 長尺台本生成開始 ({self._context.provider}) ==[/bold cyan]")
         log(f"  テーマ: {theme}")
         log(f"  リサーチデータ: {len(research_data.content)}文字")
 

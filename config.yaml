@@ -355,7 +355,7 @@ script_generator:
   # Ollama設定（ローカルLLM）
   ollama:
     model: "gpt-oss:20b-long" # ← Macに入っているモデル名
-    base_url: "http://192.168.0.73:11434/v1"  # ← MacのIPアドレス
+    base_url: "http://192.168.0.73:11434/v1"  # ← MacのIPアドレス + OpenAI互換API
     max_tokens: 16384                      # 最大トークン数
     temperature: 0.85                      # 創造性パラメータ
     costs: {}                              # ローカル実行なのでコスト0
@@ -376,12 +376,13 @@ script_generator:
   # Hierarchical Agentic Workflow オーケストレーター設定
   # ---------------------------------------------------------------------------
   # enabled: true にすると新アーキテクチャ（TopicCuration → SegmentGeneration）を使用
-  # enabled: false にすると旧アーキテクチャ（単一API呼び出し）を使用（デフォルト）
-  # 注意: Orchestratorは現在Gemini専用です。Ollama等を使用する場合はfalseにしてください。
+  # enabled: false にすると旧アーキテクチャ（単一API呼び出し）を使用
+  # Orchestratorは全プロバイダー（Gemini/OpenAI/Anthropic/Ollama）に対応しています。
+  # UIで選択したプロバイダーが自動的に使用されます。
   orchestrator:
-    enabled: false              # true: 新アーキテクチャ / false: 旧アーキテクチャ（安全なデフォルト）
-    curator_model: "gemini-2.5-flash"  # キュレーション・要約用軽量モデル（コスト削減）
-    segment_model: ""            # セグメント生成用モデル（空=script_generator.gemini.modelを使用）
+    enabled: true               # true: 新アーキテクチャ（推奨） / false: 旧アーキテクチャ
+    curator_model: ""  # キュレーション・要約用軽量モデル（空=選択されたプロバイダーのデフォルトモデルを使用）
+    segment_model: ""            # セグメント生成用モデル（空=選択されたプロバイダーのデフォルトモデルを使用）
     max_topics: 3                # キュレーションで選定する最大トピック数
     context_summary_max_length: 300  # 文脈要約の最大文字数
     # セグメント別ターン数設定

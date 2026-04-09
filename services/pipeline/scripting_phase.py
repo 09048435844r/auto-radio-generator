@@ -10,6 +10,7 @@ from dataclasses import asdict
 from core.models import AppConfig
 from core.models.artifacts import ResearchBrief
 from core.models.script import RadioScriptArtifact
+from core.models.execution_context import ExecutionContext
 from core.session_manager import SessionManager
 from core.interfaces import ResearchResult
 from workflow import (
@@ -38,13 +39,23 @@ async def execute_scripting_phase(
         config: Application config
         excluded_topics: Topics to exclude (for multi-part scripts)
         avoid_topics: Topics to avoid (Negative Prompt, optional)
-        provider: LLM provider ("gemini" | "openai" | "anthropic")
+        provider: LLM provider ("gemini" | "openai" | "anthropic" | "ollama")
         callbacks: Progress callback
         
     Returns:
         RadioScriptArtifact: Scripting phase output artifact
     """
     cb = callbacks or ProgressCallback()
+    
+    # Create ExecutionContext for provider-agnostic workflow
+    context = ExecutionContext(
+        provider=provider,
+        config=config,
+        log_callback=cb.log if cb else None,
+        progress_callback=cb.progress if cb else None,
+        use_orchestrator=config.yaml.script_generator.orchestrator.enabled,
+        enable_research=True
+    )
     
     # Convert ResearchBrief to ResearchResult (for backward compatibility)
     from core.models.research import ResearchSource
@@ -65,20 +76,20 @@ async def execute_scripting_phase(
     # Step 1: Script generation
     cb.log(f"\n== Scripting Phase: Script Generation ==")
     cb.log(f"Theme: {research_brief.theme}")
+    cb.log(f"Provider: {context.provider}")
     
-    use_orchestrator = config.yaml.script_generator.orchestrator.enabled
-    cb.log(f"Engine: {'ScriptOrchestrator (Agentic)' if use_orchestrator else provider}")
-    cb.progress(0.50, f"📝 Generating script ({'Orchestrator' if use_orchestrator else provider})...")
+    cb.log(f"Engine: {'ScriptOrchestrator (Agentic)' if context.use_orchestrator else 'Direct LLM'}")
+    cb.progress(0.50, f"📝 Generating script ({'Orchestrator' if context.use_orchestrator else 'Direct'} - {context.provider})...")
     
     script_start = time.time()
     segments = None
     
-    if use_orchestrator and research_data is not None:
-        # Hierarchical Agentic Workflow
+    if context.use_orchestrator and research_data is not None:
+        # Hierarchical Agentic Workflow with ExecutionContext
         from services.script_generation.orchestrator import ScriptOrchestrator
         
-        cb.log("[Orchestrator] Long-form script generation (TopicCuration → SegmentGeneration)")
-        orchestrator = ScriptOrchestrator(config)
+        cb.log(f"[Orchestrator] Long-form script generation with {context.provider} (TopicCuration → SegmentGeneration)")
+        orchestrator = ScriptOrchestrator(context)
         script = await orchestrator.generate_script(
             theme=research_brief.theme,
             research_data=research_data,
@@ -89,8 +100,8 @@ async def execute_scripting_phase(
         llm_usage = orchestrator.get_total_usage()
         segments = orchestrator.segments
     else:
-        # Single API call (fallback)
-        script_generator = create_script_generator(config, provider=provider)
+        # Single API call (fallback) - still uses provider selection
+        script_generator = create_script_generator(config, provider=context.provider)
         script = await script_generator.generate(
             research_brief.theme,
             research_data,

@@ -16,6 +16,7 @@ from core.models import AppConfig, LLMUsage
 from core.utils import sanitize_json_response
 from core.models.curation import CuratedTopic, CurationResult
 from core.prompt_manager import PromptManager
+from core.interfaces.llm_port import ILLMPort, LLMRequest
 
 if TYPE_CHECKING:
     from core.interfaces.researcher import ResearchResult
@@ -31,7 +32,14 @@ class TopicCurator:
     後続の SegmentGenerator に渡す「厳選済みトピック」を生成する。
     """
 
-    def __init__(self, config: AppConfig):
+    def __init__(self, llm_port: ILLMPort, config: AppConfig):
+        """Initialize TopicCurator with LLM port
+        
+        Args:
+            llm_port: LLM port interface for provider-agnostic communication
+            config: Application configuration
+        """
+        self._llm = llm_port
         self.config = config
         self.prompt_manager = PromptManager()
 
@@ -39,21 +47,6 @@ class TopicCurator:
         orch_cfg = config.yaml.script_generator.orchestrator
         self.curator_model = orch_cfg.curator_model
         self.max_topics = orch_cfg.max_topics
-
-        # Gemini クライアントを初期化
-        from google import genai
-        from google.genai import types
-        self._genai = genai
-        self._types = types
-        self.client = genai.Client(api_key=config.env.gemini_api_key)
-
-        # セーフティ設定（医療系ワード等での誤爆防止）
-        self.safety_settings = [
-            types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
-            types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE"),
-            types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
-            types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
-        ]
 
         self.last_usage: Optional[LLMUsage] = None
 
@@ -76,7 +69,7 @@ class TopicCurator:
         count = target_count or self.max_topics
         log = progress_log or (lambda msg: console.print(msg))
 
-        log(f"[cyan]🔍 トピックキュレーション開始 (モデル: {self.curator_model})[/cyan]")
+        log(f"[cyan]🔍 トピックキュレーション開始 (プロバイダー: {self._llm.provider_name}, モデル: {self.curator_model})[/cyan]")
         log(f"  リサーチデータ: {len(research_data.content)}文字 → {count}トピックを選定")
 
         system_prompt = self.prompt_manager.get_prompt("orchestrator", "curation")
@@ -132,68 +125,31 @@ class TopicCurator:
         return prompt
 
     async def _call_api(self, system_prompt: str, user_prompt: str) -> tuple[str, LLMUsage]:
-        """Gemini APIを呼び出してキュレーション結果を取得"""
-
-        config_params = {
-            "max_output_tokens": 8192,  # JSON途中切断を防ぐため増量
-            "temperature": 0.3,  # キュレーションは低温度で安定性を確保
-            # response_mime_type を削除: application/json モードでJSON切断が発生するため
-            # 通常のテキスト生成モードでJSONを返させる
-            "safety_settings": self.safety_settings,
-        }
-
-        max_retries = 2
-        response = None
-        for attempt in range(max_retries):
-            try:
-                response = self.client.models.generate_content(
-                    model=self.curator_model,
-                    contents=[
-                        self._types.Content(
-                            role="user",
-                            parts=[self._types.Part(text=f"{system_prompt}\n\n{user_prompt}")]
-                        )
-                    ],
-                    config=self._types.GenerateContentConfig(**config_params)
-                )
-                break
-            except Exception as e:
-                error_msg = str(e).lower()
-                if ("disconnected" in error_msg or "timeout" in error_msg or "connection" in error_msg) \
-                        and attempt < max_retries - 1:
-                    wait_time = 2 ** attempt
-                    console.print(f"[yellow]接続エラー ({attempt + 1}/{max_retries})。{wait_time}秒後にリトライ...[/yellow]")
-                    await asyncio.sleep(wait_time)
-                    continue
-                raise
-
-        # finish_reasonをチェック（MAX_TOKENSの場合は警告）
-        if hasattr(response, "candidates") and response.candidates:
-            candidate = response.candidates[0]
-            finish_reason = getattr(candidate, "finish_reason", None)
-            if finish_reason and str(finish_reason) == "MAX_TOKENS":
-                logger.warning(
-                    f"⚠️ TopicCurator output was truncated (finish_reason=MAX_TOKENS). "
-                    f"Consider increasing max_output_tokens."
-                )
-
-        usage = LLMUsage(
-            provider="gemini",
-            model_name=self.curator_model,
-            input_tokens=0,
-            output_tokens=0,
-            request_count=1,
+        """Call LLM API via port interface"""
+        request = LLMRequest(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=self.curator_model,
+            max_tokens=8192,  # JSON途中切断を防ぐため増量
+            temperature=0.3,  # キュレーションは低温度で安定性を確保
+            response_format="json"
         )
-        if hasattr(response, "usage_metadata") and response.usage_metadata:
-            meta = response.usage_metadata
-            usage.input_tokens = getattr(meta, "prompt_token_count", 0) or 0
-            usage.output_tokens = getattr(meta, "candidates_token_count", 0) or 0
-
+        
+        response = await self._llm.generate(request)
+        
+        # Warn if output was truncated
+        if response.finish_reason == "length":
+            logger.warning(
+                f"⚠️ TopicCurator output was truncated (finish_reason=length). "
+                f"Consider increasing max_output_tokens."
+            )
+        
         logger.debug(
-            f"TopicCurator API: model={self.curator_model}, "
-            f"in={usage.input_tokens}, out={usage.output_tokens}"
+            f"TopicCurator API: provider={response.usage.provider}, model={response.usage.model_name}, "
+            f"in={response.usage.input_tokens}, out={response.usage.output_tokens}"
         )
-        return response.text, usage
+        
+        return response.content, response.usage
 
     def _parse_curation_response(self, response_text: str) -> CurationResult:
         """APIレスポンスを CurationResult に変換"""

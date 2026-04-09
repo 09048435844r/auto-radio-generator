@@ -25,6 +25,7 @@ from core.models import (
 )
 from core.models.script import DialogueTurn  # 追加インポート
 from core.models.visual import VisualIdentity  # Issue #7 fix: Proper type import
+from core.models.execution_context import ExecutionContext
 from core.interfaces import ResearchMode, ChapterMarker, ResearchResult
 from services.script_generation import GeminiClient
 from services.script_generation.orchestrator import ScriptOrchestrator
@@ -747,7 +748,13 @@ async def execute_scripting_phase(
     if use_orchestrator and research_data is not None:
         # --- 新アーキテクチャ: Hierarchical Agentic Workflow ---
         cb.log("[cyan][Orchestrator] 長尺台本生成モード（TopicCuration → SegmentGeneration）[/cyan]")
-        orchestrator = ScriptOrchestrator(config)
+        context = ExecutionContext(
+            provider=provider,
+            config=config,
+            log_callback=cb.log if cb else None,
+            progress_callback=cb.progress if cb else None,
+        )
+        orchestrator = ScriptOrchestrator(context)
         script = await orchestrator.generate_script(
             theme=theme,
             research_data=research_data,
@@ -2163,10 +2170,10 @@ def _generate_youtube_metadata(
     from core.models.config import load_config
     
     # 設定をロード
-    config = load_config()
+    app_config = load_config()
     
     # 選択されたプロバイダーでクライアントを初期化
-    script_generator = create_script_generator(config, provider=provider)
+    script_generator = create_script_generator(app_config, provider=provider)
     settings = SettingsManager().load()
     
     # 台本の要約を生成

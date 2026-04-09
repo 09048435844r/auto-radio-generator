@@ -581,8 +581,8 @@ class ThumbnailGenerator:
             console.print(f"[cyan]🔄 新しいサムネイルタイトルを生成中...[/cyan]")
             
             # 1. Geminiで新しいタイトル生成（軽量モデル）
-            config = load_config()
-            gemini_client = GeminiClient(config)
+            app_config = load_config()
+            gemini_client = GeminiClient(app_config)
             prompt_manager = PromptManager()
             
             # 軽量プロンプトでタイトル生成
@@ -593,7 +593,7 @@ class ThumbnailGenerator:
             )
             
             # 軽量モデルでAPI呼び出し（temperature低めで安定性重視）
-            flash_model = config.yaml.script_generator.gemini.flash_model
+            flash_model = app_config.yaml.script_generator.gemini.flash_model
             response_text, _ = gemini_client._call_api(
                 system_prompt="",
                 user_prompt=formatted_prompt,

@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from core.models import AppConfig, LLMUsage
 from core.utils import sanitize_json_response
+from core.interfaces.llm_port import ILLMPort, LLMRequest
 
 if TYPE_CHECKING:
     from core.interfaces.researcher import ResearchResult
@@ -45,27 +46,18 @@ class MetadataGenerator:
     Script オブジェクトに充填する。
     """
 
-    def __init__(self, config: AppConfig):
+    def __init__(self, llm_port: ILLMPort, config: AppConfig):
+        """Initialize MetadataGenerator with LLM port
+        
+        Args:
+            llm_port: LLM port interface for provider-agnostic communication
+            config: Application configuration
+        """
+        self._llm = llm_port
         self.config = config
 
-        # キュレーションと同じ軽量モデルを使用（コスト最適化）
-        orch_cfg = config.yaml.script_generator.orchestrator
-        self.model = orch_cfg.curator_model  # gemini-2.5-flash 等
-
-        # Gemini クライアントを初期化
-        from google import genai
-        from google.genai import types
-        self._genai = genai
-        self._types = types
-        self.client = genai.Client(api_key=config.env.gemini_api_key)
-
-        # セーフティ設定
-        self.safety_settings = [
-            types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
-            types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE"),
-            types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
-            types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
-        ]
+        # Use model from injected LLM port (already configured by orchestrator)
+        self.model = llm_port.model_name
 
         # 最後の使用量を保持（オーケストレーターが累積するため）
         self.last_usage: Optional[LLMUsage] = None
@@ -97,7 +89,7 @@ class MetadataGenerator:
 
         # API呼び出し
         prompt = self._build_prompt(theme, script_summary, research_data)
-        response_text, usage = self._call_api(prompt)
+        response_text, usage = await self._call_api(prompt)
         self.last_usage = usage
 
         # パース（themeを渡してフォールバック時に使用）
@@ -169,63 +161,32 @@ class MetadataGenerator:
         )
         return prompt
 
-    def _call_api(self, prompt: str) -> tuple[str, LLMUsage]:
-        """Gemini APIを呼び出してメタデータを取得"""
-        config_params = {
-            "max_output_tokens": 4096,  # JSON途中切断を防ぐため増量（2048→4096）
-            "temperature": 0.5,
-            # response_mime_type は使用しない（JSON切断の原因となるため）
-            "safety_settings": self.safety_settings,
-        }
-
-        max_retries = 2
-        response = None
-        for attempt in range(max_retries):
-            try:
-                response = self.client.models.generate_content(
-                    model=self.model,
-                    contents=[
-                        self._types.Content(
-                            role="user",
-                            parts=[self._types.Part(text=prompt)]
-                        )
-                    ],
-                    config=self._types.GenerateContentConfig(**config_params)
-                )
-                break
-            except Exception as e:
-                error_msg = str(e).lower()
-                if ("disconnected" in error_msg or "timeout" in error_msg or "connection" in error_msg) \
-                        and attempt < max_retries - 1:
-                    wait_time = 2 ** attempt
-                    console.print(f"[yellow]MetadataGenerator 接続エラー ({attempt + 1}/{max_retries})。{wait_time}秒後にリトライ...[/yellow]")
-                    time.sleep(wait_time)
-                    continue
-                raise
-
-        # finish_reasonをチェック（MAX_TOKENSの場合は警告）
-        if hasattr(response, "candidates") and response.candidates:
-            candidate = response.candidates[0]
-            finish_reason = getattr(candidate, "finish_reason", None)
-            if finish_reason and str(finish_reason) == "MAX_TOKENS":
-                logger.warning(
-                    f"⚠️ MetadataGenerator output was truncated (finish_reason=MAX_TOKENS). "
-                    f"Consider increasing max_output_tokens."
-                )
-
-        usage = LLMUsage(
-            provider="gemini",
-            model_name=self.model,
-            input_tokens=0,
-            output_tokens=0,
-            request_count=1,
+    async def _call_api(self, prompt: str) -> tuple[str, LLMUsage]:
+        """Call LLM API via port interface"""
+        request = LLMRequest(
+            system_prompt="",  # MetadataGenerator uses user prompt only
+            user_prompt=prompt,
+            model=self.model,
+            max_tokens=2048,  # メタデータ生成は短いので2Kで十分
+            temperature=0.5,  # メタデータは安定性重視
+            response_format="json"
         )
-        if hasattr(response, "usage_metadata") and response.usage_metadata:
-            meta = response.usage_metadata
-            usage.input_tokens = getattr(meta, "prompt_token_count", 0) or 0
-            usage.output_tokens = getattr(meta, "candidates_token_count", 0) or 0
-
-        return response.text, usage
+        
+        response = await self._llm.generate(request)
+        
+        # Warn if output was truncated
+        if response.finish_reason == "length":
+            logger.warning(
+                f"⚠️ MetadataGenerator output was truncated (finish_reason=length). "
+                f"Consider increasing max_output_tokens."
+            )
+        
+        logger.debug(
+            f"MetadataGenerator API: provider={response.usage.provider}, model={response.usage.model_name}, "
+            f"in={response.usage.input_tokens}, out={response.usage.output_tokens}"
+        )
+        
+        return response.content, response.usage
 
     def _parse_response(self, response_text: str, theme: str) -> _MetadataSchema:
         """APIレスポンスを _MetadataSchema にパース"""

@@ -89,16 +89,17 @@ def toggle_jingle_path_visibility(jingle_choice: str) -> str:
     return gr.update(visible=(jingle_choice == "カスタムファイル"))
 
 
-async def check_api_health() -> tuple[str, str]:
-    """Check API health for Gemini and Perplexity with actual models from config"""
-    config = load_config()
+async def check_api_health() -> tuple[str, str, str]:
+    """Check API health for Gemini, Perplexity, and Ollama with actual models from config"""
+    app_config = load_config()
     
     gemini_status = "🟡チェック中..."
     perplexity_status = "🟡チェック中..."
+    ollama_status = "🟡チェック中..."
     
     try:
         # Gemini health check
-        gemini_client = GeminiClient(config)
+        gemini_client = GeminiClient(app_config)
         try:
             # Use minimal request with timeout
             response = gemini_client.client.models.generate_content(
@@ -123,7 +124,7 @@ async def check_api_health() -> tuple[str, str]:
     
     try:
         # Perplexity health check
-        perplexity_client = PerplexityResearcher(config)
+        perplexity_client = PerplexityResearcher(app_config)
         try:
             # Use minimal request with timeout
             response = perplexity_client.client.chat.completions.create(
@@ -144,7 +145,30 @@ async def check_api_health() -> tuple[str, str]:
     except Exception as e:
         perplexity_status = "🔴Error (初期化失敗)"
     
-    return gemini_status, perplexity_status
+    try:
+        # Ollama health check
+        from services.script_generation.adapters.factory import LLMAdapterFactory
+        try:
+            ollama_adapter = LLMAdapterFactory.create(
+                config=app_config,
+                provider="ollama"
+            )
+            # Use health_check method from adapter
+            is_healthy = await ollama_adapter.health_check()
+            if is_healthy:
+                ollama_status = f"🟢OK ({ollama_adapter.model_name})"
+            else:
+                ollama_status = f"🔴Error (接続失敗)"
+        except Exception as e:
+            error_str = str(e)
+            if "connection" in error_str.lower() or "timeout" in error_str.lower():
+                ollama_status = f"🔴Error (接続不可: {app_config.yaml.script_generator.ollama.base_url})"
+            else:
+                ollama_status = f"🔴Error ({str(e)[:50]})"
+    except Exception as e:
+        ollama_status = "🔴Error (初期化失敗)"
+    
+    return gemini_status, perplexity_status, ollama_status
 
 
 def run_api_health_check():
@@ -436,8 +460,8 @@ def generate_video(
                 script_summary = " ".join(dialogue_texts)[:200] + "..." if len(" ".join(dialogue_texts)) > 200 else " ".join(dialogue_texts)
             
             # 背景画像パスを解決
-            config = load_config()
-            bg_path = config.yaml.paths.background_image
+            app_config = load_config()
+            bg_path = app_config.yaml.paths.background_image
             if background_image and background_image != "default.png":
                 bg_path = f"assets/backgrounds/{background_image}"
             
@@ -563,7 +587,7 @@ def generate_script_only(
     
     try:
         # 設定読み込み
-        config = load_config(PROJECT_ROOT)
+        app_config = load_config(PROJECT_ROOT)
         
         # リサーチモードを変換
         mode = RESEARCH_MODE_MAP.get(research_mode)
@@ -578,7 +602,7 @@ def generate_script_only(
                 append_log(f"\n== Step 0: 検索計画作成 ==")
                 append_log(f"テーマ: {theme.strip()}")
                 
-                script_generator = GeminiClient(config)
+                script_generator = GeminiClient(app_config)
                 plan = await script_generator.create_research_plan(theme.strip(), mode, instruction=None)
                 
                 append_log(f"\n✓ 検索計画作成完了")
@@ -591,7 +615,7 @@ def generate_script_only(
                 progress(0.3, desc="Step 1: 並列リサーチ中...")
                 append_log(f"\n== Step 1: 並列リサーチ ({research_mode}) ==")
                 
-                researcher = PerplexityResearcher(config)
+                researcher = PerplexityResearcher(app_config)
                 research_result = await researcher.research_multi(plan.queries, mode)
                 
                 append_log(f"\n✓ 並列リサーチ完了")
@@ -604,7 +628,7 @@ def generate_script_only(
             append_log(f"\n== Step 2: 台本生成 ==")
             
             if not script_generator:
-                script_generator = GeminiClient(config)
+                script_generator = GeminiClient(app_config)
             
             script = script_generator.generate(
                 theme=theme.strip(),
@@ -682,7 +706,7 @@ def research_only(
         return "", "エラー: テーマを入力してください。", ""
     
     try:
-        config = load_config(PROJECT_ROOT)
+        app_config = load_config(PROJECT_ROOT)
         mode = RESEARCH_MODE_MAP.get(research_mode)
         
         if not mode:
@@ -693,7 +717,7 @@ def research_only(
             append_log(f"\n== Step 0: 検索計画作成 ==")
             append_log(f"テーマ: {theme.strip()}")
             
-            script_generator = GeminiClient(config)
+            script_generator = GeminiClient(app_config)
             plan = await script_generator.create_research_plan(theme.strip(), mode, instruction=None)
             
             append_log(f"\n✓ 検索計画作成完了")
@@ -705,7 +729,7 @@ def research_only(
             progress(0.5, desc="Step 1: 並列リサーチ中...")
             append_log(f"\n== Step 1: 並列リサーチ ({research_mode}) ==")
             
-            researcher = PerplexityResearcher(config)
+            researcher = PerplexityResearcher(app_config)
             avoid = avoid_topics.strip() if avoid_topics and avoid_topics.strip() else None
             if avoid:
                 append_log(f"除外要件: {avoid}")
@@ -886,7 +910,7 @@ def render_video_from_assets(
         append_log(f"  背景: {background_file.name}")
         
         # 設定読み込み
-        config = load_config(PROJECT_ROOT)
+        app_config = load_config(PROJECT_ROOT)
         
         # BGMパスを取得
         bgm_path = None
@@ -924,7 +948,7 @@ def render_video_from_assets(
         
         # FfmpegRenderer作成
         progress(0.2, desc="レンダラーを初期化中...")
-        renderer = FfmpegRenderer(config)
+        renderer = FfmpegRenderer(app_config)
         
         # 非同期処理を実行
         async def render():
@@ -1035,7 +1059,7 @@ def export_comparison_session(
                 gr.Textbox(visible=True)
             )
         
-        config = load_config(PROJECT_ROOT)
+        app_config = load_config(PROJECT_ROOT)
         
         # リサーチデータの構造化
         research_data = {
@@ -1049,7 +1073,7 @@ def export_comparison_session(
             comparison_state=comparison_state,
             research_data=research_data,
             theme=theme,
-            config=config
+            config=app_config
         )
         
         return (
@@ -1142,7 +1166,7 @@ def generate_script_from_research(
         progress(0.2, desc="設定を読み込み中...")
         
         # 設定を読み込み
-        config = load_config(PROJECT_ROOT)
+        app_config = load_config(PROJECT_ROOT)
         
         # モデル名からプロバイダーを推定
         from services.script_generation.llm_factory import get_provider_from_model_name
@@ -1154,7 +1178,7 @@ def generate_script_from_research(
             append_log(error_msg)
             return error_msg, error_msg, "", comparison_state, gr.Dropdown()
         
-        script_generator = create_script_generator(config, provider=provider)
+        script_generator = create_script_generator(app_config, provider=provider)
         
         progress(0.4, desc="リサーチデータを処理中...")
         
@@ -1201,7 +1225,7 @@ def generate_script_from_research(
         if hasattr(script_generator, 'last_usage') and script_generator.last_usage:
             usage = script_generator.last_usage
             from services.cost_calculator import CostCalculator
-            calculator = CostCalculator(config)
+            calculator = CostCalculator(app_config)
             cost_lines = calculator.format_llm_cost_log(usage)
             for line in cost_lines:
                 append_log(line)
@@ -1229,7 +1253,7 @@ def generate_script_from_research(
             # 比較レポート生成（2つ以上のデータがある場合）
             if len(updated_state) >= 2:
                 from services.comparison_report import generate_comparison_report
-                comparison_report_md = generate_comparison_report(updated_state, config)
+                comparison_report_md = generate_comparison_report(updated_state, app_config)
             else:
                 # スケーラブルな文言（上限を前提としない）
                 comparison_report_md = f"*現在 {len(updated_state)} 個のモデルで台本を生成済み。比較には2つ以上必要です。*"
@@ -1684,7 +1708,7 @@ def regenerate_thumbnail_from_state(
         
         # 背景画像パスを解決
         from core.models.config import load_config
-        config = load_config()
+        app_config = load_config()
         if state.background_path.startswith("assets/"):
             background_path = PROJECT_ROOT / state.background_path
         else:
@@ -1772,10 +1796,10 @@ async def regenerate_thumbnail_background_async(
         log_messages.append("🎨 サムネイル背景を再生成中（FLUX.1）...")
         log_messages.append(f"テーマ: {state.theme}")
         
-        config = load_config()
+        app_config = load_config()
         
         # Generate background
-        thumbnail_bg_generator = ThumbnailBackgroundGenerator(config)
+        thumbnail_bg_generator = ThumbnailBackgroundGenerator(app_config)
         output_dir = Path(state.output_dir)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         thumbnail_bg_path = output_dir / f"thumbnail_bg_regenerated_{timestamp}.png"
@@ -1981,11 +2005,14 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
                         )
 
                 with gr.Group(elem_classes="group-container"):
-                    gr.Markdown("### � APIヘルスチェック")
+                    gr.Markdown("### 📡 APIヘルスチェック")
                     
                     with gr.Row():
                         gemini_status = gr.Markdown("Gemini: 🟡待機中")
                         perplexity_status = gr.Markdown("Perplexity: 🟡待機中")
+                    
+                    with gr.Row():
+                        ollama_status = gr.Markdown("Ollama: 🟡待機中")
                     
                     check_api_btn = gr.Button("🔍 Check API Status", size="sm", variant="secondary")
                     
@@ -1994,7 +2021,7 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
                         **使い方:**
                         - 生成前にAPI接続状態を確認できます
                         - 🟢OK: 正常接続 / 🔴Error: 接続不可
-                        - エラー時はAPIキーやネットワークを確認してください
+                        - エラー時はAPIキーやネットワーク（Ollama: サーバー起動状態）を確認してください
                         """
                     )
 
@@ -2137,6 +2164,7 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
         "spectrum_checkbox": spectrum_checkbox,
         "gemini_status": gemini_status,
         "perplexity_status": perplexity_status,
+        "ollama_status": ollama_status,
         "check_api_btn": check_api_btn,
         "youtube_upload_checkbox": youtube_upload_checkbox,
         "generate_btn": generate_btn,
@@ -2168,8 +2196,8 @@ def create_ui() -> gr.Blocks:
     
     # 前回の設定を読み込む
     saved_settings = _settings_manager.load()
-    config = load_config(PROJECT_ROOT)
-    publishing_cfg = getattr(config.yaml, "publishing", None)
+    app_config = load_config(PROJECT_ROOT)
+    publishing_cfg = getattr(app_config.yaml, "publishing", None)
     default_enable_upload = bool(
         publishing_cfg and getattr(publishing_cfg, "enable_upload", False)
     )
@@ -2214,7 +2242,7 @@ def create_ui() -> gr.Blocks:
             # Tab 4: Settings
             with gr.TabItem("⚙️ 設定", id="settings"):
                 settings_components = create_settings_tab(
-                    config=config,
+                    config=app_config,
                     default_upload_enabled=default_enable_upload,
                     default_footer_text=default_footer_text,
                 )
@@ -2323,7 +2351,7 @@ def create_ui() -> gr.Blocks:
         )
 
         settings_components["refresh_status_btn"].click(
-            fn=lambda: get_system_status_markdown(config),
+            fn=lambda: get_system_status_markdown(app_config),
             inputs=[],
             outputs=[
                 settings_components["perplexity_status"],
@@ -2333,7 +2361,7 @@ def create_ui() -> gr.Blocks:
         )
 
         app.load(
-            fn=lambda: get_system_status_markdown(config),
+            fn=lambda: get_system_status_markdown(app_config),
             inputs=[],
             outputs=[
                 settings_components["perplexity_status"],
@@ -2457,15 +2485,17 @@ def create_ui() -> gr.Blocks:
         def update_api_status():
             """Update API status display"""
             try:
-                gemini_status, perplexity_status = run_api_health_check()
+                gemini_status, perplexity_status, ollama_status = run_api_health_check()
                 return (
                     f"Gemini: {gemini_status}",
-                    f"Perplexity: {perplexity_status}"
+                    f"Perplexity: {perplexity_status}",
+                    f"Ollama: {ollama_status}"
                 )
             except Exception as e:
                 return (
                     f"Gemini: 🔴Error (チェック失敗)",
-                    f"Perplexity: 🔴Error (チェック失敗)"
+                    f"Perplexity: 🔴Error (チェック失敗)",
+                    f"Ollama: 🔴Error (チェック失敗)"
                 )
         
         def check_generate_button_state(gemini_status_text, perplexity_status_text):
@@ -2483,7 +2513,8 @@ def create_ui() -> gr.Blocks:
             inputs=[],
             outputs=[
                 generator_components["gemini_status"],
-                generator_components["perplexity_status"]
+                generator_components["perplexity_status"],
+                generator_components["ollama_status"]
             ]
         )
         

@@ -16,6 +16,7 @@ from core.models import AppConfig, LLMUsage
 from core.models.curation import CuratedTopic, ScriptSegment
 from core.prompt_manager import PromptManager
 from core.utils import sanitize_json_response
+from core.interfaces.llm_port import ILLMPort, LLMRequest
 
 if TYPE_CHECKING:
     pass
@@ -25,43 +26,33 @@ console = Console()
 
 
 class SegmentGenerator:
-    """1つの台本セグメントを生成するエージェント
+    """１つの台本セグメントを生成するエージェント
 
     各セグメントは独立したAPI呼び出しで生成されるため、
     max_output_tokens の壁を回避できる。
     セグメントタイプに応じた専用プロンプトを使用する。
     """
 
-    def __init__(self, config: AppConfig):
+    def __init__(self, llm_port: ILLMPort, config: AppConfig):
+        """Initialize SegmentGenerator with LLM port
+        
+        Args:
+            llm_port: LLM port interface for provider-agnostic communication
+            config: Application configuration
+        """
+        self._llm = llm_port
         self.config = config
         self.prompt_manager = PromptManager()
 
         orch_cfg = config.yaml.script_generator.orchestrator
-        gemini_cfg = config.yaml.script_generator.gemini
 
-        # セグメント生成はメインモデルを使用（空の場合は gemini.model を使用）
-        self.segment_model = orch_cfg.segment_model or gemini_cfg.model
-        self.fallback_model = gemini_cfg.fallback_model
+        # セグメント生成用モデル（空の場合はportのデフォルトモデルを使用）
+        self.segment_model = orch_cfg.segment_model or llm_port.model_name
 
         # セグメント別ターン数設定
         self.intro_cfg = orch_cfg.intro
         self.deep_dive_cfg = orch_cfg.deep_dive
         self.conclusion_cfg = orch_cfg.conclusion
-
-        # Gemini クライアントを初期化
-        from google import genai
-        from google.genai import types
-        self._genai = genai
-        self._types = types
-        self.client = genai.Client(api_key=config.env.gemini_api_key)
-
-        # セーフティ設定
-        self.safety_settings = [
-            types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_NONE"),
-            types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_NONE"),
-            types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_NONE"),
-            types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_NONE"),
-        ]
 
         self.last_usage: Optional[LLMUsage] = None
 
@@ -213,77 +204,36 @@ class SegmentGenerator:
         user_prompt: str,
         model_override: Optional[str] = None,
     ) -> tuple[str, LLMUsage]:
-        """Gemini APIを呼び出してセグメントを生成"""
-
+        """Call LLM API via port interface"""
         model_to_use = model_override or self.segment_model
-
-        config_params = {
-            "max_output_tokens": 8192,  # 1セグメント分は 8K で十分
-            "temperature": 0.85,
-            # response_mime_type を削除: application/json モードでJSON切断が発生するため
-            # 通常のテキスト生成モードでJSONを返させる（TopicCurator/MetadataGeneratorと同じ方針）
-            "safety_settings": self.safety_settings,
-        }
-
+        
         console.print(
-            f"[dim]SegmentGenerator API: model={model_to_use}, max_tokens={config_params['max_output_tokens']}[/dim]"
+            f"[dim]SegmentGenerator API: provider={self._llm.provider_name}, model={model_to_use}, max_tokens=8192[/dim]"
         )
-
-        max_retries = 2
-        last_exc = None
-        response = None
-        for attempt in range(max_retries):
-            try:
-                response = self.client.models.generate_content(
-                    model=model_to_use,
-                    contents=[
-                        self._types.Content(
-                            role="user",
-                            parts=[self._types.Part(text=f"{system_prompt}\n\n{user_prompt}")]
-                        )
-                    ],
-                    config=self._types.GenerateContentConfig(**config_params),
-                )
-                last_exc = None
-                break
-            except Exception as e:
-                last_exc = e
-                error_msg = str(e).lower()
-                if (
-                    ("disconnected" in error_msg or "timeout" in error_msg or "connection" in error_msg)
-                    and attempt < max_retries - 1
-                ):
-                    wait_time = 2 ** attempt
-                    console.print(f"[yellow]接続エラー ({attempt + 1}/{max_retries})。{wait_time}秒後にリトライ...[/yellow]")
-                    await asyncio.sleep(wait_time)
-                    continue
-                raise
-
-        if last_exc:
-            raise last_exc
-
-        # finish_reason チェック
-        if response.candidates:
-            candidate = response.candidates[0]
-            finish_reason = getattr(candidate, "finish_reason", "UNKNOWN")
-            if finish_reason == "MAX_TOKENS":
-                logger.warning(f"SegmentGenerator: MAX_TOKENS に到達。出力が切り詰められた可能性あり (model={model_to_use})")
-            elif finish_reason in ("SAFETY", "RECITATION"):
-                logger.warning(f"SegmentGenerator: finish_reason={finish_reason}")
-
-        usage = LLMUsage(
-            provider="gemini",
-            model_name=model_to_use,
-            input_tokens=0,
-            output_tokens=0,
-            request_count=1,
+        
+        request = LLMRequest(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=model_to_use,
+            max_tokens=8192,  # 1セグメント分は 8K で十分
+            temperature=0.85,
+            response_format="json"
         )
-        if hasattr(response, "usage_metadata") and response.usage_metadata:
-            meta = response.usage_metadata
-            usage.input_tokens = getattr(meta, "prompt_token_count", 0) or 0
-            usage.output_tokens = getattr(meta, "candidates_token_count", 0) or 0
-
-        return response.text, usage
+        
+        response = await self._llm.generate(request)
+        
+        # Warn if output was truncated
+        if response.finish_reason == "length":
+            logger.warning(
+                f"SegmentGenerator: MAX_TOKENS に到達。出力が切り詰められた可能性あり (model={model_to_use})"
+            )
+        
+        logger.debug(
+            f"SegmentGenerator API: provider={response.usage.provider}, model={response.usage.model_name}, "
+            f"in={response.usage.input_tokens}, out={response.usage.output_tokens}"
+        )
+        
+        return response.content, response.usage
 
     # ------------------------------------------------------------------
     # Response parser

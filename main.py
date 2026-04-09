@@ -125,7 +125,7 @@ async def main():
     ))
     
     # Load config
-    config = load_config(PROJECT_ROOT)
+    app_config = load_config(PROJECT_ROOT)
     
     # Initialize SessionManager
     session_manager = SessionManager(
@@ -160,7 +160,7 @@ async def main():
             theme=args.theme,
             mode=args.mode,
             session_manager=session_manager,
-            config=config,
+            config=app_config,
             callbacks=callbacks
         )
         
@@ -168,7 +168,7 @@ async def main():
         script_artifact = await execute_scripting_phase(
             research_brief=research_brief,
             session_manager=session_manager,
-            config=config,
+            config=app_config,
             provider=args.provider,
             callbacks=callbacks
         )
@@ -177,7 +177,7 @@ async def main():
         result = await execute_production_phase(
             script_artifact=script_artifact,
             session_manager=session_manager,
-            config=config,
+            config=app_config,
             project_root=PROJECT_ROOT,
             callbacks=callbacks
         )
@@ -210,7 +210,7 @@ async def main():
             theme=args.theme,
             mode=args.mode,
             session_manager=session_manager,
-            config=config,
+            config=app_config,
             callbacks=callbacks
         )
         
@@ -243,7 +243,7 @@ async def main():
         script_artifact = await execute_scripting_phase(
             research_brief=research_brief,
             session_manager=session_manager,
-            config=config,
+            config=app_config,
             provider=args.provider,
             callbacks=callbacks
         )
@@ -281,7 +281,7 @@ async def main():
         result = await execute_production_phase(
             script_artifact=script_artifact,
             session_manager=session_manager,
-            config=config,
+            config=app_config,
             project_root=PROJECT_ROOT,
             callbacks=callbacks
         )
