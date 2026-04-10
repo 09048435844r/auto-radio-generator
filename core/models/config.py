@@ -113,6 +113,11 @@ class OrchestratorSegmentConfig(BaseModel):
 
 class OrchestratorConfig(BaseModel):
     """Hierarchical Agentic Workflow オーケストレーター設定"""
+    
+    # Direct Regex Bypass: Phase 2 JSON変換をスキップするプロバイダー
+    # ローカルLLMはJSON構造化が不安定なため、正規表現パーサーを優先
+    LOCAL_LLM_PROVIDERS: set[str] = {"ollama", "lmstudio", "localai"}
+    
     enabled: bool = Field(default=False, description="Trueにすると新アーキテクチャを使用")
     two_phase_generation: bool = Field(
         default=False,

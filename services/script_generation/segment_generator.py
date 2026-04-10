@@ -465,7 +465,15 @@ class SegmentGenerator:
         markdown_script: str,
         segment_type: str,
     ) -> tuple[str, LLMUsage]:
-        """Phase 2のJSON変換（フォールバック付き）
+        """Phase 2のJSON変換（Direct Regex Bypass対応）
+        
+        ローカルLLM（Ollama等）の場合、Phase 2のLLM呼び出しをスキップし、
+        直接正規表現パーサーでJSON生成を行う。
+        
+        Rationale for Direct Regex Bypass:
+        - ローカルLLMはJSON構造化が不安定で、Phase 2の精度が低い
+        - 正規表現パーサーの方が高速かつ確実
+        - API呼び出しコストがゼロ（ローカル実行のため時間短縮）
         
         Args:
             markdown_script: Markdown台本
@@ -474,6 +482,40 @@ class SegmentGenerator:
         Returns:
             tuple[JSON文字列, LLMUsage]
         """
+        # Direct Regex Bypass: ローカルLLMの場合はPhase 2をスキップ
+        orch_cfg = self.config.yaml.script_generator.orchestrator
+        if self._llm.provider_name.lower() in orch_cfg.LOCAL_LLM_PROVIDERS:
+            console.print(
+                f"[cyan]⚡ Direct Regex Bypass: Phase 2 LLM呼び出しをスキップ "
+                f"(provider={self._llm.provider_name})[/cyan]"
+            )
+            
+            try:
+                # 正規表現パーサーで直接JSON生成
+                json_text = self._parse_markdown_to_json(markdown_script, segment_type)
+                
+                # Usageはダミー（Phase 1で既にトークン消費済み、Phase 2はAPI呼び出しなし）
+                bypass_usage = LLMUsage(
+                    provider=self._llm.provider_name,
+                    model_name=self.segment_model,
+                    input_tokens=0,  # Phase 2 bypassed: no API call
+                    output_tokens=0,  # Phase 2 bypassed: no API call
+                    request_count=0,  # Phase 2 bypassed: no API call
+                )
+                
+                console.print(f"[green]✓ 正規表現パーサーでJSON生成完了[/green]")
+                return json_text, bypass_usage
+                
+            except ValueError as e:
+                # 正規表現パーサー失敗時のフォールバック
+                logger.error(f"Direct Regex Bypass failed: {e}")
+                console.print(
+                    f"[yellow]⚠️ 正規表現パーサー失敗。Phase 2 LLM呼び出しにフォールバックします[/yellow]"
+                )
+                # フォールバック: Phase 2のLLM呼び出しを実行
+                # （以下の通常フローに続く）
+        
+        # クラウドLLM（Gemini/GPT等）の場合、または正規表現パーサー失敗時はPhase 2を実行
         try:
             # 通常のJSON変換を試行
             json_text, usage = await self._convert_markdown_to_json(
