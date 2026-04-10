@@ -208,8 +208,35 @@ async def execute_scripting_phase(
         cb.log("[INFO] Static mode: Skipping visual identity generation")
         cb.progress(0.80, "⏭️ Skipping visual identity generation")
     
-    # Step 3: Build RadioScriptArtifact
-    cb.progress(0.90, "📦 Building script artifact...")
+    # Step 3: Metadata Generation
+    cb.log("\n== Scripting Phase: Metadata Generation ==")
+    cb.progress(0.85, "🔖 Generating metadata...")
+    await asyncio.sleep(0)  # Yield to event loop for Gradio progress flush
+    
+    try:
+        from services.script_generation.metadata_generator import MetadataGenerator
+        
+        # Create LLM port for metadata generation
+        llm_port = context.create_llm_port()
+        
+        metadata_generator = MetadataGenerator(llm_port, config)
+        script = await metadata_generator.generate(
+            theme=research_brief.theme,
+            script=script,
+            research_data=research_data,
+            progress_log=cb.log
+        )
+        
+        cb.log(f"✓ Metadata generated: {script.title}")
+        cb.progress(0.90, "✅ Metadata generation completed")
+    except Exception as e:
+        cb.log(f"⚠ Metadata generation failed (using defaults): {e}")
+        cb.progress(0.90, "⚠️ Using default metadata")
+    
+    await asyncio.sleep(0)  # Yield to event loop for Gradio progress flush
+    
+    # Step 4: Build RadioScriptArtifact
+    cb.progress(0.95, "📦 Building script artifact...")
     await asyncio.sleep(0)  # Yield to event loop for Gradio progress flush
     script_artifact = RadioScriptArtifact(
         session_id=session_manager.session_id,

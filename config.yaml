@@ -382,8 +382,19 @@ script_generator:
   orchestrator:
     enabled: true               # true: 新アーキテクチャ（推奨） / false: 旧アーキテクチャ
     two_phase_generation: true  # true: 2段階生成（Markdown→JSON） / false: 1段階生成（直接JSON）
-    curator_model: ""  # キュレーション・要約用軽量モデル（空=選択されたプロバイダーのデフォルトモデルを使用）
-    segment_model: ""            # セグメント生成用モデル（空=選択されたプロバイダーのデフォルトモデルを使用）
+    curator_model: "qwen3:8b"  # キュレーション・要約用軽量モデル（空=選択されたプロバイダーのデフォルトモデルを使用）
+    segment_model: "gemma4:26b"            # Phase 1（クリエイティブ生成）用モデル（空=選択されたプロバイダーのデフォルトモデルを使用）
+    json_model: "qwen2.5:14b"               # Phase 2（JSON構造化）専用モデル（空=segment_modelと同じ）。推奨: qwen2.5-coder:14b
+    # 以下は使用可能なモデル名
+    # - qwen2.5-coder:14b        9.0 GB
+    # - qwen2.5:14b              9.0 GB
+    # - gemma4:26b               17 GB
+    # - gpt-oss:20b-long         13 GB
+    # - gpt-oss:20b              13 GB
+    # - qwen3:32b                20 GB
+    # - qwen3:30b-a3b            18 GB
+    # - qwen3:8b                 5.2 GB
+    # - gemma3:12b-it-qat        8.9 GB
     max_topics: 3                # キュレーションで選定する最大トピック数
     context_summary_max_length: 300  # 文脈要約の最大文字数
     # セグメント別ターン数設定

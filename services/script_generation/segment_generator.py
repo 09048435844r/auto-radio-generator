@@ -54,14 +54,23 @@ class SegmentGenerator:
 
         orch_cfg = config.yaml.script_generator.orchestrator
 
-        # セグメント生成用モデル（空の場合はportのデフォルトモデルを使用）
+        # Phase 1（クリエイティブ生成）用モデル
         self.segment_model = orch_cfg.segment_model or llm_port.model_name
+        
+        # Phase 2（JSON構造化）専用モデル（空の場合はsegment_modelと同じ）
+        self.json_model = orch_cfg.json_model or self.segment_model
 
         # 2段階生成モードの設定
         self.two_phase_enabled = orch_cfg.two_phase_generation
         
         # デバッグ出力（コンソール + ログ）
-        init_msg = f"SegmentGenerator initialized: two_phase_enabled={self.two_phase_enabled}, model={self.segment_model}"
+        if self.two_phase_enabled and self.json_model != self.segment_model:
+            init_msg = (
+                f"SegmentGenerator initialized: two_phase_enabled={self.two_phase_enabled}, "
+                f"phase1_model={self.segment_model}, phase2_model={self.json_model}"
+            )
+        else:
+            init_msg = f"SegmentGenerator initialized: two_phase_enabled={self.two_phase_enabled}, model={self.segment_model}"
         logger.info(init_msg)
         console.print(f"[yellow]{init_msg}[/yellow]")
 
@@ -452,14 +461,14 @@ class SegmentGenerator:
         request = LLMRequest(
             system_prompt="You are a JSON converter. Convert Markdown dialogue to JSON format.",
             user_prompt=system_prompt,  # プロンプト全体をuser_promptに移動
-            model=self.segment_model,
+            model=self.json_model,  # Phase 2専用モデルを使用
             max_tokens=2048,  # Phase 2は短めでOK
             temperature=0.1,  # 正確性最優先
             response_format="json"
         )
         
         console.print(
-            f"[dim]  Phase 2 API: provider={self._llm.provider_name}, model={self.segment_model}, "
+            f"[dim]  Phase 2 API: provider={self._llm.provider_name}, model={self.json_model}, "
             f"max_tokens=2048, temperature=0.1[/dim]"
         )
         
@@ -572,6 +581,9 @@ class SegmentGenerator:
         Returns:
             JSON文字列
         """
+        # Extract chapter title from markdown header
+        chapter_title = self._extract_chapter_title(markdown_script, segment_type)
+        
         turns = []
         
         # 正規表現で「**話者名**: セリフ」を抽出
@@ -587,17 +599,20 @@ class SegmentGenerator:
                 f"Markdown preview (first 500 chars): {markdown_script[:500]}"
             )
         
-        for speaker, text in matches:
+        for i, (speaker, text) in enumerate(matches):
             # セリフのクリーンアップ（連続する空白を1つに正規化）
             cleaned_text = text.strip()
             # 改行や連続空白を単一スペースに正規化
             cleaned_text = ' '.join(cleaned_text.split())
             
+            # Set chapter_title only for first turn
+            turn_chapter_title = chapter_title if i == 0 else None
+            
             turns.append({
                 "speaker": speaker,
                 "text": cleaned_text,
                 "section": segment_type,
-                "chapter_title": None
+                "chapter_title": turn_chapter_title
             })
         
         segment_dict = {
@@ -610,6 +625,37 @@ class SegmentGenerator:
         
         logger.info(f"Fallback parser extracted {len(turns)} turns from Markdown")
         return json.dumps(segment_dict, ensure_ascii=False, indent=2)
+
+    def _extract_chapter_title(self, markdown_script: str, segment_type: str) -> Optional[str]:
+        """Extract chapter title from markdown header
+        
+        Args:
+            markdown_script: Markdown script with optional chapter title header
+            segment_type: Segment type for fallback mapping
+        
+        Returns:
+            Chapter title string or None if not found
+        """
+        # Try to extract from markdown header: **[セクション見出し]**: タイトル
+        header_pattern = r'\*\*\[セクション見出し\]\*\*:\s*(.+?)(?:\n|$)'
+        match = re.search(header_pattern, markdown_script)
+        
+        if match:
+            title = match.group(1).strip()
+            if title and len(title) <= 30:  # Sanity check
+                logger.info(f"Extracted chapter title from markdown: {title}")
+                return title
+        
+        # Fallback to fixed mapping
+        fallback_titles = {
+            "intro": "オープニング",
+            "deep_dive": "深掘り解説",
+            "conclusion": "まとめ"
+        }
+        
+        fallback = fallback_titles.get(segment_type, segment_type)
+        logger.info(f"Using fallback chapter title: {fallback}")
+        return fallback
 
     def _save_markdown_script(self, markdown_script: str, segment_id: str) -> None:
         """Save Phase 1 markdown script to disk

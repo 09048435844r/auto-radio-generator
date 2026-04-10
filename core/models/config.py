@@ -129,7 +129,11 @@ class OrchestratorConfig(BaseModel):
     )
     segment_model: str = Field(
         default="",
-        description="セグメント生成用モデル（空の場合は script_generator.gemini.model を使用）"
+        description="Phase 1（クリエイティブ生成）用モデル（空の場合はデフォルトモデルを使用）"
+    )
+    json_model: str = Field(
+        default="",
+        description="Phase 2（JSON構造化）専用モデル（空の場合はsegment_modelと同じ）"
     )
     max_topics: int = Field(default=3, description="キュレーションで選定する最大トピック数")
     context_summary_max_length: int = Field(
