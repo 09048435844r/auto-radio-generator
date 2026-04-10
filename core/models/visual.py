@@ -7,7 +7,8 @@ DEFAULT_PRIMARY_COLOR = "electric cyan"
 DEFAULT_SECONDARY_COLOR = "hot magenta"
 DEFAULT_COLOR_MOOD = "cyberpunk futuristic"
 DEFAULT_AESTHETIC = "Neon Cyberpunk"
-DEFAULT_VISUAL_KEYWORDS = ["neon", "futuristic", "cyberpunk"]
+# Tuple (immutable) to prevent accidental mutations
+DEFAULT_VISUAL_KEYWORDS = ("neon", "futuristic", "cyberpunk")
 
 
 class VisualIdentity(BaseModel):
@@ -109,6 +110,6 @@ def create_visual_identity_from_legacy(
         secondary_color=secondary_color,
         color_mood=mood,
         aesthetic=DEFAULT_AESTHETIC,
-        visual_keywords=DEFAULT_VISUAL_KEYWORDS.copy(),
+        visual_keywords=list(DEFAULT_VISUAL_KEYWORDS),  # Convert tuple to list
         reasoning=reasoning
     )

@@ -266,7 +266,7 @@ Create a visually distinctive brand (color palette + aesthetic) that captures th
             secondary_color=DEFAULT_SECONDARY_COLOR,
             color_mood=DEFAULT_COLOR_MOOD,
             aesthetic=DEFAULT_AESTHETIC,
-            visual_keywords=DEFAULT_VISUAL_KEYWORDS.copy(),
+            visual_keywords=list(DEFAULT_VISUAL_KEYWORDS),  # Convert tuple to list
             reasoning=f"Fallback visual identity for theme: {theme}"
         )
     

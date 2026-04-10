@@ -49,11 +49,26 @@ def sanitize_json_response(text: str, logger_name: str = "JSONSanitizer") -> str
         text = text.strip()
     
     # Step 2: Extract JSON object from surrounding text
-    # Find first { and last } to isolate JSON
+    # Use proper brace matching to handle nested objects
     first_brace = text.find("{")
-    last_brace = text.rfind("}")
-    if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
-        text = text[first_brace:last_brace + 1]
+    if first_brace != -1:
+        # Find matching closing brace with proper nesting
+        depth = 0
+        for i in range(first_brace, len(text)):
+            if text[i] == '{':
+                depth += 1
+            elif text[i] == '}':
+                depth -= 1
+                if depth == 0:
+                    # Found matching closing brace
+                    text = text[first_brace:i + 1]
+                    break
+        else:
+            # No matching closing brace found, use original rfind logic as fallback
+            last_brace = text.rfind("}")
+            if last_brace > first_brace:
+                text = text[first_brace:last_brace + 1]
+                logger.debug(f"[{logger_name}] Warning: Unbalanced braces, using fallback extraction")
     
     # Step 3: Remove invalid control characters (except tabs and newlines)
     # Preserve JSON-valid whitespace while removing problematic control chars

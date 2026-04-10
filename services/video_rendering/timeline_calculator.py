@@ -129,12 +129,24 @@ class TimelineCalculator:
                 f"image: {bg_image.name})[/dim]"
             )
         
+        # Calculate total duration including pre-jingle pauses
+        # Count jingles (all segments except last)
+        jingle_count = sum(1 for entry in timeline_entries if entry.jingle_path is not None)
+        total_pause_duration = jingle_count * self.pre_jingle_pause_sec
+        total_duration_with_pauses = synthesis_result.total_duration_sec + total_pause_duration
+        
+        logger.debug(
+            f"Timeline duration: audio={synthesis_result.total_duration_sec:.2f}s, "
+            f"jingles={jingle_count}, pre-pause={total_pause_duration:.2f}s, "
+            f"total={total_duration_with_pauses:.2f}s"
+        )
+        
         # Get video settings from config
         video_config = self.config.yaml.video_renderer
         
         timeline = VideoTimeline(
             segments=timeline_entries,
-            total_duration_sec=synthesis_result.total_duration_sec,
+            total_duration_sec=total_duration_with_pauses,  # Include pre-jingle pauses
             main_audio_path=synthesis_result.audio_path,
             bgm_path=bgm_path,
             bgm_volume=video_config.bgm_volume,

@@ -162,7 +162,12 @@ class FluxClient:
         )
         
         # Resolution fallback strategy
-        resolutions_to_try = self.fallback_resolutions if self.enable_resolution_fallback else [[self.width, self.height]]
+        if self.enable_resolution_fallback:
+            # Start with configured resolution, then try fallbacks
+            resolutions_to_try = [[self.width, self.height]] + self.fallback_resolutions
+        else:
+            # No fallback: only try configured resolution
+            resolutions_to_try = [[self.width, self.height]]
         max_retries = len(resolutions_to_try)
         last_exception = None
         

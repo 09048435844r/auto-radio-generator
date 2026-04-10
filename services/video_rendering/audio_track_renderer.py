@@ -181,20 +181,22 @@ class AudioTrackRenderer:
         
         # Build filter with or without ducking
         if jingle_periods:
-            # Guard against invalid volume settings
-            if normal_level <= 0 or self.ducking_level < 0:
+            # Guard against invalid volume settings (prevent division by zero)
+            if normal_level <= 0:
+                logger.error(
+                    f"Invalid BGM volume: {normal_level} (must be > 0). Using safe default 0.15"
+                )
+                normal_level = 0.15  # Safe fallback
+            
+            if self.ducking_level < 0:
                 logger.warning(
-                    f"Invalid volume settings (normal={normal_level}, ducking={self.ducking_level}), ducking disabled"
+                    f"Invalid ducking level: {self.ducking_level} (must be >= 0). Using default 0.04"
                 )
-                # No ducking (fallback to original behavior)
-                return (
-                    f"[1:a]volume={timeline.bgm_volume},"
-                    f"afade=t=in:st=0:d={timeline.fade_in_sec},"
-                    f"afade=t=out:st={fade_out_start}:d={timeline.fade_out_sec}[bgm]"
-                )
+                ducking_level = 0.04
+            else:
+                ducking_level = self.ducking_level
             
             # Validate ducking level to prevent volume increase
-            ducking_level = self.ducking_level
             if ducking_level >= normal_level:
                 logger.warning(
                     f"Ducking level ({ducking_level}) >= normal level ({normal_level}), "
@@ -203,6 +205,7 @@ class AudioTrackRenderer:
                 ducking_level = normal_level * 0.25
             
             # Calculate ducking multiplier (ratio to apply during jingle periods)
+            # At this point, normal_level > 0 is guaranteed by the guard above
             ducking_multiplier = ducking_level / normal_level
             
             # Build between conditions using + for OR (FFmpeg expression syntax)

@@ -372,7 +372,7 @@ async def hitl_import_script(
                 secondary_color=DEFAULT_SECONDARY_COLOR,
                 color_mood=DEFAULT_COLOR_MOOD,
                 aesthetic=DEFAULT_AESTHETIC,
-                visual_keywords=DEFAULT_VISUAL_KEYWORDS.copy()
+                visual_keywords=list(DEFAULT_VISUAL_KEYWORDS)  # Convert tuple to list
             )
             visual_identity_dict = visual_identity.model_dump()
         
@@ -434,8 +434,13 @@ async def hitl_execute_scripting(
     provider: str,
     avoid_topics: str,
     progress=gr.Progress()
-):
-    """Execute scripting phase and display editor
+) -> Tuple[str, List, str, str, str, str]:
+    """Execute scripting phase and return data (Step 1 of Two-step pattern)
+    
+    NOTE: Column visibility and Button interactivity are handled by a
+    separate .then() handler (_show_script_editor) to avoid a Gradio bug
+    where toggling Column visibility in the same return tuple as child
+    component values causes child values to be lost.
     
     Args:
         session_state: Current session ID
@@ -444,18 +449,12 @@ async def hitl_execute_scripting(
         progress: Gradio progress bar
         
     Returns:
-        Tuple of (progress_text, editor_section, turns_editor, json_editor, title, thumbnail_title, description, approve_btn)
+        Tuple of (progress_text, turns_data, json_data, title, thumbnail_title, description)
     """
     if not session_state:
         return (
             "❌ エラー: セッションが見つかりません。まずリサーチを実行してください。",
-            gr.update(visible=False),
-            gr.update(value=[]),
-            gr.update(value=""),
-            gr.update(value=""),
-            gr.update(value=""),
-            gr.update(value=""),
-            gr.update(interactive=False)
+            [], "", "", "", ""
         )
     
     try:
@@ -533,14 +532,12 @@ async def hitl_execute_scripting(
         progress(1.0, desc="完了!")
         
         return (
-            progress_text,
-            gr.update(visible=True),
-            turns_data,  # Return raw list directly, not gr.update(value=...)
-            json_data,
-            title,
-            thumbnail_title,
-            description,
-            gr.update(interactive=True)
+            progress_text,  # hitl_script_progress
+            turns_data,     # hitl_script_turns_editor (raw list)
+            json_data,      # hitl_script_json_editor
+            title,          # hitl_script_title
+            thumbnail_title,  # hitl_script_thumbnail_title
+            description     # hitl_script_description
         )
         
     except Exception as e:
@@ -558,14 +555,12 @@ async def hitl_execute_scripting(
         error_msg += f"詳細はターミナルログを確認してください"
         
         return (
-            error_msg,
-            gr.update(visible=False),
-            [],  # Return raw empty list
-            "",
-            "",
-            "",
-            "",
-            gr.update(interactive=False)
+            error_msg,  # hitl_script_progress
+            [],         # hitl_script_turns_editor (empty list)
+            "",         # hitl_script_json_editor
+            "",         # hitl_script_title
+            "",         # hitl_script_thumbnail_title
+            ""          # hitl_script_description
         )
 
 
@@ -745,8 +740,11 @@ async def hitl_execute_production(
     speed_scale: float,
     bgm_volume: float,
     progress=gr.Progress()
-) -> Tuple[str, gr.update, str, str, str, str, str]:
-    """Execute production phase and display output
+) -> Tuple[str, str, str, str, str, str]:
+    """Execute production phase and return data (Step 1 of Two-step pattern)
+    
+    NOTE: Column visibility is handled by a separate .then() handler
+    (_show_production_output) to avoid a Gradio bug.
     
     Args:
         session_state: Current session ID
@@ -757,12 +755,11 @@ async def hitl_execute_production(
         progress: Gradio progress bar
         
     Returns:
-        Tuple of (progress_text, output_section_update, video_path, video_file, audio_path, subtitle_path, metadata)
+        Tuple of (progress_text, video_path, video_file, audio_path, subtitle_path, metadata)
     """
     if not session_state:
         return (
             "❌ エラー: セッションが見つかりません。",
-            gr.update(visible=False),
             None, None, None, None, ""
         )
     
@@ -827,13 +824,12 @@ async def hitl_execute_production(
         progress(1.0, desc="完了!")
         
         return (
-            progress_text,
-            gr.update(visible=True),
-            str(result.video_path),
-            str(result.video_path),
-            str(result.audio_path),
-            str(result.subtitle_path),
-            metadata
+            progress_text,          # hitl_production_progress
+            str(result.video_path), # hitl_production_video_path
+            str(result.video_path), # hitl_production_video_file
+            str(result.audio_path), # hitl_production_audio_path
+            str(result.subtitle_path),  # hitl_production_subtitle_path
+            metadata                # hitl_production_metadata
         )
         
     except Exception as e:
@@ -845,9 +841,12 @@ async def hitl_execute_production(
         # Return concise error message to UI
         error_msg = f"❌ 動画生成中にエラーが発生しました: {str(e)}"
         return (
-            error_msg,
-            gr.update(visible=False),
-            None, None, None, None, ""
+            error_msg,  # hitl_production_progress
+            None,       # hitl_production_video_path
+            None,       # hitl_production_video_file
+            None,       # hitl_production_audio_path
+            None,       # hitl_production_subtitle_path
+            ""          # hitl_production_metadata
         )
 
 
@@ -856,8 +855,11 @@ async def hitl_regenerate_script(
     provider: str,
     avoid_topics: str,
     progress=gr.Progress()
-):
-    """Regenerate script with same research data but potentially different parameters
+) -> Tuple[str, List, str, str, str, str]:
+    """Regenerate script with same research data (Step 1 of Two-step pattern)
+    
+    NOTE: Column visibility and Button interactivity are handled by a
+    separate .then() handler (_show_script_editor) to avoid a Gradio bug.
     
     Args:
         session_state: Current session ID
@@ -866,18 +868,12 @@ async def hitl_regenerate_script(
         progress: Gradio progress bar
         
     Returns:
-        Tuple of (progress_text, editor_section, turns_editor, json_editor, title, thumbnail_title, description, approve_btn)
+        Tuple of (progress_text, turns_data, json_data, title, thumbnail_title, description)
     """
     if not session_state:
         return (
             "❌ エラー: セッションが見つかりません。まずリサーチを実行してください。",
-            gr.update(visible=False),
-            gr.update(value=[]),
-            gr.update(value=""),
-            gr.update(value=""),
-            gr.update(value=""),
-            gr.update(value=""),
-            gr.update(interactive=False)
+            [], "", "", "", ""
         )
     
     try:
@@ -947,14 +943,12 @@ async def hitl_regenerate_script(
         progress(1.0, desc="完了!")
         
         return (
-            progress_text,
-            gr.update(visible=True),
-            turns_data,  # Return raw list directly, not gr.update(value=...)
-            json_data,
-            title,
-            thumbnail_title,
-            description,
-            gr.update(interactive=True)
+            progress_text,  # hitl_script_progress
+            turns_data,     # hitl_script_turns_editor (raw list)
+            json_data,      # hitl_script_json_editor
+            title,          # hitl_script_title
+            thumbnail_title,  # hitl_script_thumbnail_title
+            description     # hitl_script_description
         )
         
     except Exception as e:
@@ -966,14 +960,12 @@ async def hitl_regenerate_script(
         # Return concise error message to UI
         error_msg = f"❌ 台本再生成中にエラーが発生しました: {str(e)}"
         return (
-            error_msg,
-            gr.update(visible=False),
-            [],  # Return raw empty list
-            "",
-            "",
-            "",
-            "",
-            gr.update(interactive=False)
+            error_msg,  # hitl_script_progress
+            [],         # hitl_script_turns_editor (empty list)
+            "",         # hitl_script_json_editor
+            "",         # hitl_script_title
+            "",         # hitl_script_thumbnail_title
+            ""          # hitl_script_description
         )
 
 
@@ -982,7 +974,7 @@ def _show_script_editor(
     turns_data: List,
     title: str,
 ) -> Tuple[gr.update, gr.update]:
-    """Show script editor section after data is populated
+    """Show script editor section after data is populated (Step 2 of Two-step pattern)
 
     This is called via .then() AFTER scripting/import/regeneration handler
     completes, to avoid Gradio bug where toggling parent Column visibility
@@ -1007,3 +999,29 @@ def _show_script_editor(
     if (not has_error) and has_turns and has_title:
         return gr.update(visible=True), gr.update(interactive=True)
     return gr.update(visible=False), gr.update(interactive=False)
+
+
+def _show_production_output(
+    progress_text: str,
+    video_path: str,
+) -> gr.update:
+    """Show production output section after video generation (Step 2 of Two-step pattern)
+    
+    This is called via .then() AFTER hitl_execute_production completes,
+    to avoid Gradio bug where toggling Column visibility together with
+    child component values in a single return loses child values.
+    
+    Returns:
+        gr.update for output_section visibility
+    """
+    has_error = (not progress_text) or ("❌" in progress_text)
+    has_video = bool(video_path and video_path != "None")
+    
+    logger.info(
+        f"_show_production_output: has_error={has_error}, "
+        f"has_video={has_video} (video_path={video_path!r})"
+    )
+    
+    if (not has_error) and has_video:
+        return gr.update(visible=True)
+    return gr.update(visible=False)

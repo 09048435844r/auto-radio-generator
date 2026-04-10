@@ -47,6 +47,8 @@ from app_hitl_handlers import (
     hitl_approve_script,
     hitl_execute_production,
     hitl_regenerate_script,
+    _show_script_editor,
+    _show_production_output,
 )
 import json
 import os
@@ -2641,7 +2643,7 @@ def create_ui() -> gr.Blocks:
             ]
         )
         
-        # Gate 2: Scripting
+        # Gate 2: Scripting (Two-step pattern to avoid Gradio bug)
         hitl_components["hitl_script_generate_btn"].click(
             fn=hitl_execute_scripting,
             inputs=[
@@ -2651,17 +2653,26 @@ def create_ui() -> gr.Blocks:
             ],
             outputs=[
                 hitl_components["hitl_script_progress"],
-                hitl_components["hitl_script_editor_section"],
                 hitl_components["hitl_script_turns_editor"],
                 hitl_components["hitl_script_json_editor"],
                 hitl_components["hitl_script_title"],
                 hitl_components["hitl_script_thumbnail_title"],
                 hitl_components["hitl_script_description"],
+            ]
+        ).then(
+            fn=_show_script_editor,
+            inputs=[
+                hitl_components["hitl_script_progress"],
+                hitl_components["hitl_script_turns_editor"],
+                hitl_components["hitl_script_title"],
+            ],
+            outputs=[
+                hitl_components["hitl_script_editor_section"],
                 hitl_components["hitl_script_approve_btn"],
             ]
         )
         
-        # Import existing script data
+        # Import existing script data (Two-step pattern)
         hitl_components["hitl_import_script_btn"].click(
             fn=hitl_import_script,
             inputs=[hitl_components["hitl_import_script_file"]],
@@ -2673,6 +2684,17 @@ def create_ui() -> gr.Blocks:
                 hitl_components["hitl_script_title"],
                 hitl_components["hitl_script_thumbnail_title"],
                 hitl_components["hitl_script_description"],
+            ]
+        ).then(
+            fn=_show_script_editor,
+            inputs=[
+                hitl_components["hitl_script_progress"],
+                hitl_components["hitl_script_turns_editor"],
+                hitl_components["hitl_script_title"],
+            ],
+            outputs=[
+                hitl_components["hitl_script_editor_section"],
+                hitl_components["hitl_script_approve_btn"],
             ]
         )
         
@@ -2706,17 +2728,26 @@ def create_ui() -> gr.Blocks:
             ],
             outputs=[
                 hitl_components["hitl_script_progress"],
-                hitl_components["hitl_script_editor_section"],
                 hitl_components["hitl_script_turns_editor"],
                 hitl_components["hitl_script_json_editor"],
                 hitl_components["hitl_script_title"],
                 hitl_components["hitl_script_thumbnail_title"],
                 hitl_components["hitl_script_description"],
+            ]
+        ).then(
+            fn=_show_script_editor,
+            inputs=[
+                hitl_components["hitl_script_progress"],
+                hitl_components["hitl_script_turns_editor"],
+                hitl_components["hitl_script_title"],
+            ],
+            outputs=[
+                hitl_components["hitl_script_editor_section"],
                 hitl_components["hitl_script_approve_btn"],
             ]
         )
         
-        # Gate 3: Production
+        # Gate 3: Production (Two-step pattern to avoid Gradio bug)
         hitl_components["hitl_render_btn"].click(
             fn=hitl_execute_production,
             inputs=[
@@ -2728,12 +2759,20 @@ def create_ui() -> gr.Blocks:
             ],
             outputs=[
                 hitl_components["hitl_render_progress"],
-                hitl_components["hitl_output_section"],
                 hitl_components["hitl_video_output"],
                 hitl_components["hitl_video_file"],
                 hitl_components["hitl_audio_output"],
                 hitl_components["hitl_subtitle_file"],
                 hitl_components["hitl_metadata_output"]
+            ]
+        ).then(
+            fn=_show_production_output,
+            inputs=[
+                hitl_components["hitl_render_progress"],
+                hitl_components["hitl_video_output"],
+            ],
+            outputs=[
+                hitl_components["hitl_output_section"],
             ]
         )
     

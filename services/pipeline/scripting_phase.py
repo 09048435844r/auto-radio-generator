@@ -162,7 +162,7 @@ async def execute_scripting_phase(
                 secondary_color=DEFAULT_SECONDARY_COLOR,
                 color_mood=DEFAULT_COLOR_MOOD,
                 aesthetic=DEFAULT_AESTHETIC,
-                visual_keywords=DEFAULT_VISUAL_KEYWORDS.copy()
+                visual_keywords=list(DEFAULT_VISUAL_KEYWORDS)  # Convert tuple to list
             )
         else:
             try:
@@ -200,7 +200,7 @@ async def execute_scripting_phase(
                     secondary_color=DEFAULT_SECONDARY_COLOR,
                     color_mood=DEFAULT_COLOR_MOOD,
                     aesthetic=DEFAULT_AESTHETIC,
-                    visual_keywords=DEFAULT_VISUAL_KEYWORDS.copy()
+                    visual_keywords=list(DEFAULT_VISUAL_KEYWORDS)  # Convert tuple to list
                 )
                 cb.progress(0.80, "⚠️ Using default visual identity")
                 await asyncio.sleep(0)  # Yield to event loop for Gradio progress flush

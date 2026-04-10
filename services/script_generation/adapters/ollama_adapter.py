@@ -56,16 +56,23 @@ class OllamaAdapter(ILLMPort):
                 content = response.choices[0].message.content
                 finish_reason = response.choices[0].finish_reason
                 
-                # Debug: Log empty responses from Ollama
+                # Validate response content (critical: prevent downstream JSON parse errors)
                 if not content or not content.strip():
                     import logging
                     logger = logging.getLogger(__name__)
-                    logger.warning(
+                    logger.error(
                         f"Ollama returned empty response. "
                         f"finish_reason={finish_reason}, "
                         f"model={request.model or self._default_model}, "
                         f"max_tokens={request.max_tokens}, "
-                        f"temperature={request.temperature}"
+                        f"temperature={request.temperature}, "
+                        f"frequency_penalty={extra_params.get('frequency_penalty', 'N/A')}"
+                    )
+                    raise LLMResponseError(
+                        f"Ollama returned empty response (finish_reason={finish_reason}). "
+                        f"Possible causes: (1) frequency_penalty too high (current: {extra_params.get('frequency_penalty', 'N/A')}), "
+                        f"(2) max_tokens too low (current: {request.max_tokens}), "
+                        f"(3) model not loaded. Check Ollama server logs for details."
                     )
                 
                 usage = LLMUsage(
@@ -77,7 +84,7 @@ class OllamaAdapter(ILLMPort):
                 )
                 
                 return LLMResponse(
-                    content=content or "",  # Ensure non-None content
+                    content=content,  # Guaranteed non-empty by validation above
                     usage=usage,
                     finish_reason=finish_reason,
                     raw_response=response
