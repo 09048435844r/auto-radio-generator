@@ -9,6 +9,7 @@ Static mode uses segment type to select appropriate images:
 - topic_*.png for deep_dive segments
 - conclusion_*.png for conclusion segments
 """
+import asyncio
 import hashlib
 import logging
 import random
@@ -32,6 +33,10 @@ class ImageProvider:
     Provides background images for each segment based on configuration.
     Supports static (local assets) and dynamic (DALL-E 3) modes.
     """
+    
+    # Class-level semaphore: Limit concurrent FLUX.1 generations to 1
+    # This prevents VRAM exhaustion when multiple segments are processed in parallel
+    _generation_semaphore = asyncio.Semaphore(1)
     
     def __init__(self, config: AppConfig, visual_identity: Optional[VisualIdentity] = None, output_dir: Optional[Path] = None):
         """Initialize image provider
@@ -129,7 +134,10 @@ class ImageProvider:
             return self._select_static_image(segment)
     
     async def _generate_dynamic_image(self, segment: ScriptSegment) -> Path:
-        """Generate background image via FLUX.1
+        """Generate background image via FLUX.1 with concurrency control
+        
+        Uses class-level semaphore to ensure only 1 image is generated at a time,
+        preventing VRAM exhaustion from parallel generation requests.
         
         Args:
             segment: Script segment
@@ -139,68 +147,73 @@ class ImageProvider:
         """
         import time
         
-        # Track wall-clock time for first generation
-        if self._generation_start_time is None:
-            self._generation_start_time = time.time()
-        
-        # 1. Generate prompt from segment with visual identity
-        # Issue #6 fix: Pass only visual_identity
-        prompt = await self.prompt_generator.generate_prompt(
-            segment, 
-            visual_identity=self.visual_identity
-        )
-        
-        # 2. Check cache (prompt-based key)
-        cache_key = self._get_prompt_cache_key(prompt)
-        cache_path = self.cache_dir / f"{cache_key}.png"
-        
-        if cache_path.exists():
-            console.print(f"[dim]Using cached image: {cache_path.name}[/dim]")
-            logger.info(f"Cache hit for segment {segment.segment_id}")
-            return cache_path
-        
-        # 3. Generate image via FluxClient
-        try:
-            console.print(f"[cyan]Generating image for {segment.segment_id}...[/cyan]")
+        # Acquire semaphore lock (wait if another generation is in progress)
+        async with self._generation_semaphore:
+            console.print(f"[dim]🔒 Acquired generation lock for {segment.segment_id}[/dim]")
+            logger.debug(f"Semaphore acquired for segment {segment.segment_id}")
             
-            # Prepare visual identity dict for metadata
-            vi_dict = {}
-            if self.visual_identity:
-                vi_dict = {
-                    "primary_color": self.visual_identity.primary_color,
-                    "secondary_color": self.visual_identity.secondary_color,
-                    "aesthetic": self.visual_identity.aesthetic,
-                }
+            # Track wall-clock time for first generation
+            if self._generation_start_time is None:
+                self._generation_start_time = time.time()
             
-            # Generate image with metadata
-            image_path, metadata = await self.flux_client.generate_image(
-                prompt=prompt,
-                output_path=cache_path,
-                context_type="segment",
-                segment_id=segment.segment_id,
-                segment_type=segment.segment_type,
-                visual_identity=vi_dict,
+            # 1. Generate prompt from segment with visual identity
+            # Issue #6 fix: Pass only visual_identity
+            prompt = await self.prompt_generator.generate_prompt(
+                segment, 
+                visual_identity=self.visual_identity
             )
             
-            console.print(f"[green]✓ Generated: {image_path.name} ({metadata.generation_time_sec:.1f}s)[/green]")
-            logger.info(f"Image generated for segment {segment.segment_id}: {image_path} ({metadata.generation_time_sec:.1f}s)")
+            # 2. Check cache (prompt-based key)
+            cache_key = self._get_prompt_cache_key(prompt)
+            cache_path = self.cache_dir / f"{cache_key}.png"
             
-            # Log to PromptOps (fail-safe)
-            if self.logger:
-                self.logger.log_generation(metadata)
+            if cache_path.exists():
+                console.print(f"[dim]Using cached image: {cache_path.name}[/dim]")
+                logger.info(f"Cache hit for segment {segment.segment_id}")
+                return cache_path
             
-            # Update end time for wall-clock tracking
-            self._generation_end_time = time.time()
-            
-            return image_path
-            
-        except Exception as e:
-            # Track time even on failure
-            self._generation_end_time = time.time()
-            
-            logger.error(f"Dynamic image generation failed: {e}, falling back to static mode")
-            console.print(f"[yellow]⚠ Generation failed, using static fallback[/yellow]")
-            return self._select_static_image(segment)
+            # 3. Generate image via FluxClient
+            try:
+                console.print(f"[cyan]Generating image for {segment.segment_id}...[/cyan]")
+                
+                # Prepare visual identity dict for metadata
+                vi_dict = {}
+                if self.visual_identity:
+                    vi_dict = {
+                        "primary_color": self.visual_identity.primary_color,
+                        "secondary_color": self.visual_identity.secondary_color,
+                        "aesthetic": self.visual_identity.aesthetic,
+                    }
+                
+                # Generate image with metadata
+                image_path, metadata = await self.flux_client.generate_image(
+                    prompt=prompt,
+                    output_path=cache_path,
+                    context_type="segment",
+                    segment_id=segment.segment_id,
+                    segment_type=segment.segment_type,
+                    visual_identity=vi_dict,
+                )
+                
+                console.print(f"[green]✓ Generated: {image_path.name} ({metadata.generation_time_sec:.1f}s)[/green]")
+                logger.info(f"Image generated for segment {segment.segment_id}: {image_path} ({metadata.generation_time_sec:.1f}s)")
+                
+                # Log to PromptOps (fail-safe)
+                if self.logger:
+                    self.logger.log_generation(metadata)
+                
+                # Update end time for wall-clock tracking
+                self._generation_end_time = time.time()
+                
+                return image_path
+                
+            except Exception as e:
+                # Track time even on failure
+                self._generation_end_time = time.time()
+                
+                logger.error(f"Dynamic image generation failed: {e}, falling back to static mode")
+                console.print(f"[yellow]⚠ Generation failed, using static fallback[/yellow]")
+                return self._select_static_image(segment)
     
     def _select_static_image(self, segment: ScriptSegment) -> Path:
         """Select background image from local assets

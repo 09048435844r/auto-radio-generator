@@ -1,5 +1,6 @@
 """FLUX.1 image generation client for Stable Diffusion WebUI Forge API"""
 import base64
+import gc
 import json
 import logging
 import tempfile
@@ -222,6 +223,25 @@ class FluxClient:
             logger.error(error_msg)
             console.print(f"[red]✗ {error_msg}[/red]")
             raise RuntimeError(error_msg) from e
+        finally:
+            # Priority 2: Explicit VRAM cleanup after generation
+            # This ensures VRAM is freed for the next generation request
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                    logger.debug("VRAM cache cleared after image generation")
+            except ImportError:
+                # torch not available (CPU-only environment)
+                pass
+            except Exception as cleanup_error:
+                # Non-fatal: log but don't raise
+                logger.warning(f"VRAM cleanup failed (non-fatal): {cleanup_error}")
+            
+            # Force garbage collection to free Python objects
+            gc.collect()
+            logger.debug("Garbage collection completed after image generation")
     
     def _extract_seed_from_response(self, response_data: dict) -> int:
         """Extract actual seed value from Forge API response

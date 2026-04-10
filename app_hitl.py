@@ -129,7 +129,7 @@ def create_hitl_tab(assets: dict) -> dict[str, object]:
         with gr.Row():
             hitl_provider_dropdown = gr.Dropdown(
                 label="LLMプロバイダー",
-                choices=["gemini", "openai", "anthropic"],
+                choices=["gemini", "openai", "anthropic", "ollama"],
                 value="gemini",
                 scale=1
             )

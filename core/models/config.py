@@ -114,6 +114,10 @@ class OrchestratorSegmentConfig(BaseModel):
 class OrchestratorConfig(BaseModel):
     """Hierarchical Agentic Workflow オーケストレーター設定"""
     enabled: bool = Field(default=False, description="Trueにすると新アーキテクチャを使用")
+    two_phase_generation: bool = Field(
+        default=False,
+        description="Trueにすると2段階生成（Markdown→JSON）を使用"
+    )
     curator_model: str = Field(
         default="gemini-2.5-flash",
         description="キュレーション・要約用軽量モデル"

@@ -354,10 +354,10 @@ script_generator:
   
   # Ollama設定（ローカルLLM）
   ollama:
-    model: "gpt-oss:20b-long" # ← Macに入っているモデル名
+    model: "gemma4:26b" # ← Macに入っているモデル名
     base_url: "http://192.168.0.73:11434/v1"  # ← MacのIPアドレス + OpenAI互換API
-    max_tokens: 16384                      # 最大トークン数
-    temperature: 0.85                      # 創造性パラメータ
+    max_tokens: 32768                      # 最大トークン数（Gemma4用に増量）
+    temperature: 0.7                       # 創造性パラメータ（JSON生成のため低めに）
     costs: {}                              # ローカル実行なのでコスト0
   
   # 台本の構成比率（合計100%）
@@ -381,6 +381,7 @@ script_generator:
   # UIで選択したプロバイダーが自動的に使用されます。
   orchestrator:
     enabled: true               # true: 新アーキテクチャ（推奨） / false: 旧アーキテクチャ
+    two_phase_generation: true  # true: 2段階生成（Markdown→JSON） / false: 1段階生成（直接JSON）
     curator_model: ""  # キュレーション・要約用軽量モデル（空=選択されたプロバイダーのデフォルトモデルを使用）
     segment_model: ""            # セグメント生成用モデル（空=選択されたプロバイダーのデフォルトモデルを使用）
     max_topics: 3                # キュレーションで選定する最大トピック数
@@ -464,7 +465,7 @@ video_renderer:
 # セグメント背景・サムネイル背景の動的生成に使用します。
 flux:
   base_url: "http://127.0.0.1:7890"  # Forge API URL
-  timeout: 300  # API timeout (seconds) - 低VRAM環境での10倍遅延に対応
+  timeout: 600  # API timeout (seconds) - 初回モデルロード + 低VRAM環境対応（300→600秒に延長）
   
   # FLUX.1 [schnell] 最適化設定（低VRAM対応）
   steps: 10      # 20 → 10 (schnellは4-10ステップで高品質、処理時間半減)
@@ -473,6 +474,10 @@ flux:
   sampler_name: "Euler"
   scheduler: "Simple"
   cfg_scale: 1.0  # FLUX.1 [schnell] 必須設定
+  
+  # メモリ最適化設定
+  max_concurrent_generations: 1  # 同時生成数制限（Semaphoreで実装済み）
+  enable_vram_cleanup: true      # 生成後のVRAM自動クリーンアップ（実装済み）
 
 # -----------------------------------------------------------------------------
 # 映像オーバーレイ設定

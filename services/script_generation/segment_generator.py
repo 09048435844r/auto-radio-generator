@@ -4,10 +4,15 @@ Hierarchical Agentic Workflow の Step 2。
 TopicCuratorが選定したトピックを受け取り、セグメントタイプ
 （intro / deep_dive / conclusion）に応じた台本を生成する。
 前セグメントの文脈要約を受け取り、会話の連続性を維持する。
+
+2段階生成モード:
+- Phase 1: Markdown形式でクリエイティブに台本を生成（temperature: 0.85）
+- Phase 2: Phase 1の出力をJSON形式に変換（temperature: 0.3）
 """
 import asyncio
 import json
 import logging
+import re
 from typing import Optional, TYPE_CHECKING
 
 from rich.console import Console
@@ -49,6 +54,14 @@ class SegmentGenerator:
         # セグメント生成用モデル（空の場合はportのデフォルトモデルを使用）
         self.segment_model = orch_cfg.segment_model or llm_port.model_name
 
+        # 2段階生成モードの設定
+        self.two_phase_enabled = orch_cfg.two_phase_generation
+        
+        # デバッグ出力（コンソール + ログ）
+        init_msg = f"SegmentGenerator initialized: two_phase_enabled={self.two_phase_enabled}, model={self.segment_model}"
+        logger.info(init_msg)
+        console.print(f"[yellow]{init_msg}[/yellow]")
+
         # セグメント別ターン数設定
         self.intro_cfg = orch_cfg.intro
         self.deep_dive_cfg = orch_cfg.deep_dive
@@ -74,16 +87,37 @@ class SegmentGenerator:
         log = progress_log or (lambda msg: console.print(msg))
         log(f"[cyan]📝 導入セグメント生成中...[/cyan]")
 
-        system_prompt = self.prompt_manager.get_prompt("orchestrator", "segment_intro").format(
-            min_turns=self.intro_cfg.min_turns,
-            max_turns=self.intro_cfg.max_turns,
-        )
         user_prompt = self._build_intro_user_prompt(theme, topic_titles, context)
 
-        response_text, usage = await self._call_api(system_prompt, user_prompt)
-        self.last_usage = usage
-        segment = self._parse_segment_response(response_text, expected_type="intro")
+        if self.two_phase_enabled:
+            # 2段階生成モード
+            log(f"[dim]  Phase 1: クリエイティブ生成中...[/dim]")
+            markdown_script, usage1 = await self._generate_creative_markdown(
+                segment_type="intro",
+                user_prompt=user_prompt,
+                min_turns=self.intro_cfg.min_turns,
+                max_turns=self.intro_cfg.max_turns,
+                context=context,
+            )
+            
+            log(f"[dim]  Phase 2: JSON構造化中...[/dim]")
+            response_text, usage2 = await self._convert_markdown_to_json_with_fallback(
+                markdown_script=markdown_script,
+                segment_type="intro",
+            )
+            
+            # Usage合算
+            self.last_usage = self._merge_usage(usage1, usage2)
+        else:
+            # 従来の1段階生成モード
+            system_prompt = self.prompt_manager.get_prompt("orchestrator", "segment_intro").format(
+                min_turns=self.intro_cfg.min_turns,
+                max_turns=self.intro_cfg.max_turns,
+            )
+            response_text, usage = await self._call_api(system_prompt, user_prompt)
+            self.last_usage = usage
 
+        segment = self._parse_segment_response(response_text, expected_type="intro")
         log(f"[green]  ✓ 導入: {len(segment.turns)}ターン[/green]")
         return segment
 
@@ -106,22 +140,42 @@ class SegmentGenerator:
         log(f"[cyan]📝 深掘りセグメント{segment_index}生成中: 「{topic.title}」[/cyan]")
 
         segment_id = f"deep_dive_{segment_index}"
-        section_marker = f"main_{segment_index}" if segment_index > 1 else "main"
-
-        system_prompt = self.prompt_manager.get_prompt("orchestrator", "segment_deep_dive").format(
-            context=context or "（前のセグメントはありません。これが番組の最初です）",
-            min_turns=self.deep_dive_cfg.min_turns,
-            max_turns=self.deep_dive_cfg.max_turns,
-            segment_id=segment_id,
-            topic_title=topic.title,
-            section_marker=section_marker,
-        )
         user_prompt = self._build_deep_dive_user_prompt(topic)
 
-        response_text, usage = await self._call_api(system_prompt, user_prompt)
-        self.last_usage = usage
-        segment = self._parse_segment_response(response_text, expected_type="deep_dive")
+        if self.two_phase_enabled:
+            # 2段階生成モード
+            log(f"[dim]  Phase 1: クリエイティブ生成中...[/dim]")
+            markdown_script, usage1 = await self._generate_creative_markdown(
+                segment_type="deep_dive",
+                user_prompt=user_prompt,
+                min_turns=self.deep_dive_cfg.min_turns,
+                max_turns=self.deep_dive_cfg.max_turns,
+                context=context,
+            )
+            
+            log(f"[dim]  Phase 2: JSON構造化中...[/dim]")
+            response_text, usage2 = await self._convert_markdown_to_json_with_fallback(
+                markdown_script=markdown_script,
+                segment_type="deep_dive",
+            )
+            
+            # Usage合算
+            self.last_usage = self._merge_usage(usage1, usage2)
+        else:
+            # 従来の1段階生成モード
+            section_marker = f"main_{segment_index}" if segment_index > 1 else "main"
+            system_prompt = self.prompt_manager.get_prompt("orchestrator", "segment_deep_dive").format(
+                context=context or "（前のセグメントはありません。これが番組の最初です）",
+                min_turns=self.deep_dive_cfg.min_turns,
+                max_turns=self.deep_dive_cfg.max_turns,
+                segment_id=segment_id,
+                topic_title=topic.title,
+                section_marker=section_marker,
+            )
+            response_text, usage = await self._call_api(system_prompt, user_prompt)
+            self.last_usage = usage
 
+        segment = self._parse_segment_response(response_text, expected_type="deep_dive")
         log(f"[green]  ✓ 深掘り{segment_index}「{topic.title}」: {len(segment.turns)}ターン[/green]")
         return segment
 
@@ -143,17 +197,38 @@ class SegmentGenerator:
         log = progress_log or (lambda msg: console.print(msg))
         log(f"[cyan]📝 まとめセグメント生成中...[/cyan]")
 
-        system_prompt = self.prompt_manager.get_prompt("orchestrator", "segment_conclusion").format(
-            context=context or "（文脈情報なし）",
-            min_turns=self.conclusion_cfg.min_turns,
-            max_turns=self.conclusion_cfg.max_turns,
-        )
         user_prompt = self._build_conclusion_user_prompt(theme, topic_titles)
 
-        response_text, usage = await self._call_api(system_prompt, user_prompt)
-        self.last_usage = usage
-        segment = self._parse_segment_response(response_text, expected_type="conclusion")
+        if self.two_phase_enabled:
+            # 2段階生成モード
+            log(f"[dim]  Phase 1: クリエイティブ生成中...[/dim]")
+            markdown_script, usage1 = await self._generate_creative_markdown(
+                segment_type="conclusion",
+                user_prompt=user_prompt,
+                min_turns=self.conclusion_cfg.min_turns,
+                max_turns=self.conclusion_cfg.max_turns,
+                context=context,
+            )
+            
+            log(f"[dim]  Phase 2: JSON構造化中...[/dim]")
+            response_text, usage2 = await self._convert_markdown_to_json_with_fallback(
+                markdown_script=markdown_script,
+                segment_type="conclusion",
+            )
+            
+            # Usage合算
+            self.last_usage = self._merge_usage(usage1, usage2)
+        else:
+            # 従来の1段階生成モード
+            system_prompt = self.prompt_manager.get_prompt("orchestrator", "segment_conclusion").format(
+                context=context or "（文脈情報なし）",
+                min_turns=self.conclusion_cfg.min_turns,
+                max_turns=self.conclusion_cfg.max_turns,
+            )
+            response_text, usage = await self._call_api(system_prompt, user_prompt)
+            self.last_usage = usage
 
+        segment = self._parse_segment_response(response_text, expected_type="conclusion")
         log(f"[green]  ✓ まとめ: {len(segment.turns)}ターン[/green]")
         return segment
 
@@ -279,5 +354,224 @@ class SegmentGenerator:
             turns=turns,
             context_summary=data.get("context_summary", ""),
             token_count=0,
+        )
+
+    # ------------------------------------------------------------------
+    # Two-phase generation methods
+    # ------------------------------------------------------------------
+
+    async def _generate_creative_markdown(
+        self,
+        segment_type: str,
+        user_prompt: str,
+        min_turns: int,
+        max_turns: int,
+        context: str = "",
+    ) -> tuple[str, LLMUsage]:
+        """Phase 1: Markdown形式でクリエイティブに台本を生成
+        
+        Args:
+            segment_type: セグメントタイプ (intro/deep_dive/conclusion)
+            user_prompt: ユーザープロンプト
+            min_turns: 最小ターン数
+            max_turns: 最大ターン数
+            context: 前セグメントの文脈要約
+        
+        Returns:
+            tuple[Markdown台本, LLMUsage]
+        """
+        # Phase 1用のクリエイティブプロンプトを取得
+        system_prompt = self.prompt_manager.get_prompt(
+            "orchestrator", 
+            f"segment_{segment_type}_creative"
+        ).format(
+            min_turns=min_turns,
+            max_turns=max_turns,
+            context=context or "（前のセグメントはありません。これが番組の最初です）"
+        )
+        
+        # API呼び出し（JSON形式を要求しない）
+        request = LLMRequest(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=self.segment_model,
+            max_tokens=4096,  # Phase 1は長めに
+            temperature=0.85,  # 創造性重視
+            response_format="text"  # JSON不要
+        )
+        
+        console.print(
+            f"[dim]  Phase 1 API: provider={self._llm.provider_name}, model={self.segment_model}, "
+            f"max_tokens=4096, temperature=0.85[/dim]"
+        )
+        
+        response = await self._llm.generate(request)
+        
+        logger.debug(
+            f"Phase 1 (Creative): provider={response.usage.provider}, model={response.usage.model_name}, "
+            f"in={response.usage.input_tokens}, out={response.usage.output_tokens}"
+        )
+        
+        return response.content, response.usage
+
+    async def _convert_markdown_to_json(
+        self,
+        markdown_script: str,
+        segment_type: str,
+    ) -> tuple[str, LLMUsage]:
+        """Phase 2: Markdown台本をJSON形式に変換
+        
+        Args:
+            markdown_script: Phase 1で生成されたMarkdown台本
+            segment_type: セグメントタイプ
+        
+        Returns:
+            tuple[JSON文字列, LLMUsage]
+        """
+        system_prompt = self.prompt_manager.get_prompt(
+            "orchestrator",
+            "markdown_to_json"
+        ).format(
+            markdown_script=markdown_script,
+            segment_type=segment_type
+        )
+        
+        # API呼び出し（構造化に特化）
+        request = LLMRequest(
+            system_prompt="You are a JSON converter. Convert Markdown dialogue to JSON format.",
+            user_prompt=system_prompt,  # プロンプト全体をuser_promptに移動
+            model=self.segment_model,
+            max_tokens=2048,  # Phase 2は短めでOK
+            temperature=0.1,  # 正確性最優先
+            response_format="json"
+        )
+        
+        console.print(
+            f"[dim]  Phase 2 API: provider={self._llm.provider_name}, model={self.segment_model}, "
+            f"max_tokens=2048, temperature=0.1[/dim]"
+        )
+        
+        response = await self._llm.generate(request)
+        
+        logger.debug(
+            f"Phase 2 (JSON): provider={response.usage.provider}, model={response.usage.model_name}, "
+            f"in={response.usage.input_tokens}, out={response.usage.output_tokens}"
+        )
+        
+        return response.content, response.usage
+
+    async def _convert_markdown_to_json_with_fallback(
+        self,
+        markdown_script: str,
+        segment_type: str,
+    ) -> tuple[str, LLMUsage]:
+        """Phase 2のJSON変換（フォールバック付き）
+        
+        Args:
+            markdown_script: Markdown台本
+            segment_type: セグメントタイプ
+        
+        Returns:
+            tuple[JSON文字列, LLMUsage]
+        """
+        try:
+            # 通常のJSON変換を試行
+            json_text, usage = await self._convert_markdown_to_json(
+                markdown_script, segment_type
+            )
+            
+            # パース可能か検証
+            json.loads(json_text.strip(), strict=False)
+            console.print(f"[green]✓ Phase 2: JSON変換成功[/green]")
+            return json_text, usage
+            
+        except json.JSONDecodeError as e:
+            logger.warning(f"Phase 2 JSON変換失敗: {e}")
+            console.print(f"[yellow]⚠️ Phase 2失敗。フォールバックパーサーを使用します[/yellow]")
+            
+            # フォールバック: Markdownを正規表現でパース
+            json_text = self._parse_markdown_to_json(markdown_script, segment_type)
+            
+            # Usageはダミー（フォールバックなのでAPI呼び出しなし）
+            fallback_usage = LLMUsage(
+                provider=self._llm.provider_name,
+                model_name=self.segment_model,
+                input_tokens=0,
+                output_tokens=0,
+                request_count=0,
+            )
+            
+            console.print(f"[green]✓ フォールバックパーサーでJSON生成成功[/green]")
+            return json_text, fallback_usage
+
+    def _parse_markdown_to_json(
+        self,
+        markdown_script: str,
+        segment_type: str,
+    ) -> str:
+        """MarkdownをパースしてJSON文字列を生成（フォールバック）
+        
+        Args:
+            markdown_script: Markdown台本
+            segment_type: セグメントタイプ
+        
+        Returns:
+            JSON文字列
+        """
+        turns = []
+        
+        # 正規表現で「**話者名**: セリフ」を抽出
+        # パターン: **A**: または **B**: で始まり、次の話者または文末まで
+        pattern = r'\*\*([AB])\*\*:\s*(.+?)(?=\n\*\*[AB]\*\*:|$)'
+        matches = re.findall(pattern, markdown_script, re.DOTALL)
+        
+        # マッチが0件の場合は明示的にエラーを発生
+        if not matches:
+            raise ValueError(
+                f"Fallback parser failed: No valid speaker patterns found in Markdown.\n"
+                f"Expected format: '**A**: text' or '**B**: text'\n"
+                f"Markdown preview (first 500 chars): {markdown_script[:500]}"
+            )
+        
+        for speaker, text in matches:
+            # セリフのクリーンアップ（連続する空白を1つに正規化）
+            cleaned_text = text.strip()
+            # 改行や連続空白を単一スペースに正規化
+            cleaned_text = ' '.join(cleaned_text.split())
+            
+            turns.append({
+                "speaker": speaker,
+                "text": cleaned_text,
+                "section": segment_type,
+                "chapter_title": None
+            })
+        
+        segment_dict = {
+            "segment_id": segment_type,
+            "segment_type": segment_type,
+            "topic_title": None,
+            "turns": turns,
+            "context_summary": ""
+        }
+        
+        logger.info(f"Fallback parser extracted {len(turns)} turns from Markdown")
+        return json.dumps(segment_dict, ensure_ascii=False, indent=2)
+
+    def _merge_usage(self, usage1: LLMUsage, usage2: LLMUsage) -> LLMUsage:
+        """2つのLLMUsageを合算
+        
+        Args:
+            usage1: Phase 1のUsage
+            usage2: Phase 2のUsage
+        
+        Returns:
+            合算されたLLMUsage
+        """
+        return LLMUsage(
+            provider=usage1.provider,
+            model_name=usage1.model_name,
+            input_tokens=usage1.input_tokens + usage2.input_tokens,
+            output_tokens=usage1.output_tokens + usage2.output_tokens,
+            request_count=usage1.request_count + usage2.request_count,
         )
 
