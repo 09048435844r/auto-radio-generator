@@ -465,12 +465,12 @@ video_renderer:
 # セグメント背景・サムネイル背景の動的生成に使用します。
 flux:
   base_url: "http://127.0.0.1:7890"  # Forge API URL
-  timeout: 600  # API timeout (seconds) - 初回モデルロード + 低VRAM環境対応（300→600秒に延長）
+  timeout: 900  # API timeout (seconds) - 初回モデルロード + 低VRAM環境対応（600→900秒=15分に延長）
   
-  # FLUX.1 [schnell] 最適化設定（低VRAM対応）
-  steps: 10      # 20 → 10 (schnellは4-10ステップで高品質、処理時間半減)
-  width: 1024    # 1344 → 1024 (VRAM消費約50%削減)
-  height: 576    # 768 → 576 (アスペクト比16:9維持)
+  # FLUX.1 [schnell] 超低VRAM対応設定
+  steps: 8       # 10 → 8 (schnellは4-8ステップでも高品質、メモリ効率優先)
+  width: 896     # 1024 → 896 (VRAM消費さらに削減、アスペクト比16:9維持)
+  height: 504    # 576 → 504 (896x504 = 16:9)
   sampler_name: "Euler"
   scheduler: "Simple"
   cfg_scale: 1.0  # FLUX.1 [schnell] 必須設定
@@ -478,6 +478,14 @@ flux:
   # メモリ最適化設定
   max_concurrent_generations: 1  # 同時生成数制限（Semaphoreで実装済み）
   enable_vram_cleanup: true      # 生成後のVRAM自動クリーンアップ（実装済み）
+  enable_pre_generation_cleanup: true  # 生成前のVRAMクリーンアップ（新規）
+  
+  # タイムアウト時の段階的フォールバック設定
+  enable_resolution_fallback: true  # タイムアウト時に解像度を下げて再試行
+  fallback_resolutions:  # フォールバック解像度リスト（優先度順）
+    - [896, 504]   # 1st attempt (default)
+    - [768, 432]   # 2nd attempt (VRAM削減)
+    - [640, 360]   # 3rd attempt (最終手段)
 
 # -----------------------------------------------------------------------------
 # 映像オーバーレイ設定

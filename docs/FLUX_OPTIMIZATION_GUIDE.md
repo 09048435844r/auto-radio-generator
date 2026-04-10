@@ -61,22 +61,67 @@ flux:
 
 ---
 
-## 優先度4: Forge起動オプション最適化
+### ✅ 優先度4: VRAM事前クリーンアップ（新規実装）
 
-### 推奨設定（中程度のVRAM環境）
+**実装箇所**: `services/media_processing/flux_client.py`
+
+```python
+async def _cleanup_vram_before_generation(self) -> bool:
+    """Request VRAM cleanup from Forge API before generation"""
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        await client.post(f"{self.base_url}/sdapi/v1/unload-checkpoint")
+```
+
+**効果**:
+- 生成開始前にForge APIにモデルアンロードを要求
+- VRAMを事前に解放し、タイムアウトリスクを低減
+- `config.yaml`の`enable_pre_generation_cleanup: true`で有効化
+
+---
+
+### ✅ 優先度5: 段階的解像度フォールバック（新規実装）
+
+**実装箇所**: `services/media_processing/flux_client.py`
+
+```python
+# タイムアウト時に解像度を段階的に下げて再試行
+resolutions_to_try = [[896, 504], [768, 432], [640, 360]]
+```
+
+**効果**:
+- 1回目のタイムアウト時、自動的に解像度を下げて再試行
+- 最大3回まで自動リトライ（896x504 → 768x432 → 640x360）
+- `config.yaml`の`enable_resolution_fallback: true`で有効化
+
+**設定箇所**: `config.yaml`
+
+```yaml
+flux:
+  enable_resolution_fallback: true
+  fallback_resolutions:
+    - [896, 504]   # 1st attempt
+    - [768, 432]   # 2nd attempt
+    - [640, 360]   # 3rd attempt
+```
+
+---
+
+## 優先度6: Forge起動オプション最適化
+
+### 推奨設定（中程度のVRAM環境: 8GB）
 
 Stable Diffusion WebUI Forgeの起動スクリプト（`webui-user.bat`または`webui-user.sh`）に以下を追加:
 
 ```bash
 # Windows (webui-user.bat)
-set COMMANDLINE_ARGS=--medvram --opt-split-attention --no-half-vae --api --port 7890
+set COMMANDLINE_ARGS=--medvram-sdxl --opt-split-attention --no-half-vae --api --port 7890
 
 # Linux/Mac (webui-user.sh)
-export COMMANDLINE_ARGS="--medvram --opt-split-attention --no-half-vae --api --port 7890"
+export COMMANDLINE_ARGS="--medvram-sdxl --opt-split-attention --no-half-vae --api --port 7890"
 ```
 
 **各オプションの説明**:
-- `--medvram`: 中程度のVRAM最適化（8GB VRAM推奨）
+- `--medvram-sdxl`: SDXL/FLUX向けVRAM最適化（8GB VRAM推奨）
 - `--opt-split-attention`: Attention計算の最適化（メモリ効率向上）
 - `--no-half-vae`: VAEの精度を保ちつつメモリ節約
 - `--api`: API機能を有効化（必須）
@@ -114,18 +159,28 @@ set COMMANDLINE_ARGS=--lowvram --opt-sdp-attention --no-half --precision full --
 
 ### タイムアウトが依然として発生する場合
 
-1. **解像度をさらに下げる** (`config.yaml`):
+1. **段階的フォールバックが有効か確認** (`config.yaml`):
    ```yaml
    flux:
-     width: 896   # 1024 → 896
-     height: 504  # 576 → 504
-     steps: 8     # 10 → 8
+     timeout: 900  # 15分に延長
+     enable_pre_generation_cleanup: true
+     enable_resolution_fallback: true
    ```
 
-2. **Forgeのモデルキャッシュをクリア**:
-   - Forge WebUIの設定から「Unload SD checkpoint to free VRAM」を有効化
+2. **Forgeの起動オプションを確認**:
+   - `--medvram-sdxl`または`--lowvram`が設定されているか
+   - Forgeを再起動して設定を反映
 
-3. **システムメモリ（RAM）を確認**:
+3. **最小解像度をさらに下げる** (`config.yaml`):
+   ```yaml
+   flux:
+     fallback_resolutions:
+       - [768, 432]   # 1st attempt
+       - [640, 360]   # 2nd attempt
+       - [512, 288]   # 3rd attempt (最終手段)
+   ```
+
+4. **システムメモリ（RAM）を確認**:
    - VRAMが不足するとシステムRAMにスワップされ、極端に遅くなる
    - 最低16GB RAM推奨
 
@@ -154,24 +209,27 @@ set COMMANDLINE_ARGS=--lowvram --opt-sdp-attention --no-half --precision full --
 
 ## パフォーマンス目安
 
-| VRAM | 推奨設定 | 生成時間（1024x576, 10steps） |
-|------|---------|------------------------------|
-| 12GB+ | デフォルト | 10〜20秒 |
-| 8GB | `--medvram` | 20〜40秒 |
-| 6GB | `--lowvram` | 40〜80秒 |
-| 4GB | `--lowvram --no-half` | 80〜180秒 |
+| VRAM | 推奨設定 | 生成時間（896x504, 8steps） | タイムアウトリスク |
+|------|---------|---------------------------|------------------|
+| 12GB+ | デフォルト | 8〜15秒 | 極めて低い |
+| 8GB | `--medvram-sdxl` | 15〜30秒 | 低い |
+| 6GB | `--lowvram` | 30〜60秒 | 中程度 |
+| 4GB | `--lowvram --no-half` | 60〜120秒 | 高い（フォールバック推奨） |
+
+**注**: 上記は1回目の生成時間。2回目以降はモデルキャッシュにより高速化されます。
 
 ---
 
 ## 関連ファイル
 
-- `config.yaml`: タイムアウト・解像度設定
+- `config.yaml`: タイムアウト・解像度・フォールバック設定
 - `services/media_processing/image_provider.py`: Semaphore実装
-- `services/media_processing/flux_client.py`: VRAM自動クリーンアップ
+- `services/media_processing/flux_client.py`: VRAM自動クリーンアップ、段階的フォールバック
 - `services/media_processing/thumbnail_background_generator.py`: サムネイル生成
 
 ---
 
 ## 更新履歴
 
-- **2026-04-10**: 初版作成（優先度1〜4の対策実装完了）
+- **2026-04-10 (v2)**: VRAM事前クリーンアップ、段階的解像度フォールバック機能を追加
+- **2026-04-10 (v1)**: 初版作成（優先度1〜3の対策実装完了）

@@ -28,10 +28,16 @@ class OllamaAdapter(ILLMPort):
             {"role": "user", "content": request.user_prompt}
         ]
         
-        # Ollama-specific: JSON mode
+        # Ollama-specific: JSON mode and repetition penalty
         extra_params = {}
         if request.response_format == "json":
             extra_params["response_format"] = {"type": "json_object"}
+        
+        # Prevent infinite repetition loops (critical for metadata generation)
+        # Note: Ollama's frequency_penalty implementation differs from OpenAI
+        # Values > 1.0 can cause empty responses. Use conservative 0.8-1.0 range.
+        # 0.0 = no penalty, 1.0 = moderate penalty, >1.0 = aggressive (risky)
+        extra_params["frequency_penalty"] = 0.9
         
         max_retries = 3
         last_error = None
@@ -49,6 +55,19 @@ class OllamaAdapter(ILLMPort):
                 # Extract response
                 content = response.choices[0].message.content
                 finish_reason = response.choices[0].finish_reason
+                
+                # Debug: Log empty responses from Ollama
+                if not content or not content.strip():
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(
+                        f"Ollama returned empty response. "
+                        f"finish_reason={finish_reason}, "
+                        f"model={request.model or self._default_model}, "
+                        f"max_tokens={request.max_tokens}, "
+                        f"temperature={request.temperature}"
+                    )
+                
                 usage = LLMUsage(
                     provider="ollama",
                     model_name=request.model or self._default_model,
@@ -58,7 +77,7 @@ class OllamaAdapter(ILLMPort):
                 )
                 
                 return LLMResponse(
-                    content=content,
+                    content=content or "",  # Ensure non-None content
                     usage=usage,
                     finish_reason=finish_reason,
                     raw_response=response

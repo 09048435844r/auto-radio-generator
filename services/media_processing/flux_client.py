@@ -42,6 +42,10 @@ class FluxClient:
             self.sampler_name = flux_config.sampler_name
             self.scheduler = flux_config.scheduler
             self.cfg_scale = flux_config.cfg_scale
+            # New optimization settings
+            self.enable_pre_generation_cleanup = getattr(flux_config, "enable_pre_generation_cleanup", True)
+            self.enable_resolution_fallback = getattr(flux_config, "enable_resolution_fallback", True)
+            self.fallback_resolutions = getattr(flux_config, "fallback_resolutions", [[896, 504], [768, 432], [640, 360]])
         else:
             # Fallback defaults
             self.base_url = "http://127.0.0.1:7890"
@@ -52,6 +56,9 @@ class FluxClient:
             self.sampler_name = "Euler"
             self.scheduler = "Simple"
             self.cfg_scale = 1.0
+            self.enable_pre_generation_cleanup = True
+            self.enable_resolution_fallback = True
+            self.fallback_resolutions = [[896, 504], [768, 432], [640, 360]]
         
         logger.info(f"FluxClient initialized: {self.base_url}")
     
@@ -72,6 +79,30 @@ class FluxClient:
             logger.warning(f"Forge API not available: {e}")
             console.print(f"[yellow]⚠ Forge API not available: {e}[/yellow]")
         return False
+    
+    async def _cleanup_vram_before_generation(self) -> bool:
+        """Request VRAM cleanup from Forge API before generation
+        
+        Returns:
+            bool: True if cleanup succeeded, False otherwise
+        """
+        if not self.enable_pre_generation_cleanup:
+            return True
+        
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                # Unload checkpoint to free VRAM
+                response = await client.post(f"{self.base_url}/sdapi/v1/unload-checkpoint")
+                if response.status_code == 200:
+                    logger.info("✓ VRAM cleanup completed (checkpoint unloaded)")
+                    console.print("[dim]🧹 VRAM cleanup completed[/dim]")
+                    return True
+                else:
+                    logger.warning(f"VRAM cleanup returned status {response.status_code}")
+                    return False
+        except Exception as e:
+            logger.warning(f"VRAM cleanup request failed (non-fatal): {e}")
+            return False
     
     async def generate_image(
         self,
@@ -112,6 +143,9 @@ class FluxClient:
             "batch_size": 1,
         }
         
+        # Pre-generation VRAM cleanup
+        await self._cleanup_vram_before_generation()
+        
         logger.info(f"Generating image: {self.width}x{self.height}, {self.steps} steps")
         console.print(f"[cyan]Generating image via FLUX.1 [schnell]...[/cyan]")
         console.print(f"[dim]Prompt: {prompt[:80]}...[/dim]")
@@ -122,16 +156,26 @@ class FluxClient:
         # Configure timeout with separate connect/read limits
         timeout_config = httpx.Timeout(
             connect=10.0,  # Connection timeout: 10 seconds
-            read=self.timeout,  # Read timeout: from config (default 300s)
+            read=self.timeout,  # Read timeout: from config (default 900s)
             write=10.0,  # Write timeout: 10 seconds
             pool=5.0  # Pool timeout: 5 seconds
         )
         
-        # Retry logic for timeout exceptions
-        max_retries = 2
+        # Resolution fallback strategy
+        resolutions_to_try = self.fallback_resolutions if self.enable_resolution_fallback else [[self.width, self.height]]
+        max_retries = len(resolutions_to_try)
         last_exception = None
         
         for attempt in range(max_retries):
+            # Use fallback resolution on retry
+            current_width, current_height = resolutions_to_try[attempt]
+            if attempt > 0:
+                logger.info(f"Retry {attempt}/{max_retries-1}: Reducing resolution to {current_width}x{current_height}")
+                console.print(f"[yellow]⚙ Retry with lower resolution: {current_width}x{current_height}[/yellow]")
+            
+            # Update payload with current resolution
+            payload["width"] = current_width
+            payload["height"] = current_height
             try:
                 async with httpx.AsyncClient(timeout=timeout_config) as client:
                     response = await client.post(
@@ -139,15 +183,20 @@ class FluxClient:
                         json=payload
                     )
                     response.raise_for_status()
+                    # Success - update metadata with actual resolution used
+                    if attempt > 0:
+                        logger.info(f"✓ Generation succeeded with fallback resolution {current_width}x{current_height}")
+                        console.print(f"[green]✓ Succeeded with {current_width}x{current_height}[/green]")
                     break  # Success, exit retry loop
             except httpx.TimeoutException as e:
+                last_exception = e
                 if attempt < max_retries - 1:
-                    logger.warning(f"FLUX.1 timeout on attempt {attempt + 1}/{max_retries}, retrying...")
+                    logger.warning(f"FLUX.1 timeout on attempt {attempt + 1}/{max_retries}, retrying with lower resolution...")
                     console.print(f"[yellow]⚠ Timeout ({attempt + 1}/{max_retries}), retrying...[/yellow]")
                     continue
                 else:
                     # Final attempt failed
-                    error_msg = f"Forge API timeout after {self.timeout}s (all {max_retries} attempts failed)"
+                    error_msg = f"Forge API timeout after {self.timeout}s (all {max_retries} resolution attempts failed)"
                     logger.error(error_msg)
                     console.print(f"[red]✗ {error_msg}[/red]")
                     raise RuntimeError(error_msg) from e
@@ -204,7 +253,8 @@ class FluxClient:
                 # Extract actual seed from API response
                 actual_seed = self._extract_seed_from_response(result)
                 
-                # Build metadata
+                # Build metadata (use actual resolution that succeeded)
+                actual_resolution = f"{current_width}x{current_height}"
                 metadata = self._build_metadata(
                     image_path=str(output_path),
                     context_type=context_type,
@@ -214,6 +264,7 @@ class FluxClient:
                     visual_identity=visual_identity or {},
                     seed=actual_seed,
                     generation_time_sec=gen_time,
+                    resolution=actual_resolution,
                 )
                 
                 return output_path, metadata
@@ -289,6 +340,7 @@ class FluxClient:
         visual_identity: dict,
         seed: int,
         generation_time_sec: float,
+        resolution: str = None,
     ) -> GenerationMetadata:
         """Build GenerationMetadata from generation parameters
         
@@ -301,11 +353,13 @@ class FluxClient:
             visual_identity: Visual identity dict
             seed: Actual seed used
             generation_time_sec: Generation time
+            resolution: Actual resolution used (optional, defaults to config)
         
         Returns:
             GenerationMetadata: Metadata instance
         """
-        resolution = f"{self.width}x{self.height}"
+        if resolution is None:
+            resolution = f"{self.width}x{self.height}"
         
         if context_type == "segment":
             return GenerationMetadata.create_from_segment(

@@ -2,6 +2,7 @@
 from dataclasses import dataclass, field
 from typing import Optional, Callable
 from datetime import datetime
+from pathlib import Path
 import uuid
 
 from core.models import AppConfig
@@ -31,6 +32,7 @@ class ExecutionContext:
     # Session metadata
     session_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     timestamp: datetime = field(default_factory=datetime.now)
+    session_dir: Optional[Path] = None  # Output directory for session artifacts
     
     def log(self, message: str) -> None:
         """Safe logging with callback"""
@@ -52,5 +54,6 @@ class ExecutionContext:
             use_orchestrator=self.use_orchestrator,
             enable_research=self.enable_research,
             session_id=self.session_id,
-            timestamp=self.timestamp
+            timestamp=self.timestamp,
+            session_dir=self.session_dir
         )

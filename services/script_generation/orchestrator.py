@@ -76,7 +76,11 @@ class ScriptOrchestrator(IScriptOrchestrator):
         
         # Initialize components with LLM ports
         self.curator = TopicCurator(self._curator_port, context.config)
-        self.generator = SegmentGenerator(self._segment_port, context.config)
+        
+        # Pass session_dir to SegmentGenerator for markdown script saving
+        markdown_output_dir = getattr(context, 'session_dir', None)
+        self.generator = SegmentGenerator(self._segment_port, context.config, markdown_output_dir=markdown_output_dir)
+        
         self.metadata_gen = MetadataGenerator(self._metadata_port, context.config)
 
         # 累積 LLM 使用量（プロバイダー別 + 全体集計）

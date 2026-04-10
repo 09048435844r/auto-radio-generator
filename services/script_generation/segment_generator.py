@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import re
+from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
 from rich.console import Console
@@ -38,16 +39,18 @@ class SegmentGenerator:
     セグメントタイプに応じた専用プロンプトを使用する。
     """
 
-    def __init__(self, llm_port: ILLMPort, config: AppConfig):
+    def __init__(self, llm_port: ILLMPort, config: AppConfig, markdown_output_dir: Optional[Path] = None):
         """Initialize SegmentGenerator with LLM port
         
         Args:
             llm_port: LLM port interface for provider-agnostic communication
             config: Application configuration
+            markdown_output_dir: Optional directory to save Phase 1 markdown scripts
         """
         self._llm = llm_port
         self.config = config
         self.prompt_manager = PromptManager()
+        self.markdown_output_dir = markdown_output_dir
 
         orch_cfg = config.yaml.script_generator.orchestrator
 
@@ -99,6 +102,9 @@ class SegmentGenerator:
                 max_turns=self.intro_cfg.max_turns,
                 context=context,
             )
+            
+            # Save Phase 1 markdown to disk
+            self._save_markdown_script(markdown_script, "intro")
             
             log(f"[dim]  Phase 2: JSON構造化中...[/dim]")
             response_text, usage2 = await self._convert_markdown_to_json_with_fallback(
@@ -152,6 +158,9 @@ class SegmentGenerator:
                 max_turns=self.deep_dive_cfg.max_turns,
                 context=context,
             )
+            
+            # Save Phase 1 markdown to disk
+            self._save_markdown_script(markdown_script, segment_id)
             
             log(f"[dim]  Phase 2: JSON構造化中...[/dim]")
             response_text, usage2 = await self._convert_markdown_to_json_with_fallback(
@@ -209,6 +218,9 @@ class SegmentGenerator:
                 max_turns=self.conclusion_cfg.max_turns,
                 context=context,
             )
+            
+            # Save Phase 1 markdown to disk
+            self._save_markdown_script(markdown_script, "conclusion")
             
             log(f"[dim]  Phase 2: JSON構造化中...[/dim]")
             response_text, usage2 = await self._convert_markdown_to_json_with_fallback(
@@ -598,6 +610,30 @@ class SegmentGenerator:
         
         logger.info(f"Fallback parser extracted {len(turns)} turns from Markdown")
         return json.dumps(segment_dict, ensure_ascii=False, indent=2)
+
+    def _save_markdown_script(self, markdown_script: str, segment_id: str) -> None:
+        """Save Phase 1 markdown script to disk
+        
+        Args:
+            markdown_script: Markdown台本
+            segment_id: セグメントID（ファイル名に使用）
+        """
+        if not self.markdown_output_dir:
+            return
+        
+        try:
+            # Create output directory if it doesn't exist
+            self.markdown_output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Save markdown file
+            output_path = self.markdown_output_dir / f"{segment_id}_phase1.md"
+            output_path.write_text(markdown_script, encoding="utf-8")
+            
+            logger.debug(f"Phase 1 markdown saved: {output_path}")
+            console.print(f"[dim]💾 Markdown saved: {output_path.name}[/dim]")
+        except Exception as e:
+            # Non-fatal: log but don't raise
+            logger.warning(f"Failed to save markdown script (non-fatal): {e}")
 
     def _merge_usage(self, usage1: LLMUsage, usage2: LLMUsage) -> LLMUsage:
         """2つのLLMUsageを合算
