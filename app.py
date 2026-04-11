@@ -345,6 +345,7 @@ def generate_video(
     second_mode: str = "なし",
     jingle_choice: str = "なし",
     jingle_custom_path: str = "",
+    research_import_filepath: Optional[str] = None,
     progress=gr.Progress()
 ) -> tuple[str | None, str, str, str, str, str, Optional[ThumbnailRegenerationState]]:
     """動画生成を実行し、サムネイル再作成用Stateも返す
@@ -438,6 +439,7 @@ def generate_video(
         footer_text_override=footer_text,
         second_mode=second_mode_enum,
         jingle_path=jingle_path,
+        research_import_filepath=research_import_filepath or None,
     )
     
     # 成功時に設定を保存とState作成
@@ -1895,6 +1897,19 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
                         info="台本に含めたくないトピックを指定できます",
                     )
 
+                    with gr.Accordion("📂 リサーチデータのインポート（リサーチAPIをスキップ）", open=False):
+                        gr.Markdown(
+                            "過去に生成した `research_brief.json` を指定すると、"
+                            "Perplexity APIの呼び出しをスキップしてコストゼロでリサーチフェーズを完了できます。"
+                            "指定しない場合は通常通りAPIでリサーチを実行します。"
+                        )
+                        research_import_file = gr.File(
+                            label="リサーチデータをインポート (任意・research_brief.json)",
+                            file_types=[".json"],
+                            type="filepath",
+                            value=None,
+                        )
+
                     # 第2部モード設定
                     gr.Markdown("### 📖 第2部モード (2-Story Mode)")
                     with gr.Row():
@@ -2153,6 +2168,7 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
         "jingle_dropdown": jingle_dropdown,
         "jingle_path_input": jingle_path_input,
         "avoid_topics_input": avoid_topics_input,
+        "research_import_file": research_import_file,
         "bg_preview": bg_preview,
         "selected_bg_filename": selected_bg_filename,
         "custom_bg_upload": custom_bg_upload,
@@ -2415,6 +2431,7 @@ def create_ui() -> gr.Blocks:
                 generator_components["second_mode_dropdown"],
                 generator_components["jingle_dropdown"],
                 generator_components["jingle_path_input"],
+                generator_components["research_import_file"],
             ],
             outputs=[
                 generator_components["video_output"],

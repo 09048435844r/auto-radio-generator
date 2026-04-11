@@ -1493,6 +1493,7 @@ def run_workflow_sync(
     footer_text_override: Optional[str] = None,
     second_mode: Optional[ResearchMode] = None,
     jingle_path: Optional[str] = None,
+    research_import_filepath: Optional[str] = None,
 ) -> WorkflowResult:
     """同期版ワークフロー実行（Gradioから呼び出し用）
     
@@ -1584,6 +1585,57 @@ def run_workflow_sync(
                 'researcher': None
             }
             
+            # ========== インポートリサーチデータのロード（オプション） ==========
+            # research_import_filepathが指定された場合、Phase 1/2のリサーチAPIを完全スキップ
+            preloaded_research: Optional[ResearchResult] = None
+            
+            if research_import_filepath and not config.yaml.dev.mock_mode:
+                import json as _json
+                from core.models.artifacts import ResearchBrief
+                from core.models.research import ResearchSource as ModelResearchSource
+                
+                callbacks.log("\n== リサーチデータ インポート ==")
+                callbacks.progress(0.05, "📂 リサーチデータを読み込み中...")
+                
+                try:
+                    with open(research_import_filepath, 'r', encoding='utf-8') as _f:
+                        _brief_data = _json.load(_f)
+                    brief = ResearchBrief(**_brief_data)
+                    
+                    # ResearchBrief.research_sources (list[dict]) → list[ResearchSource] に変換
+                    imported_sources = []
+                    for _s in (brief.research_sources or []):
+                        if isinstance(_s, dict):
+                            try:
+                                imported_sources.append(ModelResearchSource(**_s))
+                            except Exception:
+                                pass
+                    
+                    preloaded_research = ResearchResult(
+                        topic=brief.theme,
+                        mode=brief.research_mode,
+                        content=brief.research_content,
+                        sources=imported_sources,
+                        usage=None,
+                    )
+                    
+                    # リサーチ（API課金）フェーズを無効化
+                    overrides_obj.enable_research = False
+                    
+                    callbacks.log(f"✅ リサーチデータのインポート完了（APIコスト: ¥0）")
+                    callbacks.log(f"   テーマ: {brief.theme}")
+                    callbacks.log(f"   モード: {brief.research_mode}")
+                    callbacks.log(f"   コンテキスト: {len(brief.research_content)}文字")
+                    callbacks.log(f"   ソース数: {len(imported_sources)}件")
+                    callbacks.progress(0.10, "✅ リサーチデータ読み込み完了（Perplexity APIスキップ）")
+                    
+                except FileNotFoundError:
+                    callbacks.log(f"❌ インポートファイルが見つかりません: {research_import_filepath}")
+                    callbacks.log("通常のリサーチAPIを使用して続行します")
+                except Exception as _e:
+                    callbacks.log(f"❌ リサーチデータのインポート失敗: {_e}")
+                    callbacks.log("通常のリサーチAPIを使用して続行します")
+            
             # ========== Phase 1: 企画（検索計画作成） ==========
             planning_result = None
             queries = []
@@ -1642,6 +1694,7 @@ def run_workflow_sync(
                     config=config,
                     output_dir=output_base,
                     enable_research=should_enable_research,
+                    preloaded_research_data=preloaded_research,
                     avoid_topics=avoid_topics,
                     provider=provider,
                     callbacks=callbacks
@@ -1703,6 +1756,7 @@ def run_workflow_sync(
                     config=config,
                     output_dir=output_base,
                     enable_research=should_enable_research,
+                    preloaded_research_data=preloaded_research,
                     avoid_topics=avoid_topics,
                     provider=provider,
                     callbacks=callbacks
