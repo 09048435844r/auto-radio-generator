@@ -480,8 +480,8 @@ flux:
   
   # FLUX.1 [schnell] 超低VRAM対応設定
   steps: 8       # 10 → 8 (schnellは4-8ステップでも高品質、メモリ効率優先)
-  width: 896     # 1024 → 896 (VRAM消費さらに削減、アスペクト比16:9維持)
-  height: 504    # 576 → 504 (896x504 = 16:9)
+  width: 768     # 1024 → 896 (VRAM消費さらに削減、アスペクト比16:9維持)
+  height: 432    # 576 → 504 (896x504 = 16:9)
   sampler_name: "Euler"
   scheduler: "Simple"
   cfg_scale: 1.0  # FLUX.1 [schnell] 必須設定

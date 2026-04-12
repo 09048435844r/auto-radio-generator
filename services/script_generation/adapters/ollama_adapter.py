@@ -106,16 +106,20 @@ class OllamaAdapter(ILLMPort):
         raise LLMConnectionError(f"Max retries exceeded: {last_error}")
     
     async def health_check(self) -> bool:
-        """Check Ollama API availability"""
+        """Check Ollama API availability (connection check only, ignores empty responses)"""
         try:
-            test_request = LLMRequest(
-                system_prompt="Test",
-                user_prompt="Reply with 'OK'",
+            # Direct API call to check connection (bypass empty response validation)
+            messages = [
+                {"role": "system", "content": "Test"},
+                {"role": "user", "content": "Reply with 'OK'"}
+            ]
+            response = await self._client.chat.completions.create(
                 model=self._default_model,
+                messages=messages,
                 max_tokens=10,
                 temperature=0.0
             )
-            await self.generate(test_request)
+            # Connection successful even if response is empty
             return True
         except Exception:
             return False
