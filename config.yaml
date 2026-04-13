@@ -355,7 +355,7 @@ script_generator:
   # Ollama設定（ローカルLLM）
   ollama:
     model: "gemma4:26b" # ← Macに入っているモデル名
-    base_url: "http://192.168.0.73:11434/v1"  # ← MacのIPアドレス + OpenAI互換API
+    base_url: "http://192.168.0.73:11435/v1"  # ← MacのIPアドレス + OpenAI互換API　ポート番号11434（ollama本体）→11435（キューシステムMac Studio側での設定）
     max_tokens: 32768                      # 最大トークン数（Gemma4用に増量）
     temperature: 0.7                       # 創造性パラメータ（JSON生成のため低めに）
     costs: {}                              # ローカル実行なのでコスト0
