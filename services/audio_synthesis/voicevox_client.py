@@ -198,7 +198,8 @@ class VoicevoxClient(IAudioSynthesizer):
         chapters = self._build_chapters(adjusted_phrase_data, script)
         
         # セグメント単位のタイミング情報を計算（調整済みタイムスタンプを使用）
-        segment_timings = calculate_segment_timings(script, segments, adjusted_phrase_data) if segments else []
+        # segment_pausesを渡してジングル情報をSegmentTimingに含める
+        segment_timings = calculate_segment_timings(script, segments, adjusted_phrase_data, segment_pauses) if segments else []
         
         total_duration_sec = len(combined_audio) / 1000.0
         
@@ -247,7 +248,7 @@ class VoicevoxClient(IAudioSynthesizer):
         
         return synthesis_response.content
     
-    def _calculate_segment_pauses(self, segments: Optional[list]) -> dict[str, tuple[float, Optional[Path]]]:
+    def _calculate_segment_pauses(self, segments: Optional[list]) -> dict[str, tuple[float, Optional[Path], Optional[float]]]:
         """Calculate pause duration after each segment based on jingle length
         
         Pause structure: [pre-jingle pause] + [jingle duration]
@@ -258,7 +259,7 @@ class VoicevoxClient(IAudioSynthesizer):
             segments: List of ScriptSegment objects
         
         Returns:
-            dict[segment_id, (pause_sec, jingle_path)]: Pause duration and jingle path for each segment
+            dict[segment_id, (pause_sec, jingle_path, jingle_duration)]: Pause duration, jingle path, and jingle duration for each segment
         """
         pauses = {}
         
@@ -273,14 +274,14 @@ class VoicevoxClient(IAudioSynthesizer):
                 jingle_duration = self.jingle_provider.get_jingle_duration(jingle_path)
                 # Pause = pre-jingle pause + full jingle duration (no overlap, perfect sync)
                 pause_sec = self.pre_jingle_pause_sec + jingle_duration
-                pauses[segment.segment_id] = (pause_sec, jingle_path)
+                pauses[segment.segment_id] = (pause_sec, jingle_path, jingle_duration)
                 console.print(
                     f"[dim]  Segment {segment.segment_id}: jingle={jingle_path.name} "
                     f"({jingle_duration:.2f}s), pre-pause={self.pre_jingle_pause_sec:.2f}s, "
                     f"total_pause={pause_sec:.2f}s[/dim]"
                 )
             else:
-                pauses[segment.segment_id] = (0.0, None)
+                pauses[segment.segment_id] = (0.0, None, None)
         
         return pauses
     
@@ -288,7 +289,7 @@ class VoicevoxClient(IAudioSynthesizer):
         self,
         phrase_data: list,
         pause_ms: int,
-        segment_pauses: dict[str, tuple[float, Optional[Path]]],
+        segment_pauses: dict[str, tuple[float, Optional[Path], Optional[float]]],
         segments: Optional[list]
     ) -> tuple[AudioSegment, list]:
         """Combine audio with dynamic segment pauses and adjust phrase timestamps
@@ -296,7 +297,7 @@ class VoicevoxClient(IAudioSynthesizer):
         Args:
             phrase_data: List of (audio_segment, start_ms, end_ms, text, speaker) tuples
             pause_ms: Pause between individual phrases (250ms)
-            segment_pauses: Dict of {segment_id: (pause_sec, jingle_path)}
+            segment_pauses: Dict of {segment_id: (pause_sec, jingle_path, jingle_duration)}
             segments: List of ScriptSegment objects
         
         Returns:
@@ -349,7 +350,7 @@ class VoicevoxClient(IAudioSynthesizer):
             # Insert pause after segment (if not last segment)
             pause_info = segment_pauses.get(segment.segment_id)
             if pause_info:
-                pause_sec, jingle_path = pause_info
+                pause_sec, jingle_path, jingle_duration = pause_info
                 if pause_sec > 0:
                     pause_ms_seg = int(pause_sec * 1000)
                     combined += AudioSegment.silent(duration=pause_ms_seg)
@@ -357,7 +358,8 @@ class VoicevoxClient(IAudioSynthesizer):
                     
                     console.print(
                         f"[yellow]  → Inserted {pause_sec:.2f}s pause after {segment.segment_id} "
-                        f"(jingle: {jingle_path.name if jingle_path else 'None'}), "
+                        f"(jingle: {jingle_path.name if jingle_path else 'None'}, "
+                        f"duration: {jingle_duration:.2f}s if jingle_duration else 0), "
                         f"cumulative offset: {cumulative_offset_ms/1000:.2f}s[/yellow]"
                     )
         

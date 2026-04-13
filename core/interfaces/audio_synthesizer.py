@@ -28,6 +28,8 @@ class SegmentTiming:
     start_sec: float                   # Segment start time in audio
     end_sec: float                     # Segment end time in audio
     duration_sec: float                # Segment duration
+    jingle_path: Optional[Path] = None # Jingle file selected by VoicevoxClient (single source of truth)
+    jingle_duration: Optional[float] = None  # Jingle duration in seconds
 
 
 @dataclass

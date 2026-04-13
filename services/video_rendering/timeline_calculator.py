@@ -74,29 +74,21 @@ class TimelineCalculator:
             # Get background image for this segment
             bg_image = await image_provider.get_image_for_segment(segment)
             
-            # Determine jingle for segment boundary (not for last segment)
-            jingle_path = None
+            # Get jingle information from SegmentTiming (single source of truth from VoicevoxClient)
+            # No random selection here - use what VoicevoxClient already selected
+            jingle_path = timing.jingle_path
+            jingle_duration = timing.jingle_duration
             jingle_start = None
-            jingle_duration = None
             
-            if self.enable_jingles and i < len(segments) - 1 and jingle_provider.is_available():
-                jingle_path = jingle_provider.get_random_jingle()
-                if jingle_path:
-                    jingle_duration = jingle_provider.get_jingle_duration(jingle_path)
-                    # Validate jingle duration
-                    if jingle_duration is None or jingle_duration <= 0:
-                        logger.warning(f"Invalid jingle duration ({jingle_duration}) for {jingle_path.name}, skipping jingle")
-                        jingle_path = None
-                        jingle_duration = None
-                    else:
-                        # Start jingle after pre-jingle pause (breathing space before jingle)
-                        # Pause structure: [segment end] + [pre-pause] + [jingle]
-                        jingle_start = timing.end_sec + self.pre_jingle_pause_sec
-                        logger.debug(
-                            f"Jingle for segment {segment.segment_id}: {jingle_path.name} "
-                            f"at {jingle_start:.2f}s (pre-pause: {self.pre_jingle_pause_sec:.2f}s, "
-                            f"duration: {jingle_duration:.2f}s)"
-                        )
+            if jingle_path and jingle_duration:
+                # Start jingle after pre-jingle pause (breathing space before jingle)
+                # Pause structure: [segment end] + [pre-pause] + [jingle]
+                jingle_start = timing.end_sec + self.pre_jingle_pause_sec
+                logger.debug(
+                    f"Jingle for segment {segment.segment_id}: {jingle_path.name} "
+                    f"at {jingle_start:.2f}s (pre-pause: {self.pre_jingle_pause_sec:.2f}s, "
+                    f"duration: {jingle_duration:.2f}s) [from VoicevoxClient]"
+                )
             
             # Calculate video timing (for jingle-synchronized transitions)
             # If jingle exists, extend video display until jingle ends (including pre-pause)

@@ -11,7 +11,8 @@ from core.models import Script
 def calculate_segment_timings(
     script: Script,
     segments: Optional[list],
-    phrase_data: list
+    phrase_data: list,
+    segment_pauses: Optional[dict] = None
 ) -> list[SegmentTiming]:
     """Calculate segment-level timing information
     
@@ -22,9 +23,10 @@ def calculate_segment_timings(
         script: Script object
         segments: List of ScriptSegment objects
         phrase_data: List of (audio_segment, start_ms, end_ms, text, speaker) tuples
+        segment_pauses: Dict of {segment_id: (pause_sec, jingle_path)} from VoicevoxClient
     
     Returns:
-        List of SegmentTiming objects
+        List of SegmentTiming objects with jingle information
     """
     if not segments or not phrase_data:
         return []
@@ -61,6 +63,12 @@ def calculate_segment_timings(
         
         duration_sec = end_sec - start_sec
         
+        # Extract jingle information from segment_pauses (if available)
+        jingle_path = None
+        jingle_duration = None
+        if segment_pauses and segment.segment_id in segment_pauses:
+            pause_sec, jingle_path, jingle_duration = segment_pauses[segment.segment_id]
+        
         segment_timings.append(SegmentTiming(
             segment_id=segment.segment_id,
             segment_type=segment.segment_type,
@@ -68,6 +76,8 @@ def calculate_segment_timings(
             start_sec=start_sec,
             end_sec=end_sec,
             duration_sec=duration_sec,
+            jingle_path=jingle_path,
+            jingle_duration=jingle_duration,
         ))
         
         # Move to next segment's phrases
