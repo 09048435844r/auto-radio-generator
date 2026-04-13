@@ -31,7 +31,29 @@ class ThumbnailBackgroundGenerator:
         """
         self.config = config
         self.prompt_generator = ImagePromptGenerator(config)
-        self.flux_client = FluxClient(config)
+        
+        # Get image provider from config with defensive fallback
+        image_provider = getattr(config.yaml, "image_provider", "forge")
+        if image_provider not in {"forge", "comfyui"}:
+            logger.warning(
+                f"Invalid image_provider '{image_provider}' in config, defaulting to 'forge'. "
+                f"Valid options: forge, comfyui"
+            )
+            image_provider = "forge"
+        
+        if image_provider == "comfyui":
+            from services.media_processing.comfyui_client import ComfyUIClient
+            self.image_client = ComfyUIClient(config)
+            logger.info("Thumbnail generator using ComfyUI")
+            console.print("[cyan]Thumbnail generator using ComfyUI[/cyan]")
+        else:  # forge
+            from services.media_processing.flux_client import FluxClient
+            self.image_client = FluxClient(config)
+            logger.info("Thumbnail generator using FLUX.1 Forge")
+            console.print("[cyan]Thumbnail generator using FLUX.1 Forge[/cyan]")
+        
+        # Legacy support: flux_client attribute for backward compatibility
+        self.flux_client = self.image_client
         
         # Initialize PromptOps logger (optional, fail-safe)
         self.logger = None
@@ -92,8 +114,8 @@ class ThumbnailBackgroundGenerator:
                 "aesthetic": identity.aesthetic,
             }
         
-        # 2. Generate image via FLUX.1 with metadata
-        image_path, metadata = await self.flux_client.generate_image(
+        # 2. Generate image via image client with metadata
+        image_path, metadata = await self.image_client.generate_image(
             prompt=prompt,
             output_path=output_path,
             context_type="thumbnail",
@@ -110,9 +132,9 @@ class ThumbnailBackgroundGenerator:
         return image_path
     
     async def check_availability(self) -> bool:
-        """Check if FLUX.1 API is available
+        """Check if image generation API is available
         
         Returns:
             bool: True if available, False otherwise
         """
-        return await self.flux_client.check_api_status()
+        return await self.image_client.check_api_status()

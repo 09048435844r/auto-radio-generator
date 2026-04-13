@@ -32,7 +32,7 @@ Final Video
 #### 2. プロバイダー
 - `ImageProvider` (`services/media_processing/image_provider.py`): 背景画像提供
   - 静的モード: `assets/backgrounds/`から選択
-  - 動的モード: DALL-E 3で生成（将来実装）
+  - 動的モード: FLUX.1で生成（ForgeまたはComfyUIバックエンド）
 - `JingleProvider` (`services/media_processing/jingle_provider.py`): ジングル音声提供
   - `assets/jingles/`からランダム選択
 
@@ -164,7 +164,7 @@ output/{timestamp}/.temp/
 
 ## 将来の拡張
 
-- [ ] DALL-E 3による動的背景画像生成
+- [x] FLUX.1による動的背景画像生成（Forge/ComfyUIバックエンド対応済み）
 - [ ] セグメント種別別のジングル選択
 - [ ] トランジションエフェクト（クロスフェード等）
 - [ ] セグメント単位のBGM変更

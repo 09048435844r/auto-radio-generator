@@ -2,7 +2,7 @@
 
 Provides background images for each segment, either by:
 1. Static mode: Selecting from local assets (assets/backgrounds/)
-2. Dynamic mode: Generating via DALL-E 3 API (future implementation)
+2. Dynamic mode: Generating via FLUX.1 (Forge or ComfyUI backend)
 
 Static mode uses segment type to select appropriate images:
 - intro_*.png for intro segments
@@ -76,13 +76,31 @@ class ImageProvider:
         # Initialize dynamic generation components
         if self.mode == "dynamic":
             from services.script_generation.image_prompt_generator import ImagePromptGenerator
-            from services.media_processing.flux_client import FluxClient
             
             self.prompt_generator = ImagePromptGenerator(config)
-            self.flux_client = FluxClient(config)
             
-            logger.info("Dynamic image generation mode enabled (FLUX.1)")
-            console.print("[cyan]Dynamic image generation mode enabled (FLUX.1)[/cyan]")
+            # Get image provider from config with defensive fallback
+            image_provider = getattr(config.yaml, "image_provider", "forge")
+            if image_provider not in {"forge", "comfyui"}:
+                logger.warning(
+                    f"Invalid image_provider '{image_provider}' in config, defaulting to 'forge'. "
+                    f"Valid options: forge, comfyui"
+                )
+                image_provider = "forge"
+            
+            if image_provider == "comfyui":
+                from services.media_processing.comfyui_client import ComfyUIClient
+                self.image_client = ComfyUIClient(config)
+                logger.info("Dynamic image generation mode enabled (ComfyUI)")
+                console.print("[cyan]Dynamic image generation mode enabled (ComfyUI)[/cyan]")
+            else:  # forge
+                from services.media_processing.flux_client import FluxClient
+                self.image_client = FluxClient(config)
+                logger.info("Dynamic image generation mode enabled (FLUX.1 Forge)")
+                console.print("[cyan]Dynamic image generation mode enabled (FLUX.1 Forge)[/cyan]")
+            
+            # Legacy support: flux_client attribute for backward compatibility
+            self.flux_client = self.image_client
     
     def _scan_static_images(self):
         """Scan assets/backgrounds/ and categorize by segment type"""
@@ -186,7 +204,7 @@ class ImageProvider:
                     }
                 
                 # Generate image with metadata
-                image_path, metadata = await self.flux_client.generate_image(
+                image_path, metadata = await self.image_client.generate_image(
                     prompt=prompt,
                     output_path=cache_path,
                     context_type="segment",

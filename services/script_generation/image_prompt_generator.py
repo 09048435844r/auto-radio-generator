@@ -86,25 +86,27 @@ Example 3 (Environmental Topic):
 "A climate scientist analyzing satellite imagery of melting ice caps on a large monitor, with data visualization showing temperature anomalies and CO2 concentration graphs, research papers and core sample tubes on the desk, bathed in electric cyan and hot magenta neon glow, Clean Minimalist Modern aesthetic, urgent and analytical atmosphere, shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
 """
     
-    THUMBNAIL_SYSTEM_PROMPT_TEMPLATE = """You are a professional cinematographer specializing in creating SUBJECT-DRIVEN, eye-catching YouTube thumbnail backgrounds.
+    THUMBNAIL_SYSTEM_PROMPT_TEMPLATE = """You are a professional cinematographer specializing in creating ABSTRACT, METAPHORICAL, and ATMOSPHERIC YouTube thumbnail backgrounds for radio content.
 
-Your task is to generate a detailed English prompt for FLUX.1 that creates a visually striking thumbnail featuring CONCRETE SUBJECTS from the video's content.
+Your task is to generate a detailed English prompt for FLUX.1 that creates a visually striking background featuring ABSTRACT LANDSCAPES, CYBERPUNK AESTHETICS, or METAPHORICAL IMAGERY - NOT specific objects or people.
 
-PRIMARY FOCUS (MANDATORY - Highest priority for click-through rate):
-1. IDENTIFY THE MOST ICONIC SUBJECT from the video theme:
-   - What is the ONE object, device, person, or phenomenon that best represents this video?
-   - What visual element would make viewers immediately understand the topic?
-   - What subject would create curiosity and compel clicks?
+PRIMARY FOCUS (MANDATORY - Radio Background Suitability):
+1. CREATE ABSTRACT OR METAPHORICAL VISUALS:
+   - Landscapes: Futuristic cityscapes, neon-lit environments, abstract natural scenery
+   - Abstract art: Flowing energy patterns, geometric shapes, light and color compositions
+   - Cyberpunk objects: Glowing circuits, holographic interfaces, neon signs (without text)
+   - Metaphorical imagery: Visual metaphors that evoke the theme's essence without literal representation
 
-2. MAKE THE SUBJECT DRAMATIC AND SPECIFIC:
-   - Be CONCRETE: Instead of "medical technology", show "a glowing continuous glucose monitor with real-time alerts"
-   - Be DYNAMIC: Show the subject in an engaging state (active, illuminated, in use)
-   - Be BOLD: The subject should dominate the frame and be instantly recognizable
+2. AVOID CONCRETE SUBJECTS:
+   - NO specific devices, tools, or equipment
+   - NO people, hands, or human figures
+   - NO text, charts, graphs, or data displays
+   - NO literal representations of the topic
 
-3. OPTIMIZE FOR THUMBNAIL VISIBILITY:
-   - The subject must be clear and identifiable even at small sizes
-   - High contrast and visual clarity are essential
-   - Avoid cluttered compositions - focus on ONE hero subject
+3. OPTIMIZE FOR BACKGROUND USE:
+   - The image should complement text overlay (thumbnail title will be added later)
+   - High visual impact through color, lighting, and atmosphere
+   - Clean composition that doesn't compete with foreground text
 
 UNIFIED VISUAL BRAND (MANDATORY):
 - Color Palette: {color_palette}
@@ -112,24 +114,25 @@ UNIFIED VISUAL BRAND (MANDATORY):
 - Film Quality: shot on Kodak Portra 400 film, subtle film grain, highly detailed
 
 REQUIREMENTS:
-- Focus: Create a CONCRETE, SUBJECT-DRIVEN representation (not abstract symbolism)
-- Impact: Maximum visual impact through clear, bold subject presentation
-- Composition: Dynamic framing that showcases the hero subject
+- Focus: Create ABSTRACT, ATMOSPHERIC, or METAPHORICAL imagery (NOT concrete objects)
+- Impact: Maximum visual impact through color, lighting, and mood
+- Composition: Clean, uncluttered background suitable for text overlay
 - ALWAYS end with: "no text, no writing, no watermarks" (MANDATORY)
 
 OUTPUT FORMAT:
 Return ONLY the English prompt text, no explanations.
+DO NOT include any Japanese characters in your output.
 
-EXAMPLE OUTPUTS (Subject-Driven Thumbnails):
+EXAMPLE OUTPUTS (Abstract/Metaphorical Backgrounds):
 
-Example 1 (Medical Topic):
-"A close-up of a doctor's hand holding a continuous glucose monitor displaying real-time blood sugar graphs with bright alert indicators, with an insulin pump and medical chart visible in soft focus background, bathed in electric cyan and hot magenta neon glow, Clean Minimalist Modern aesthetic, dramatic and clinical atmosphere, shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
+Example 1 (Medical/Health Topic):
+"An abstract flowing energy field with pulsing waves of light representing vitality and health, transitioning from deep blue to vibrant cyan, with soft particle effects and ethereal glow, bathed in electric cyan and hot magenta neon lighting, Clean Minimalist Modern aesthetic, serene and hopeful atmosphere, shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
 
 Example 2 (Technology Topic):
-"A laptop screen showing AI code with glowing syntax highlighting and a neural network visualization diagram, with a programmer's hands on keyboard in dramatic lighting, surrounded by multiple monitors displaying training metrics, bathed in electric cyan and hot magenta neon glow, Clean Minimalist Modern aesthetic, intense and innovative atmosphere, shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
+"A futuristic cyberpunk cityscape at dusk with towering neon-lit skyscrapers and holographic light beams cutting through misty atmosphere, geometric patterns of glowing circuits floating in the foreground, bathed in electric cyan and hot magenta neon glow, Clean Minimalist Modern aesthetic, innovative and dynamic atmosphere, shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
 
 Example 3 (Environmental Topic):
-"A dramatic satellite image of Earth showing climate data overlays with temperature anomaly heat maps in vivid colors, displayed on a large monitor with a scientist's silhouette analyzing the data, bathed in electric cyan and hot magenta neon glow, Clean Minimalist Modern aesthetic, urgent and impactful atmosphere, shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
+"An abstract representation of Earth's atmosphere with swirling aurora-like energy patterns in vivid greens and blues, cosmic background with distant stars, flowing light trails suggesting movement and change, bathed in electric cyan and hot magenta accents, Clean Minimalist Modern aesthetic, majestic and contemplative atmosphere, shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
 """
     
     def __init__(self, config: AppConfig):
@@ -357,16 +360,20 @@ Generate the prompt now:"""
             aesthetic=aesthetic
         )
         
-        # Build user message
-        user_message = f"""Generate a visually striking thumbnail background prompt for this video:
+        # Sanitize Japanese input to prevent mixing
+        theme_sanitized = self._extract_english_keywords(theme)
+        summary_sanitized = self._extract_english_keywords(script_summary[:300])
+        
+        # Build user message with sanitized input
+        user_message = f"""Generate a visually striking ABSTRACT/METAPHORICAL thumbnail background prompt for this radio content:
 
-Theme: {theme}
-Topic: {topic_title or theme}
+Theme keywords: {theme_sanitized}
+Topic keywords: {self._extract_english_keywords(topic_title) if topic_title else theme_sanitized}
 
-Summary:
-{script_summary[:300]}
+Content essence:
+{summary_sanitized}
 
-Create a CONCRETE, SUBJECT-DRIVEN representation that maximizes click-through rate."""
+Create an ABSTRACT, ATMOSPHERIC, or METAPHORICAL background (NOT concrete objects/people) that evokes the theme's essence through color, lighting, and mood."""
         
         logger.info(f"Generating thumbnail prompt for theme: {theme}")
         console.print(f"[cyan]Generating thumbnail background prompt...[/cyan]")
@@ -388,6 +395,9 @@ Create a CONCRETE, SUBJECT-DRIVEN representation that maximizes click-through ra
             
             prompt = response.text.strip()
             
+            # Sanitize to remove any Japanese characters
+            prompt = self._sanitize_prompt(prompt)
+            
             # Enforce mandatory quality keywords only
             prompt = self._enforce_quality_keywords(prompt)
             
@@ -404,6 +414,60 @@ Create a CONCRETE, SUBJECT-DRIVEN representation that maximizes click-through ra
             fallback = self._get_fallback_thumbnail_prompt(theme, identity)
             console.print(f"[yellow]Using fallback thumbnail prompt[/yellow]")
             return fallback
+    
+    def _extract_english_keywords(self, text: str) -> str:
+        """Extract English keywords from mixed Japanese/English text
+        
+        Args:
+            text: Input text (may contain Japanese)
+        
+        Returns:
+            str: English keywords only, or generic description if none found
+        """
+        import re
+        
+        # Extract English words (2+ characters)
+        english_words = re.findall(r'\b[a-zA-Z]{2,}\b', text)
+        
+        if english_words:
+            # Return unique keywords, max 10 words
+            unique_words = []
+            seen = set()
+            for word in english_words:
+                word_lower = word.lower()
+                if word_lower not in seen and word_lower not in {'the', 'and', 'for', 'with', 'about'}:
+                    unique_words.append(word)
+                    seen.add(word_lower)
+                if len(unique_words) >= 10:
+                    break
+            return ' '.join(unique_words)
+        else:
+            # No English found, return generic description
+            return "abstract concept, modern technology, innovative ideas"
+    
+    def _sanitize_prompt(self, prompt: str) -> str:
+        """Remove any Japanese characters from prompt
+        
+        Args:
+            prompt: Generated prompt
+        
+        Returns:
+            str: Sanitized prompt (English only)
+        """
+        import re
+        
+        # Remove Japanese characters (Hiragana, Katakana, Kanji)
+        sanitized = re.sub(r'[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]+', '', prompt)
+        
+        # Remove extra spaces
+        sanitized = re.sub(r'\s+', ' ', sanitized).strip()
+        
+        # Log if sanitization occurred
+        if sanitized != prompt:
+            logger.warning(f"Prompt sanitized: removed non-English characters")
+            logger.debug(f"Original length: {len(prompt)}, Sanitized length: {len(sanitized)}")
+        
+        return sanitized
     
     def _get_composition_guidance(self, segment_type: str) -> str:
         """Get composition guidance based on segment type
@@ -491,12 +555,15 @@ Create a CONCRETE, SUBJECT-DRIVEN representation that maximizes click-through ra
         """Get fallback thumbnail prompt if generation fails
         
         Args:
-            theme: Video theme
+            theme: Video theme (may contain Japanese)
             visual_identity: Optional visual identity
         
         Returns:
-            str: Fallback thumbnail prompt
+            str: Fallback thumbnail prompt (abstract/metaphorical, English only)
         """
+        # Extract English keywords from theme
+        theme_keywords = self._extract_english_keywords(theme)
+        
         # Issue #1 fix: No isinstance check needed
         if visual_identity:
             color_desc = visual_identity.to_color_fragment()
@@ -505,12 +572,14 @@ Create a CONCRETE, SUBJECT-DRIVEN representation that maximizes click-through ra
             color_desc = self.DEFAULT_COLOR_PALETTE
             aesthetic_desc = f"{DEFAULT_AESTHETIC} aesthetic"
         
+        # Return abstract/metaphorical fallback (no concrete objects)
         return (
-            f"A dramatic scene representing '{theme}', "
+            f"An abstract futuristic cityscape with neon-lit skyscrapers and holographic light beams, "
+            f"flowing energy patterns and geometric shapes in the atmosphere, "
             f"bathed in {color_desc}, "
             f"{aesthetic_desc}, "
-            f"dynamic composition with depth, "
-            f"shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
+            f"dynamic composition with depth and atmospheric perspective, "
+            f"shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text, no writing, no watermarks"
         )
     
     def _get_fallback_prompt(

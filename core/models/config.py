@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Literal, Dict, Optional, List
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -208,6 +208,22 @@ class FluxConfig(BaseModel):
     sampler_name: str = "Euler"
     scheduler: str = "Simple"
     cfg_scale: float = 1.0
+    enable_pre_generation_cleanup: bool = True
+    enable_resolution_fallback: bool = True
+    fallback_resolutions: list[list[int]] = [[896, 504], [768, 432], [640, 360]]
+
+
+class ComfyUIConfig(BaseModel):
+    """ComfyUI API 設定"""
+    base_url: str = "http://127.0.0.1:8188"
+    workflow_path: str = "config/workflow_api.json"
+    timeout: int = 600
+    steps: int = 4
+    width: int = 768
+    height: int = 432
+    cfg: float = 1.0
+    sampler_name: str = "euler"
+    scheduler: str = "normal"
 
 
 class VideoConfig(BaseModel):
@@ -281,10 +297,23 @@ class YamlConfig(BaseModel):
     video_renderer: VideoRendererConfig = Field(default_factory=VideoRendererConfig)
     video: VideoConfig = Field(default_factory=VideoConfig)
     flux: FluxConfig = Field(default_factory=FluxConfig)
+    comfyui: ComfyUIConfig = Field(default_factory=ComfyUIConfig)
+    image_provider: str = "forge"  # "forge" or "comfyui"
     paths: PathsConfig = Field(default_factory=PathsConfig)
     personalities: PersonalitiesConfig = Field(default_factory=PersonalitiesConfig)
     dev: DevConfig = Field(default_factory=DevConfig)  # 開発用設定
     publishing: PublishingConfig = Field(default_factory=PublishingConfig)
+
+    @model_validator(mode="after")
+    def validate_image_provider(self):
+        """Validate image_provider value"""
+        valid_providers = {"forge", "comfyui"}
+        if self.image_provider not in valid_providers:
+            raise ValueError(
+                f"Invalid image_provider: '{self.image_provider}'. "
+                f"Must be one of: {', '.join(sorted(valid_providers))}"
+            )
+        return self
 
 
 # =============================================================================

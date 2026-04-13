@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from core.models import AppConfig, LLMUsage
 from core.utils import sanitize_json_response
 from core.interfaces.llm_port import ILLMPort, LLMRequest
+from core.prompt_manager import PromptManager
 
 if TYPE_CHECKING:
     from core.interfaces.researcher import ResearchResult
@@ -55,6 +56,7 @@ class MetadataGenerator:
         """
         self._llm = llm_port
         self.config = config
+        self.prompt_manager = PromptManager()
 
         # Use model from injected LLM port (already configured by orchestrator)
         self.model = llm_port.model_name
@@ -82,49 +84,26 @@ class MetadataGenerator:
         """
         log = progress_log or (lambda msg: console.print(msg))
 
-        log("[cyan]🔖 メタデータ生成開始...[/cyan]")
+        log(f"[cyan]🔖 メタデータ生成開始 (provider={self._llm.provider_name})...[/cyan]")
 
-        # Direct Fallback for Local LLMs: Skip unreliable JSON generation
-        if self._llm.provider_name.lower() == "ollama":
-            console.print(
-                f"[cyan]⚡ Local LLM detected (provider={self._llm.provider_name}). "
-                f"Using rule-based metadata generation (skipping LLM call)[/cyan]"
-            )
-            
-            # Generate simple metadata from theme
-            metadata = self._generate_simple_metadata(theme, script)
-            
-            # Dummy usage (no API call)
-            self.last_usage = LLMUsage(
-                provider=self._llm.provider_name,
-                model_name=self.model,
-                input_tokens=0,
-                output_tokens=0,
-                request_count=0,
-            )
-            
-            console.print(f"[green]✓ Rule-based metadata generated[/green]")
-        else:
-            # Cloud LLM: Use normal LLM-based generation
-            # セリフ全文の要約を作成（全文は長すぎるのでサンプリング）
-            script_summary = self._build_script_summary(script)
+        # セリフ全文の要約を作成（全文は長すぎるのでサンプリング）
+        script_summary = self._build_script_summary(script)
 
-            # API呼び出し
-            prompt = self._build_prompt(theme, script_summary, research_data)
-            response_text, usage = await self._call_api(prompt)
-            self.last_usage = usage
+        # API呼び出し（ローカルLLM・クラウドLLM共通）
+        prompt = self._build_prompt(theme, script_summary, research_data)
+        response_text, usage = await self._call_api(prompt)
+        self.last_usage = usage
 
-            # パース（themeを渡してフォールバック時に使用）
-            metadata = self._parse_response(response_text, theme)
+        # パース（themeを渡してフォールバック時に使用）
+        metadata = self._parse_response(response_text, theme)
 
-        # 参考リンクをフォーマット
+        # 参考リンクを抽出（descriptionには含めない）
         references = self._extract_references(research_data)
-        formatted_links = self._format_references_for_description(references)
 
         # Script を更新（セリフ sections には一切触れない）
         script.title = metadata.title
         script.thumbnail_title = metadata.thumbnail_title
-        script.description = metadata.description + formatted_links
+        script.description = metadata.description  # 参考リンクは含めない（build_video_descriptionで追加される）
         script.hashtags = [f"#{tag}" if not tag.startswith("#") else tag for tag in metadata.hashtags]
         script.references = references
 
@@ -134,41 +113,6 @@ class MetadataGenerator:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-
-    def _generate_simple_metadata(self, theme: str, script: "Script") -> _MetadataSchema:
-        """Generate simple rule-based metadata for local LLMs (no API call)
-        
-        Args:
-            theme: Video theme
-            script: Generated script
-        
-        Returns:
-            _MetadataSchema: Simple metadata based on theme
-        """
-        # Simple title generation
-        title = f"{theme}について徹底解説！"
-        if len(title) > 45:
-            title = f"{theme[:40]}について"
-        
-        # Simple thumbnail title
-        thumbnail_title = theme[:15] if len(theme) <= 15 else theme[:12] + "..."
-        
-        # Simple description
-        description = (
-            f"「{theme}」について、ずんだもんとめたんが詳しく解説します。\n"
-            f"最新の情報をもとに、わかりやすくお届けします。"
-        )
-        
-        # Simple hashtags (extract keywords from theme)
-        hashtags = ["解説", "ラジオ", "AI生成", "ずんだもん", "めたん"]
-        
-        logger.info(f"Generated simple metadata for theme: {theme}")
-        return _MetadataSchema(
-            title=title,
-            thumbnail_title=thumbnail_title,
-            description=description,
-            hashtags=hashtags,
-        )
 
     def _build_script_summary(self, script: "Script") -> str:
         """セリフ全文のサマリーを構築（最大3000文字）"""
@@ -193,17 +137,14 @@ class MetadataGenerator:
         script_summary: str,
         research_data: "ResearchResult",
     ) -> str:
-        """メタデータ生成用プロンプトを構築"""
+        """メタデータ生成用プロンプトを構築（prompts.yamlから取得）"""
+        base_prompt = self.prompt_manager.get_prompt("script", "metadata_generation")
+        
+        # プロンプトにコンテキスト情報を追加
         prompt = (
-            f"あなたはYouTubeラジオ動画のメタデータ専門家です。\n"
-            f"完成した台本を読み、動画のメタデータ（タイトル・サムネイル・概要欄・ハッシュタグ）を生成してください。\n\n"
+            f"{base_prompt}\n\n"
             f"## 動画のテーマ\n{theme}\n\n"
             f"## 台本サマリー（セリフ抜粋）\n{script_summary[:500]}\n\n"
-            f"## メタデータ生成ルール\n"
-            f"- title: 30〜45文字。視聴意欲を刺激するタイトル。\n"
-            f"- thumbnail_title: 15文字以内。インパクト重視。\n"
-            f"- description: 200〜400文字。番組の内容を簡潔にまとめる。\n"
-            f"- hashtags: 5〜8個。動画内容に関連するもの。#は不要。\n\n"
             f"## 出力形式（JSON）\n"
             f"以下の形式で必ず出力してください。コードブロック不要。\n"
             f'{{\n'
@@ -216,8 +157,8 @@ class MetadataGenerator:
             f'{{\n'
             f'  "title": "AIの進化が止まらない！人類の未来はどうなる？",\n'
             f'  "thumbnail_title": "AI革命の真実",\n'
-            f'  "description": "最新のAI技術について、ずんだもんとめたんが詳しく解説します。",\n'
-            f'  "hashtags": ["AI", "技術", "未来", "解説", "ラジオ"]\n'
+            f'  "description": "今回のずんだもんラジオでは、最新のAI技術について詳しく解説します。",\n'
+            f'  "hashtags": ["AI", "技術", "未来", "ラジオ", "ずんだもん"]\n'
             f'}}\n'
         )
         return prompt
@@ -319,16 +260,3 @@ class MetadataGenerator:
                 unique_urls.append(url)
 
         return unique_urls[:10]  # 最大10件
-
-
-    @staticmethod
-    def _format_references_for_description(references: list[str]) -> str:
-        """参考URLリストを概要欄用テキストにフォーマット"""
-        if not references:
-            return ""
-
-        lines = ["\n\n【参考文献・リンク】"]
-        for url in references:
-            lines.append(f"🔗 {url}")
-
-        return "\n".join(lines)

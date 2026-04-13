@@ -50,8 +50,8 @@ class ExecutionLogger:
         log_path = self.logs_dir / filename
         
         try:
-            # Pydanticモデルを辞書に変換してJSON化
-            entry_dict = entry.model_dump()
+            # Pydanticモデルを辞書に変換してJSON化（set型をリストに変換）
+            entry_dict = entry.model_dump(mode='json')
             json_line = json.dumps(entry_dict, ensure_ascii=False)
             
             # アトミックな追記（append mode）
@@ -72,8 +72,8 @@ class ExecutionLogger:
         log_path = self.logs_dir / filename
         
         try:
-            # Pydanticモデルを辞書に変換してJSON化
-            entry_dict = entry.model_dump()
+            # Pydanticモデルを辞書に変換してJSON化（set型をリストに変換）
+            entry_dict = entry.model_dump(mode='json')
             json_line = json.dumps(entry_dict, ensure_ascii=False)
             
             # アトミックな追記（append mode）

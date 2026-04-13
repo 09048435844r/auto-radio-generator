@@ -13,6 +13,13 @@ from rich.console import Console
 from core.models import AppConfig
 from core.models.generation_metadata import GenerationMetadata
 
+# Optional torch import for VRAM cleanup (GPU environments only)
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except ImportError:
+    TORCH_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 console = Console()
 
@@ -219,60 +226,59 @@ class FluxClient:
                 raise RuntimeError(error_msg) from e
         
         try:
-                
-                result = response.json()
-                
-                # Extract first image from response
-                images = result.get("images")
-                if not images or not isinstance(images, list) or len(images) == 0:
-                    raise RuntimeError("No images returned from Forge API")
-                
-                # Decode base64 image with error handling
-                image_b64 = images[0]
-                try:
-                    image_data = base64.b64decode(image_b64)
-                except Exception as e:
-                    raise RuntimeError(f"Failed to decode base64 image: {e}")
-                
-                # Save to output path atomically (prevent race conditions)
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-                
-                # Write to temporary file first, then atomic rename
-                with tempfile.NamedTemporaryFile(
-                    mode='wb',
-                    dir=output_path.parent,
-                    delete=False,
-                    suffix='.tmp'
-                ) as tmp_file:
-                    tmp_file.write(image_data)
-                    tmp_path = Path(tmp_file.name)
-                
-                # Atomic rename (replaces existing file if present)
-                tmp_path.replace(output_path)
-                
-                gen_time = time.time() - gen_start
-                
-                logger.info(f"Image saved: {output_path}")
-                console.print(f"[green]✓ Image generated: {output_path.name}[/green]")
-                
-                # Extract actual seed from API response
-                actual_seed = self._extract_seed_from_response(result)
-                
-                # Build metadata (use actual resolution that succeeded)
-                actual_resolution = f"{current_width}x{current_height}"
-                metadata = self._build_metadata(
-                    image_path=str(output_path),
-                    context_type=context_type,
-                    segment_id=segment_id,
-                    segment_type=segment_type,
-                    prompt=prompt,
-                    visual_identity=visual_identity or {},
-                    seed=actual_seed,
-                    generation_time_sec=gen_time,
-                    resolution=actual_resolution,
-                )
-                
-                return output_path, metadata
+            result = response.json()
+            
+            # Extract first image from response
+            images = result.get("images")
+            if not images or not isinstance(images, list) or len(images) == 0:
+                raise RuntimeError("No images returned from Forge API")
+            
+            # Decode base64 image with error handling
+            image_b64 = images[0]
+            try:
+                image_data = base64.b64decode(image_b64)
+            except Exception as e:
+                raise RuntimeError(f"Failed to decode base64 image: {e}")
+            
+            # Save to output path atomically (prevent race conditions)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Write to temporary file first, then atomic rename
+            with tempfile.NamedTemporaryFile(
+                mode='wb',
+                dir=output_path.parent,
+                delete=False,
+                suffix='.tmp'
+            ) as tmp_file:
+                tmp_file.write(image_data)
+                tmp_path = Path(tmp_file.name)
+            
+            # Atomic rename (replaces existing file if present)
+            tmp_path.replace(output_path)
+            
+            gen_time = time.time() - gen_start
+            
+            logger.info(f"Image saved: {output_path}")
+            console.print(f"[green]✓ Image generated: {output_path.name}[/green]")
+            
+            # Extract actual seed from API response
+            actual_seed = self._extract_seed_from_response(result)
+            
+            # Build metadata (use actual resolution that succeeded)
+            actual_resolution = f"{current_width}x{current_height}"
+            metadata = self._build_metadata(
+                image_path=str(output_path),
+                context_type=context_type,
+                segment_id=segment_id,
+                segment_type=segment_type,
+                prompt=prompt,
+                visual_identity=visual_identity or {},
+                seed=actual_seed,
+                generation_time_sec=gen_time,
+                resolution=actual_resolution,
+            )
+            
+            return output_path, metadata
         except Exception as e:
             # Catch any errors during image processing (after successful API call)
             error_msg = f"Image processing failed: {e}"
@@ -282,18 +288,15 @@ class FluxClient:
         finally:
             # Priority 2: Explicit VRAM cleanup after generation
             # This ensures VRAM is freed for the next generation request
-            try:
-                import torch
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                    torch.cuda.synchronize()
-                    logger.debug("VRAM cache cleared after image generation")
-            except ImportError:
-                # torch not available (CPU-only environment)
-                pass
-            except Exception as cleanup_error:
-                # Non-fatal: log but don't raise
-                logger.warning(f"VRAM cleanup failed (non-fatal): {cleanup_error}")
+            if TORCH_AVAILABLE:
+                try:
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        torch.cuda.synchronize()
+                        logger.debug("VRAM cache cleared after image generation")
+                except Exception as cleanup_error:
+                    # Non-fatal: log but don't raise
+                    logger.warning(f"VRAM cleanup failed (non-fatal): {cleanup_error}")
             
             # Force garbage collection to free Python objects
             gc.collect()

@@ -125,11 +125,22 @@ class TopicCurator:
         return prompt
 
     async def _call_api(self, system_prompt: str, user_prompt: str) -> tuple[str, LLMUsage]:
-        """Call LLM API via port interface"""
+        """LLM API を呼び出してキュレーション結果を取得"""
+        # Determine model to use: if curator_model is Ollama-specific and provider is not Ollama, use None (default)
+        model_to_use = self.curator_model
+        if model_to_use and self._llm.provider_name != "ollama":
+            # Detect Ollama-specific patterns: "model:tag" or "ollama/model"
+            if ":" in model_to_use or model_to_use.startswith("ollama/"):
+                logger.warning(
+                    f"curator_model '{model_to_use}' appears to be Ollama-specific but provider is '{self._llm.provider_name}'. "
+                    f"Using provider's default model instead."
+                )
+                model_to_use = None
+        
         request = LLMRequest(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            model=self.curator_model,
+            model=model_to_use,
             max_tokens=8192,  # JSON途中切断を防ぐため増量
             temperature=0.3,  # キュレーションは低温度で安定性を確保
             response_format="json"

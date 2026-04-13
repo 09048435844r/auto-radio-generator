@@ -298,13 +298,23 @@ class SegmentGenerator:
         self,
         system_prompt: str,
         user_prompt: str,
-        model_override: Optional[str] = None,
+        model_override: str = None,
     ) -> tuple[str, LLMUsage]:
         """Call LLM API via port interface"""
         model_to_use = model_override or self.segment_model
         
+        # Check if model appears to be Ollama-specific when provider is not Ollama
+        if model_to_use and self._llm.provider_name != "ollama":
+            # Detect Ollama-specific patterns: "model:tag" or "ollama/model"
+            if ":" in model_to_use or model_to_use.startswith("ollama/"):
+                logger.warning(
+                    f"segment_model '{model_to_use}' appears to be Ollama-specific but provider is '{self._llm.provider_name}'. "
+                    f"Using provider's default model instead."
+                )
+                model_to_use = None
+        
         console.print(
-            f"[dim]SegmentGenerator API: provider={self._llm.provider_name}, model={model_to_use}, max_tokens=8192[/dim]"
+            f"[dim]SegmentGenerator API: provider={self._llm.provider_name}, model={model_to_use or 'default'}, max_tokens=8192[/dim]"
         )
         
         request = LLMRequest(
@@ -411,18 +421,29 @@ class SegmentGenerator:
             context=context or "（前のセグメントはありません。これが番組の最初です）"
         )
         
+        # Check if model appears to be Ollama-specific when provider is not Ollama
+        phase1_model = self.segment_model
+        if phase1_model and self._llm.provider_name != "ollama":
+            # Detect Ollama-specific patterns: "model:tag" or "ollama/model"
+            if ":" in phase1_model or phase1_model.startswith("ollama/"):
+                logger.warning(
+                    f"segment_model '{phase1_model}' appears to be Ollama-specific but provider is '{self._llm.provider_name}'. "
+                    f"Using provider's default model instead."
+                )
+                phase1_model = None
+        
         # API呼び出し（JSON形式を要求しない）
         request = LLMRequest(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            model=self.segment_model,
+            model=phase1_model,
             max_tokens=4096,  # Phase 1は長めに
             temperature=0.85,  # 創造性重視
             response_format="text"  # JSON不要
         )
         
         console.print(
-            f"[dim]  Phase 1 API: provider={self._llm.provider_name}, model={self.segment_model}, "
+            f"[dim]  Phase 1 API: provider={self._llm.provider_name}, model={phase1_model or 'default'}, "
             f"max_tokens=4096, temperature=0.85[/dim]"
         )
         
@@ -458,17 +479,28 @@ class SegmentGenerator:
         )
         
         # API呼び出し（構造化に特化）
+        # Check if model appears to be Ollama-specific when provider is not Ollama
+        phase2_model = self.json_model
+        if phase2_model and self._llm.provider_name != "ollama":
+            # Detect Ollama-specific patterns: "model:tag" or "ollama/model"
+            if ":" in phase2_model or phase2_model.startswith("ollama/"):
+                logger.warning(
+                    f"json_model '{phase2_model}' appears to be Ollama-specific but provider is '{self._llm.provider_name}'. "
+                    f"Using provider's default model instead."
+                )
+                phase2_model = None
+        
         request = LLMRequest(
             system_prompt="You are a JSON converter. Convert Markdown dialogue to JSON format.",
             user_prompt=system_prompt,  # プロンプト全体をuser_promptに移動
-            model=self.json_model,  # Phase 2専用モデルを使用
+            model=phase2_model,  # Phase 2専用モデルを使用
             max_tokens=2048,  # Phase 2は短めでOK
             temperature=0.1,  # 正確性最優先
             response_format="json"
         )
         
         console.print(
-            f"[dim]  Phase 2 API: provider={self._llm.provider_name}, model={self.json_model}, "
+            f"[dim]  Phase 2 API: provider={self._llm.provider_name}, model={phase2_model or 'default'}, "
             f"max_tokens=2048, temperature=0.1[/dim]"
         )
         

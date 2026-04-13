@@ -29,7 +29,8 @@ class SessionManager:
         self.project_root = Path(project_root)
         self.workspace_root = self.project_root / "workspace"
         
-        if session_id is None:
+        # Create new session if session_id is None or empty string
+        if session_id is None or session_id == "":
             # Create new session with timestamp
             self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         else:

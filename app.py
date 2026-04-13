@@ -372,11 +372,11 @@ def generate_video(
     Returns:
         (動画パス, ログ出力, コストレポート, タイトル, 概要欄, YouTube状態, ThumbnailRegenerationState)
     """
-    # 入力検証
-    if (not theme or not theme.strip()) and not use_mock:
-        return None, "エラー: テーマを入力してください。", "", "", "", "YouTube: 未実行"
+    # 入力検証（リサーチインポート時はテーマ不要）
+    if (not theme or not theme.strip()) and not use_mock and not research_import_filepath:
+        return None, "エラー: テーマを入力してください。", "", "", "", "YouTube: 未実行", None
 
-    effective_theme = theme.strip() if theme and theme.strip() else "Mock run"
+    effective_theme = theme.strip() if theme and theme.strip() else ("Mock run" if use_mock else "Imported Research")
     
     # ジングルパスを解決
     jingle_path = resolve_jingle_path(jingle_choice, jingle_custom_path)
@@ -1885,7 +1885,7 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
                         llm_provider_dropdown = gr.Dropdown(
                             label="🤖 LLMプロバイダー",
                             choices=["gemini", "openai", "anthropic", "ollama"],
-                            value="gemini",
+                            value="ollama",
                             info="台本生成に使用するAIモデルを選択",
                             scale=1,
                         )

@@ -4,6 +4,20 @@
 
 FLUX.1画像生成でメモリ不足・タイムアウトが発生する場合の対策をまとめたガイドです。
 
+## サポートされるバックエンド
+
+本プロジェクトでは、以下の2つの画像生成バックエンドをサポートしています：
+
+| バックエンド | APIタイプ | 設定キー | 特徴 |
+|-----------|----------|---------|------|
+| Stable Diffusion WebUI Forge | 同期API | `forge` | 既定のバックエンド。解像度フォールバック機能あり |
+| ComfyUI | 非同期ポーリングAPI | `comfyui` | より柔軟なワークフロー設定可能 |
+
+**切り替え方法** (`config.yaml`):
+```yaml
+image_provider: "forge"  # "forge" または "comfyui"
+```
+
 ---
 
 ## 実装済み対策
@@ -103,6 +117,58 @@ flux:
     - [768, 432]   # 2nd attempt
     - [640, 360]   # 3rd attempt
 ```
+
+---
+
+## ComfyUIバックエンド設定
+
+### 設定ファイル (`config.yaml`)
+
+```yaml
+comfyui:
+  base_url: "http://127.0.0.1:8188"  # ComfyUI API URL
+  workflow_path: "config/workflow_api.json"  # ワークフローJSONのパス
+  timeout: 600  # API timeout (seconds)
+  
+  # FLUX.1 [schnell] 最適化設定
+  steps: 4       # ComfyUI用schnell最適化
+  width: 768     # 解像度幅
+  height: 432    # 解像度高さ
+  cfg: 1.0       # CFG Scale (schnell最適化)
+```
+
+### ComfyUIワークフロー設定
+
+ComfyUIでは`config/workflow_api.json`でワークフローを定義します。ノードIDは`ComfyUIClient.NODE_IDS`で管理されており、ワークフロー構造を変更する場合は以下の定数を更新してください：
+
+```python
+NODE_IDS = {
+    "ksampler": "3",
+    "checkpoint": "4",
+    "empty_latent": "5",
+    "clip_text_pos": "6",
+    "clip_text_neg": "7",
+    "vae_decode": "8",
+    "save_image": "9",
+}
+```
+
+### ComfyUIとForgeの違い
+
+| 特徴 | Forge | ComfyUI |
+|------|-------|---------|
+| APIタイプ | 同期API | 非同期ポーリングAPI |
+| 解像度フォールバック | ✓ 自動フォールバック | ✗ 手動設定のみ |
+| ワークフロー柔軟性 | 低（固定） | 高（JSONでカスタマイズ可能） |
+| VRAM事前クリーンアップ | ✓ APIサポート | ✗ 手動管理 |
+| 並列制御 | ImageProviderセマフォ | ImageProviderセマフォ |
+
+### ComfyUI最適化推奨設定
+
+**FLUX.1 [schnell]向け最適化**:
+- `steps: 4` - schnellモデル向けの最適値
+- `cfg: 1.0` - 低CFGスケールで高速化
+- `width/height: 768x432` - HD動画向けアスペクト比
 
 ---
 
@@ -222,14 +288,17 @@ set COMMANDLINE_ARGS=--lowvram --opt-sdp-attention --no-half --precision full --
 
 ## 関連ファイル
 
-- `config.yaml`: タイムアウト・解像度・フォールバック設定
-- `services/media_processing/image_provider.py`: Semaphore実装
-- `services/media_processing/flux_client.py`: VRAM自動クリーンアップ、段階的フォールバック
+- `config.yaml`: タイムアウト・解像度・フォールバック設定、バックエンド選択（`image_provider`）
+- `services/media_processing/image_provider.py`: Semaphore実装、バックエンド切り替えロジック
+- `services/media_processing/flux_client.py`: Forge APIクライアント、VRAM自動クリーンアップ、段階的フォールバック
+- `services/media_processing/comfyui_client.py`: ComfyUI APIクライアント、非同期ポーリング
 - `services/media_processing/thumbnail_background_generator.py`: サムネイル生成
+- `config/workflow_api.json`: ComfyUIワークフロー定義
 
 ---
 
 ## 更新履歴
 
+- **2026-04-12 (v3)**: ComfyUIバックエンド対応、ノードID定数化、一時ファイルクリーンアップ強化
 - **2026-04-10 (v2)**: VRAM事前クリーンアップ、段階的解像度フォールバック機能を追加
 - **2026-04-10 (v1)**: 初版作成（優先度1〜3の対策実装完了）
