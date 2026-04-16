@@ -2,7 +2,7 @@
 
 > **Created:** 2026-02-07  
 > **Base Version:** v3.6.1 (HITL Mode + Bug Fixes)  
-> **Last Updated:** 2026-04-06  
+> **Last Updated:** 2026-04-15  
 > **Author:** AI Tech Lead (Cascade)
 
 ---
@@ -87,6 +87,12 @@
 - [x] **Cost Calculator** — API 使用量トラッキング + コストレポート生成
 
 ### Recent Achievements（直近の達成事項）
+- [x] **Research Data Reusability (2026-04-15)** — 自動モードで生成したリサーチデータの再利用機能を実装
+  - `output/[session_id]/research_brief.json` を自動保存（インポート機能で再利用可能）
+  - 既存の `research.json` は参照用として維持（後方互換性を完全保持）
+  - ディスク使用量は微増（+10 MB程度、全体の0.08%）
+  - 実装箇所: `workflow.py`（通常モードと2-Story Modeの両方）
+  - 関連ドキュメント: `docs/RESEARCH_DATA_FUTURE_IMPROVEMENTS.md`
 - [x] **Pre-Jingle Pause Feature (2026-04)** — ジングル再生前に自然な一拍（間）を挿入する機能を追加
   - `config.yaml` に `pre_jingle_pause_sec` 設定を追加（デフォルト: 0.5秒）
   - セグメント終了からジングル開始までの間に呼吸するような自然なポーズを挿入
@@ -192,6 +198,44 @@
 - [ ] **Output Index（生成物インデックス）**
   - `output/` 配下の分散データを横断検索可能にするインデックスファイル
   - テーマ・日時・評価・コストでフィルタリング可能
+
+- [ ] **Research Data Import Enhancement（リサーチデータインポート機能の拡張）** 🔄 中期実装候補
+  - **現状:** 自動モードで生成した `research_brief.json` のみインポート可能（2026-04-15実装済み）
+  - **課題:** 既存の165ファイルの `research.json`（5フィールド、シンプル形式）が再利用できない
+  - **実装内容:**
+    - ファイル形式の自動判定機能（`research_brief.json` vs `research.json`）
+    - `research.json` → `ResearchBrief` への自動変換ロジック
+    - 欠損フィールド（`queries`, `angle` など）の補完処理
+    - ユーザーがファイル形式を意識せずにインポート可能に
+  - **期待効果:**
+    - 既存の全リサーチデータが再利用可能に
+    - ユーザビリティの向上
+    - 後方互換性の最大化
+  - **実装難易度:** ⭐⭐⭐☆☆（中程度）
+  - **推定工数:** 2-3日
+  - **関連ドキュメント:** `docs/RESEARCH_DATA_FUTURE_IMPROVEMENTS.md`（案2）
+
+- [ ] **Research Data Model Unification（リサーチデータモデルの統一）** 🔧 長期実装候補
+  - **現状:** 2つの `ResearchResult` クラスが存在（dataclass版とPydantic版）+ `ResearchBrief`
+  - **課題:** データモデルの重複によるコードの複雑性（17ファイルに影響）
+  - **実装内容:**
+    - `ResearchResult` (dataclass) を削除
+    - `ResearchResult` (Pydantic) を削除
+    - すべて `ResearchBrief` に統一
+    - 保存処理の統一（`research.json` 廃止、`research_brief.json` のみ保存）
+    - 変換処理の削減（ResearchBrief ↔ ResearchResult 変換が不要に）
+  - **期待効果:**
+    - データモデル数: 3つ → 1つ（-67%）
+    - 保存処理の箇所: 2箇所 → 1箇所（-50%）
+    - 変換処理の箇所: 2箇所 → 0箇所（-100%）
+    - コードの複雑性削減、長期的なメンテナンス性向上
+  - **実装難易度:** ⭐⭐⭐⭐☆（高）
+  - **推定工数:** 5-7日
+  - **前提条件:**
+    - Import Enhancement（案2）が実装済み
+    - 十分な移行期間（6ヶ月以上）
+    - ユーザーへの事前周知
+  - **関連ドキュメント:** `docs/RESEARCH_DATA_FUTURE_IMPROVEMENTS.md`（案3）
 
 ---
 
