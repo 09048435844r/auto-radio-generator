@@ -1007,6 +1007,32 @@ def _save_research_results(
         
         callbacks.log(f"✓ リサーチ結果保存: {research_path}")
         
+        # ResearchBrief も保存（インポート機能用）
+        # 案1実装: 自動モードで生成したリサーチデータを再利用可能にする
+        from core.models.artifacts import ResearchBrief
+        
+        # セッションIDを取得（output_dirのディレクトリ名から）
+        session_id = output_dir.name
+        
+        research_brief = ResearchBrief(
+            session_id=session_id,
+            theme=research_data.topic,
+            research_mode=research_data.mode,
+            created_at=datetime.now().isoformat(),
+            research_content=research_data.content,
+            research_sources=[s.model_dump() for s in (research_data.sources or [])],
+            queries=[research_data.topic],  # topicをクエリとして使用
+            angle="自動生成",
+            curated_topics=None,
+            perplexity_usage=research_data.usage.model_dump() if research_data.usage else None,
+            gemini_usage_planning=None
+        )
+        
+        research_brief_path = output_dir / "research_brief.json"
+        research_brief_json = json.dumps(research_brief.model_dump(), ensure_ascii=False, indent=2)
+        research_brief_path.write_text(research_brief_json, encoding="utf-8")
+        callbacks.log(f"✓ リサーチブリーフ保存（インポート用）: {research_brief_path}")
+        
         # Markdownレポートも保存
         report_path = output_dir / "research_report.md"
         report_content = f"""# リサーチレポート
@@ -1229,6 +1255,31 @@ async def generate_video_workflow(
                 log(f"✓ リサーチ結果保存: {research_path}")
                 log(f"[DEBUG] ファイルサイズ: {research_path.stat().st_size} bytes")
                 
+                # ResearchBrief も保存（インポート機能用）
+                # 案1実装: 自動モードで生成したリサーチデータを再利用可能にする
+                from core.models.artifacts import ResearchBrief
+                
+                session_id = output_base.name
+                research_brief = ResearchBrief(
+                    session_id=session_id,
+                    theme=research_data.topic,
+                    research_mode=research_data.mode,
+                    created_at=datetime.now().isoformat(),
+                    research_content=research_data.content,
+                    research_sources=[s.model_dump() for s in (research_data.sources or [])],
+                    queries=[research_data.topic],
+                    angle="自動生成",
+                    curated_topics=None,
+                    perplexity_usage=research_data.usage.model_dump() if research_data.usage else None,
+                    gemini_usage_planning=None
+                )
+                
+                research_brief_path = output_base / "research_brief.json"
+                research_brief_json = json.dumps(research_brief.model_dump(), ensure_ascii=False, indent=2)
+                research_brief_path.write_text(research_brief_json, encoding="utf-8")
+                log(f"✓ リサーチブリーフ保存（インポート用）: {research_brief_path}")
+                log(f"[DEBUG] ブリーフサイズ: {research_brief_path.stat().st_size} bytes")
+                
                 # Markdownレポートも保存（人間が読みやすい形式）
                 report_path = output_base / "research_report.md"
                 report_content = f"""# リサーチレポート
@@ -1270,7 +1321,7 @@ async def generate_video_workflow(
         
         script_start = time.time()
         script_generator = create_script_generator(config, provider=provider)
-        script = await script_generator.generate(theme, research_data)
+        script, segments = await script_generator.generate(theme, research_data)
 
         diagnostics, suspected_swap = _build_speaker_diagnostics(script)
         for msg in diagnostics:
@@ -1316,7 +1367,8 @@ async def generate_video_workflow(
         synthesis_result = await voicevox.synthesize(
             script, 
             audio_output_dir,
-            speed_scale_override=overrides.speed_scale
+            speed_scale_override=overrides.speed_scale,
+            segments=segments
         )
         
         # Usage記録

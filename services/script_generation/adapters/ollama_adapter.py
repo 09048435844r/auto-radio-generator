@@ -32,12 +32,15 @@ class OllamaAdapter(ILLMPort):
         extra_params = {}
         if request.response_format == "json":
             extra_params["response_format"] = {"type": "json_object"}
-        
-        # Prevent infinite repetition loops (critical for metadata generation)
-        # Note: Ollama's frequency_penalty implementation differs from OpenAI
-        # Values > 1.0 can cause empty responses. Use conservative 0.8-1.0 range.
-        # 0.0 = no penalty, 1.0 = moderate penalty, >1.0 = aggressive (risky)
-        extra_params["frequency_penalty"] = 0.9
+            # JSON generation requires lower frequency_penalty to allow structured keywords
+            # (e.g., "title", "description") to be repeated as needed
+            extra_params["frequency_penalty"] = 0.5
+        else:
+            # Regular dialogue generation: higher penalty to prevent repetition
+            # Note: Ollama's frequency_penalty implementation differs from OpenAI
+            # Values > 1.0 can cause empty responses. Use conservative 0.8-1.0 range.
+            # 0.0 = no penalty, 1.0 = moderate penalty, >1.0 = aggressive (risky)
+            extra_params["frequency_penalty"] = 0.9
         
         max_retries = 3
         last_error = None
@@ -70,9 +73,10 @@ class OllamaAdapter(ILLMPort):
                     )
                     raise LLMResponseError(
                         f"Ollama returned empty response (finish_reason={finish_reason}). "
-                        f"Possible causes: (1) frequency_penalty too high (current: {extra_params.get('frequency_penalty', 'N/A')}), "
+                        f"Possible causes: (1) model not loaded or crashed, "
                         f"(2) max_tokens too low (current: {request.max_tokens}), "
-                        f"(3) model not loaded. Check Ollama server logs for details."
+                        f"(3) frequency_penalty issue (current: {extra_params.get('frequency_penalty', 'N/A')}). "
+                        f"Check Ollama server logs for details."
                     )
                 
                 usage = LLMUsage(

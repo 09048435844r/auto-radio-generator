@@ -169,7 +169,7 @@ class MetadataGenerator:
             system_prompt="",  # MetadataGenerator uses user prompt only
             user_prompt=prompt,
             model=self.model,
-            max_tokens=1536,  # Balanced: enough for metadata, not too long for repetition
+            max_tokens=2048,  # Increased: prevent truncation for detailed descriptions
             temperature=0.6,  # Balanced: creative enough, stable enough
             response_format="json"
         )

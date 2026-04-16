@@ -189,7 +189,9 @@ class GeminiClient(IScriptGenerator):
                         output_tokens=0,
                         request_count=0
                     )
-                    return script_obj
+                    # Extract segments from script
+                    segments = self._extract_segments_from_script(script_obj)
+                    return script_obj, segments
             else:
                 console.print(f"[red]✗ Mock data not found at {mock_file}[/red]")
                 console.print(f"[yellow]  Falling back to normal API execution...[/yellow]")
@@ -256,7 +258,9 @@ class GeminiClient(IScriptGenerator):
             console.print(f"[green]✓ 台本生成完了[/green] 対話数: {len(script.dialogue)}")
             if usage:
                 console.print(f"  トークン: 入力 {usage.input_tokens:,} / 出力 {usage.output_tokens:,}")
-            return script
+            # Extract segments from script
+            segments = self._extract_segments_from_script(script)
+            return script, segments
             
         except Exception as e:
             console.print(f"[red]✗ Gemini API エラー: {e}[/red]")
@@ -269,7 +273,9 @@ class GeminiClient(IScriptGenerator):
                     response_text, usage = self._call_api(system_prompt, user_prompt, use_schema=True)
                     self.last_usage = usage
                     script = self._parse_response(response_text)
-                    return script
+                    # Extract segments from script
+                    segments = self._extract_segments_from_script(script)
+                    return script, segments
                 finally:
                     self.model_name = original_model
             raise
@@ -617,4 +623,57 @@ class GeminiClient(IScriptGenerator):
             user_prompt=formatted_prompt
         )
         return response_text
+    
+    def _extract_segments_from_script(self, script: Script) -> list:
+        """Extract segments from Script.sections based on section field
+        
+        Args:
+            script: Script object with sections
+        
+        Returns:
+            List of ScriptSegment objects
+        """
+        from core.models.curation import ScriptSegment
+        
+        segments = []
+        current_segment_turns = []
+        current_segment_id = None
+        current_segment_type = "intro"  # Default type
+        
+        for turn in script.sections:
+            if turn.section:  # New segment starts
+                if current_segment_turns:  # Save previous segment
+                    segments.append(ScriptSegment(
+                        segment_id=current_segment_id or "default",
+                        segment_type=current_segment_type,
+                        topic_title=None,
+                        turns=[t.model_dump() for t in current_segment_turns],
+                        context_summary=""
+                    ))
+                
+                # Start new segment
+                current_segment_id = turn.section
+                # Infer segment type from section name
+                if "intro" in turn.section.lower():
+                    current_segment_type = "intro"
+                elif "conclusion" in turn.section.lower() or "ending" in turn.section.lower():
+                    current_segment_type = "conclusion"
+                else:
+                    current_segment_type = "deep_dive"
+                
+                current_segment_turns = [turn]
+            else:
+                current_segment_turns.append(turn)
+        
+        # Save last segment
+        if current_segment_turns:
+            segments.append(ScriptSegment(
+                segment_id=current_segment_id or "default",
+                segment_type=current_segment_type,
+                topic_title=None,
+                turns=[t.model_dump() for t in current_segment_turns],
+                context_summary=""
+            ))
+        
+        return segments
     
