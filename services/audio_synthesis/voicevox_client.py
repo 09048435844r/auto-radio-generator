@@ -610,10 +610,14 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             "metaphor": "たとえで理解",
             "example": "活用例",
             "main": "本題",
+            "deep_dive_1": "深掘り1",
+            "deep_dive_2": "深掘り2",
+            "deep_dive_3": "深掘り3",
             "news_1": "ニュース1",
             "news_2": "ニュース2",
             "news_3": "ニュース3",
             "listener_mail": "リスナーメール",
+            "conclusion": "まとめ",
             "ending": "エンディング",
         }
         

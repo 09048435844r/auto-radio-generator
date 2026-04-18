@@ -251,6 +251,36 @@ script_generator:
 
 ---
 
+## 🧮 コスト計算API（実装メモ）
+
+コスト計算ロジックは `services/cost_calculator.py` に集約されており、全てのレート・為替レートは `config.yaml`（SSOT）から取得されます。
+
+### シグネチャ
+
+```python
+calculator = CostCalculator(config)  # AppConfig が必須
+
+# プロバイダとモデル名の両方を明示的に渡す（モデル名からのプロバイダ推論は廃止）
+input_rate, output_rate = calculator.get_llm_rate(provider, model_name)
+```
+
+- `provider`: `"gemini" | "openai" | "anthropic" | "ollama"`
+- `ollama` は常に `(0.0, 0.0)` を返す（ローカル実行のため無料）
+
+### 未登録モデルのフォールバック
+
+`config.yaml` に登録されていないモデル名が渡された場合、当該プロバイダの最初のモデルの単価にフォールバックし、`logging.WARNING` で「どのモデルが未知でどの単価が適用されたか」が出力されます。ログを確認し、必要に応じて `config.yaml > script_generator.<provider>.costs` にモデルを追加してください。
+
+### JPY換算
+
+円換算は全て `config.yaml > script_generator.currency.usd_to_jpy` を参照します。コード内にレートをハードコードしないでください（SSOT 原則）。
+
+### Free-Tier 判定
+
+`_check_free_tier` は「Gemini のリクエスト回数が 1 以上 1 以下」のときのみ Free Tier 適用中バッジを返します。`request_count == 0`（Gemini を一度も使っていないケース）はバッジ表示対象外です。
+
+---
+
 ## 📚 関連ドキュメント
 
 - [README.md](../README.md) - プロジェクト全体の概要

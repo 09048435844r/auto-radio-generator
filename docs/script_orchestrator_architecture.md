@@ -423,7 +423,21 @@ else:
 - API呼び出し: 10回 → 5回（**50%削減**）
 - JSON生成成功率: 100%維持
 
-### 8.2 今後の拡張可能性
+### 8.2 フォールバック分割（旧アーキテクチャ互換）
+
+`services/script_generation/gemini_client.py::_extract_segments_from_script` は、`config/prompts.yaml` の単発プロンプトから返った `Script` を疑似的にセグメント化するために使用されます。LLM が `section` フィールドを一切付与しなかった場合に発動するフォールバックロジックは、2026-04-18 のコードレビュー対応で以下のように堅牢化されました。
+
+- **空入力の早期検出**: `script.sections == []` のときは `ValueError("Cannot extract segments: script.sections is empty.")` を送出し、サイレントに0セグメントを返さないようにしている
+- **`segment_size` の計算**: `max(1, math.ceil(total_turns / 3))` を使用。短いスクリプト（例: 5〜10ターン）でも適切に3分割される
+- **`segment_type` 割当ルール**（チャンクインデックス `idx` 基準）:
+  - `idx == 0` → `intro`（`segment_id = "auto_intro"`）
+  - `idx == num_chunks - 1 and num_chunks > 1` → `conclusion`（`segment_id = "auto_conclusion"`）
+  - それ以外 → `deep_dive`（`segment_id = f"auto_deep_dive_{idx}"`）
+- **単一チャンクの場合**: `intro` のみ割り当て、`conclusion` との二重ラベル付与を防ぐ
+
+このフォールバックは **本来 LLM が `config/prompts.yaml` のセクションマーカールールに従って `intro` / `deep_dive_N` / `conclusion` を明示すべき** という前提の安全網であり、発動時は `Console` に警告が表示されます。
+
+### 8.3 今後の拡張可能性
 
 - **並列生成**: 複数の deep_dive セグメントを並列API呼び出しで高速化
 - **キャッシュ**: 同一リサーチデータのキュレーション結果をキャッシュ

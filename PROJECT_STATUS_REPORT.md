@@ -602,11 +602,20 @@ class VoicevoxClient(IAudioSynthesizer):
             chapters=chapters
         )
     
-    def _get_chapter_title(self, section_id: str, text: str) -> str:
-        """セクションIDからチャプタータイトルを生成"""
+    def _get_chapter_title(self, section_id: str, text: str, chapter_title: Optional[str] = None) -> str:
+        """セクションIDからチャプタータイトルを生成。
+        LLM 生成の chapter_title があれば最優先で採用し、無い場合のみ下記マップにフォールバック。"""
+        if chapter_title and chapter_title.strip():
+            return chapter_title.strip()
         section_titles = {
             "intro": "オープニング",
             "main": "本題",
+            # Hierarchical agentic workflow sections (v3.5.0+)
+            "deep_dive_1": "深掘り1",
+            "deep_dive_2": "深掘り2",
+            "deep_dive_3": "深掘り3",
+            "conclusion": "まとめ",
+            # Weekly-digest / legacy sections
             "news_1": "ニュース1",
             "news_2": "ニュース2",
             "news_3": "ニュース3",

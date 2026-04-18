@@ -1,4 +1,5 @@
 """APIコスト計算サービス（SSOT対応版）"""
+import logging
 from typing import Optional
 from core.models.config import AppConfig
 from core.models.usage import (
@@ -7,6 +8,13 @@ from core.models.usage import (
     PerplexityUsage,
     LLMUsage,
 )
+
+logger = logging.getLogger(__name__)
+
+# Free-tier detection bounds (Gemini).
+# Lower bound ensures zero-request runs are NOT flagged as free-tier.
+_FREE_TIER_MIN_REQUESTS = 1
+_FREE_TIER_MAX_REQUESTS = 1
 
 # Backward compatibility alias
 GeminiUsage = LLMUsage
@@ -28,17 +36,17 @@ class CostCalculator:
         self.config = config
         self.usd_to_jpy = config.yaml.script_generator.currency.usd_to_jpy
     
-    def get_llm_rate(self, model_name: str) -> tuple[float, float]:
+    def get_llm_rate(self, provider: str, model_name: str) -> tuple[float, float]:
         """Get input/output rates for a specific model
         
         Args:
+            provider: Provider name ("gemini" | "openai" | "anthropic" | "ollama")
             model_name: LLM model name (e.g., "gpt-4o-mini")
         
         Returns:
             tuple[float, float]: (input_rate, output_rate) per 1M tokens
         """
-        # Determine provider from model name
-        provider = self._get_provider_from_model_name(model_name)
+        # Use provider directly instead of inferring from model name
         
         # Ollama is local, zero cost
         if provider == "ollama":
@@ -60,33 +68,26 @@ class CostCalculator:
         if model_cost is None:
             # Fallback to first available model in provider
             if costs:
-                model_cost = next(iter(costs.values()))
+                fallback_model_name = next(iter(costs.keys()))
+                model_cost = costs[fallback_model_name]
+                logger.warning(
+                    "Unknown model '%s' for provider '%s'. "
+                    "Falling back to '%s' pricing (input=%.4f, output=%.4f per 1M tokens). "
+                    "Cost estimates may be inaccurate — please register this model in config.yaml.",
+                    model_name, provider, fallback_model_name,
+                    model_cost.input, model_cost.output,
+                )
             else:
                 # Ultimate fallback (gemini-2.5-flash rates)
                 from core.models.config import ModelCost
                 model_cost = ModelCost(input=0.30, output=2.50)
-        
+                logger.warning(
+                    "No cost data available for provider '%s' (model '%s'). "
+                    "Using hard-coded fallback rates (input=0.30, output=2.50 per 1M tokens).",
+                    provider, model_name,
+                )
+
         return model_cost.input, model_cost.output
-    
-    def _get_provider_from_model_name(self, model_name: str) -> str:
-        """Infer provider from model name
-        
-        Args:
-            model_name: Model name
-        
-        Returns:
-            str: Provider name ("gemini" | "openai" | "anthropic" | "ollama")
-        """
-        if model_name.startswith("gemini-"):
-            return "gemini"
-        elif model_name.startswith(("gpt-", "o1-", "o3-")):
-            return "openai"
-        elif model_name.startswith("claude-"):
-            return "anthropic"
-        elif model_name.startswith(("gpt-oss:", "llama3.", "phi3:", "mistral:", "mixtral:")):
-            return "ollama"
-        else:
-            return "gemini"  # Default
     
     def get_all_available_models(self) -> list[str]:
         """Get all available models from config
@@ -121,7 +122,7 @@ class CostCalculator:
         total_llm_output_usd = 0.0
         
         for provider, llm_usage in usage.llm_usage.items():
-            input_rate, output_rate = self.get_llm_rate(llm_usage.model_name)
+            input_rate, output_rate = self.get_llm_rate(provider, llm_usage.model_name)
             total_llm_input_usd += (llm_usage.input_tokens / 1_000_000) * input_rate
             total_llm_output_usd += (llm_usage.output_tokens / 1_000_000) * output_rate
         
@@ -150,13 +151,21 @@ class CostCalculator:
         )
     
     def _check_free_tier(self, usage: TotalUsage) -> bool:
-        """Check if usage qualifies for free tier (simplified)"""
-        # Gemini Free Tier conditions are complex,
-        # here we simply assume <= 1 request qualifies
+        """Check if usage qualifies for free tier (simplified).
+
+        Gemini Free Tier conditions are complex; we approximate by flagging
+        runs with a small, non-zero Gemini request count. A zero request
+        count means Gemini was not used at all and therefore must NOT be
+        displayed as "Free Tier applied".
+        """
         gemini_usage = usage.llm_usage.get("gemini")
-        if gemini_usage:
-            return gemini_usage.request_count <= 1
-        return False
+        if gemini_usage is None:
+            return False
+        return (
+            _FREE_TIER_MIN_REQUESTS
+            <= gemini_usage.request_count
+            <= _FREE_TIER_MAX_REQUESTS
+        )
     
     def format_llm_cost_log(self, usage: LLMUsage) -> list[str]:
         """Format LLM usage and cost as log lines
@@ -167,7 +176,7 @@ class CostCalculator:
         Returns:
             list[str]: List of log lines
         """
-        input_rate, output_rate = self.get_llm_rate(usage.model_name)
+        input_rate, output_rate = self.get_llm_rate(usage.provider, usage.model_name)
         cost_usd = (
             (usage.input_tokens / 1_000_000) * input_rate +
             (usage.output_tokens / 1_000_000) * output_rate
@@ -235,7 +244,7 @@ class CostCalculator:
         # LLM costs (per-provider)
         for provider, llm_usage in usage.llm_usage.items():
             if llm_usage.total_tokens > 0:
-                input_rate, output_rate = self.get_llm_rate(llm_usage.model_name)
+                input_rate, output_rate = self.get_llm_rate(provider, llm_usage.model_name)
                 provider_cost = (
                     (llm_usage.input_tokens / 1_000_000) * input_rate +
                     (llm_usage.output_tokens / 1_000_000) * output_rate

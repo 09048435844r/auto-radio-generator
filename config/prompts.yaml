@@ -207,12 +207,16 @@ script:
       "hashtags": ["#生成AI", "#テクノロジー", "#学び", "#ニュース解説", "#ラジオ"],
       "references": ["https://example.com/source-1", "https://example.com/source-2"],
       "dialogue": [
-        {{"speaker_id": "main", "text": "セリフ内容", "section": "intro", "chapter_title": "魅力的な見出し"}},
+        {{"speaker_id": "main", "text": "導入のセリフ", "section": "intro", "chapter_title": "魅力的な見出し"}},
         {{"speaker_id": "sub", "text": "セリフ内容"}},
         ...
-        {{"speaker_id": "main", "text": "セリフ内容", "section": "main", "chapter_title": "本題の見出し"}},
+        {{"speaker_id": "main", "text": "1つ目のトピック開始", "section": "deep_dive_1", "chapter_title": "トピック1の見出し"}},
+        {{"speaker_id": "sub", "text": "セリフ内容"}},
         ...
-        {{"speaker_id": "main", "text": "セリフ内容", "section": "ending", "chapter_title": "締めの見出し"}},
+        {{"speaker_id": "main", "text": "2つ目のトピック開始", "section": "deep_dive_2", "chapter_title": "トピック2の見出し"}},
+        {{"speaker_id": "sub", "text": "セリフ内容"}},
+        ...
+        {{"speaker_id": "main", "text": "まとめのセリフ", "section": "conclusion", "chapter_title": "締めの見出し"}},
         ...
       ]
     }}
@@ -221,11 +225,18 @@ script:
     1. 必ず純粋なJSON文字列のみを出力すること。Markdownのコードブロック(```json 等)は絶対に使用しないこと。
     2. JSONの文字列値の中で改行を表現する場合は、生の改行を使用せず、必ず \n にエスケープすること。
 
-    ## セクションマーカー（重要）
-    各セクションの**最初のセリフ**にのみ `section` フィールドを付けてください：
-    - `"intro"` - 第1部の最初
-    - `"main"` - 第2部の最初
-    - `"ending"` - 第3部の最初
+    ## セクションマーカー（重要・必須）
+    **必ず以下のルールに従って `section` フィールドを設定してください**：
+    
+    1. **第1部（導入）の最初のセリフ**: `"section": "intro"`
+    2. **第2部（深掘り）の各トピックの最初のセリフ**: `"section": "deep_dive_1"`, `"deep_dive_2"`, `"deep_dive_3"` など
+       - 深掘りトピックが2〜3個ある場合、それぞれの最初のセリフに番号付きのsectionを設定
+       - 例: 1つ目のトピック開始時 → `"section": "deep_dive_1"`
+       - 例: 2つ目のトピック開始時 → `"section": "deep_dive_2"`
+    3. **第3部（まとめ）の最初のセリフ**: `"section": "conclusion"`
+    
+    **重要**: これらのsectionマーカーは、ジングル（効果音）の挿入タイミングを決定するため、**必ず設定してください**。
+    設定しない場合、動画の演出が正しく機能しません。
     
     ## チャプタータイトル生成（重要）
     `section` を付けるセリフには、必ず `chapter_title` フィールドを追加してください：

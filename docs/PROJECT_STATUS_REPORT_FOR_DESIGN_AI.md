@@ -4,6 +4,21 @@
 **対象**: 設計・要件定義担当AI  
 **プロジェクト**: 自動ラジオ動画生成システム v3.3.2
 
+> ⚠️ **現行実装との差分ノート（2026-04-18 追記）**
+>
+> 本ドキュメントは設計時点のスケッチであり、コード例には現行実装と食い違う箇所があります。特にコスト計算周りについては下記の差分を参照してください。
+>
+> - **料金データの保存場所**: `config/costs.yaml` は廃止され、全てのレートおよび `usd_to_jpy` は `config.yaml > script_generator.*` に統合されています（SSOT）。
+> - **`CostCalculator` のシグネチャ**:
+>   - 旧スケッチ: `CostCalculator(costs_yaml_path)` + `calculate_llm_cost(usage)`
+>   - 現行実装: `CostCalculator(config: AppConfig)` + `get_llm_rate(provider: str, model_name: str)`
+> - **プロバイダ推論の廃止**: モデル名からプロバイダを推論する `_get_provider_from_model_name` は削除されました。呼び出し側は `provider` を明示的に渡す必要があります。
+> - **未登録モデルのフォールバック警告**: 当該プロバイダの先頭モデル単価にフォールバックした場合、`logger.warning` で通知されます。
+> - **Free Tier 判定**: `request_count <= 1` から `1 <= request_count <= 1` に厳格化されました（未使用=0 を誤検知しない）。
+> - **JPY 換算の SSOT 統一**: `comparison_report.py` の `cost_usd * 150.0` ハードコードは廃止され、`calculator.usd_to_jpy` を参照しています。
+>
+> 詳細は `CHANGELOG.md` の 2026-04-18 エントリおよび `docs/MULTI_LLM_GUIDE.md > コスト計算API` を参照してください。
+
 ---
 
 ## 1. Directory Structure

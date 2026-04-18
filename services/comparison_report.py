@@ -48,12 +48,12 @@ def generate_comparison_report(scripts_data: List[dict], config) -> str:
         estimated_duration = turn_count * 7.0
         
         # Calculate cost
-        input_rate, output_rate = calculator.get_llm_rate(usage.model_name)
+        input_rate, output_rate = calculator.get_llm_rate(usage.provider, usage.model_name)
         cost_usd = (
             (usage.input_tokens / 1_000_000) * input_rate +
             (usage.output_tokens / 1_000_000) * output_rate
         )
-        cost_jpy = cost_usd * 150.0  # USD to JPY conversion
+        cost_jpy = cost_usd * calculator.usd_to_jpy  # SSOT: use config-driven rate
         
         comparisons.append(ScriptComparison(
             model_name=usage.model_name,

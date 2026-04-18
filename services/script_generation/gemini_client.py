@@ -1,5 +1,6 @@
 """Gemini APIを使用した台本生成クライアント"""
 import json
+import math
 import re
 from pathlib import Path
 from typing import Optional
@@ -675,5 +676,59 @@ class GeminiClient(IScriptGenerator):
                 context_summary=""
             ))
         
+        # Fallback: If no segments were created (all section fields are null)
+        if not segments:
+            total_turns = len(script.sections)
+
+            # Guard: empty script sections → cannot build any segment
+            if total_turns == 0:
+                console.print(
+                    "[red]✗ script.sections が空のため、セグメントを生成できません。[/red]"
+                )
+                raise ValueError(
+                    "Cannot extract segments: script.sections is empty."
+                )
+
+            console.print(
+                "[yellow]⚠ section フィールドが設定されていません。自動分割します。[/yellow]"
+            )
+
+            # Calculate segment size: aim for up to 3 segments (intro, deep_dive, conclusion).
+            # Use ceil so that short scripts still get chunked properly instead of being
+            # forced into a single 10-turn bucket.
+            segment_size = max(1, math.ceil(total_turns / 3))
+
+            chunk_ranges = list(range(0, total_turns, segment_size))
+            num_chunks = len(chunk_ranges)
+
+            for idx, i in enumerate(chunk_ranges):
+                chunk = script.sections[i:i + segment_size]
+
+                # Robust segment_type assignment:
+                #   - first chunk  → intro
+                #   - last chunk (only if more than one chunk) → conclusion
+                #   - middle chunks → deep_dive_N
+                if idx == 0:
+                    segment_type = "intro"
+                    segment_id = "auto_intro"
+                elif idx == num_chunks - 1 and num_chunks > 1:
+                    segment_type = "conclusion"
+                    segment_id = "auto_conclusion"
+                else:
+                    segment_type = "deep_dive"
+                    segment_id = f"auto_deep_dive_{idx}"
+
+                segments.append(ScriptSegment(
+                    segment_id=segment_id,
+                    segment_type=segment_type,
+                    topic_title=None,
+                    turns=[t.model_dump() for t in chunk],
+                    context_summary=""
+                ))
+
+            console.print(
+                f"[yellow]  → {len(segments)}個のセグメントに自動分割しました[/yellow]"
+            )
+
         return segments
     

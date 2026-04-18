@@ -1,6 +1,7 @@
 """Multi-provider usage tracking system test"""
 from core.models.usage import LLMUsage, TotalUsage
 from services.cost_calculator import CostCalculator
+from core.models import load_config
 
 def test_llm_usage_model():
     """Test LLMUsage model with provider tracking"""
@@ -63,14 +64,17 @@ def test_cost_calculator():
     """Test CostCalculator with model-specific rates"""
     print("\nTesting CostCalculator...")
     
-    calc = CostCalculator()
+    config = load_config()
+    calc = CostCalculator(config)
     
     # Test rate lookup
-    gemini_rates = calc.get_llm_rate("gemini-1.5-pro")
-    openai_rates = calc.get_llm_rate("gpt-4o-mini")
+    gemini_rates = calc.get_llm_rate("gemini", "gemini-1.5-pro")
+    openai_rates = calc.get_llm_rate("openai", "gpt-4o-mini")
+    ollama_rates = calc.get_llm_rate("ollama", "gemma4:26b")
     
     print(f"  Gemini 1.5 Pro rates: ${gemini_rates[0]:.2f} / ${gemini_rates[1]:.2f} per 1M")
     print(f"  GPT-4o-mini rates: ${openai_rates[0]:.2f} / ${openai_rates[1]:.2f} per 1M")
+    print(f"  Ollama (gemma4:26b) rates: ${ollama_rates[0]:.2f} / ${ollama_rates[1]:.2f} per 1M (should be 0.00)")
     
     # Test cost calculation
     total_usage = TotalUsage()

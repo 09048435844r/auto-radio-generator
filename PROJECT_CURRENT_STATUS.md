@@ -590,16 +590,33 @@ class ThumbnailGenerator:
         ...
 ```
 
-#### `services/cost_calculator.py` (171行)
+#### `services/cost_calculator.py`
 
 ```python
 class CostCalculator:
+    """AppConfig (= config.yaml SSOT) からレートを取得するコスト計算器"""
+
+    def __init__(self, config: AppConfig):
+        self.usd_to_jpy = config.yaml.script_generator.currency.usd_to_jpy
+        ...
+
+    def get_llm_rate(self, provider: str, model_name: str) -> tuple[float, float]:
+        """Provider と model_name から (input_rate, output_rate) を返す。
+        未登録モデルは当該プロバイダの先頭モデル単価にフォールバックし、
+        logger.warning で通知する。ollama は常に (0.0, 0.0)。"""
+        ...
+
     def calculate(self, usage: TotalUsage) -> CostBreakdown:
-        """Perplexity: $0.005/req, Gemini: $1.25/$5.00 per 1M tokens, VOICEVOX: $0"""
+        """Perplexity + LLM(provider 別集計) + VOICEVOX(=0) を集計"""
+        ...
+
+    def _check_free_tier(self, usage: TotalUsage) -> bool:
+        """Gemini の request_count が 1〜1 のときのみ Free Tier 扱い。
+        request_count == 0 は Gemini 未使用として扱われ、バッジは出ない。"""
         ...
 
     def format_cost_report(self, usage, cost) -> str:
-        """Markdown形式のコストレポート生成"""
+        """Markdown形式のコストレポート生成（円換算は self.usd_to_jpy を使用）"""
         ...
 ```
 

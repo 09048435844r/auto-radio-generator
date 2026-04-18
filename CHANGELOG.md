@@ -7,6 +7,23 @@
 
 ## [Unreleased]
 
+### 修正（2026-04-18: コードレビュー対応・耐障害性とSSOT強化）
+- **`services/script_generation/gemini_client.py` フォールバック分割ロジックの堅牢化**
+  - `script.sections` が空のとき `ValueError` を送出して早期リターン（無意味な分割処理を防止）
+  - `segment_size` を `max(10, total // 3)` から `max(1, math.ceil(total / 3))` に変更し、短いスクリプトでも適切に3分割されるよう改善
+  - セグメント種別割当をチャンクインデックス基準に変更：`idx == 0` → intro / `idx == num_chunks - 1 and num_chunks > 1` → conclusion / それ以外 → `deep_dive_{idx}`
+  - 単一チャンクのみ生成される場合は `intro` として扱い、`conclusion` との重複ラベル付与を排除
+- **`services/comparison_report.py` SSOT違反（JPY換算ハードコード）の修正**
+  - `cost_jpy = cost_usd * 150.0` を `calculator.usd_to_jpy`（`config.yaml` 由来）に置き換え
+  - `comparison_session.py` との実装整合性を確保
+- **`services/cost_calculator.py` サイレントフォールバックの可視化**
+  - 未登録モデル名が渡された場合、`logger.warning` でプロバイダ名・モデル名・適用された代替単価を明示出力
+  - 価格表自体が空のケースでも警告を出力
+  - `_check_free_tier` の判定条件を `request_count <= 1` から `1 <= request_count <= 1` に変更し、`request_count == 0`（Gemini未使用）のケースを Free Tier 扱いから除外
+- **`services/audio_synthesis/voicevox_client.py` チャプター名フォールバック補完**
+  - `_get_chapter_title` の `section_titles` マッピングに `deep_dive_1/2/3`、`conclusion` を追加
+  - `config/prompts.yaml` の新しいセクション命名規約（`deep_dive_N` / `conclusion`）と整合
+
 ### 追加
 - **HITLモード（Human-in-the-Loop）**: ユーザーが各フェーズで介入・編集できる新しいワークフローモード
   - リサーチ結果のプレビューと承認機能

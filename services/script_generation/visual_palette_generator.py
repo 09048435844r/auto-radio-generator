@@ -171,45 +171,47 @@ Create a visually distinctive brand (color palette + aesthetic) that captures th
             
             # Run sync client in a thread to avoid blocking the event loop.
             # asyncio.wait_for only works reliably with asyncio.to_thread (not aio client).
-            def _sync_call() -> str:
-                response = self.client.models.generate_content(
+            #
+            # Root-cause fix for "Unterminated string" JSONDecodeError:
+            # - Use Structured Output (response_schema=VisualIdentity) so the SDK
+            #   returns a parsed Pydantic instance and JSON validity is guaranteed
+            #   by the model. This removes markdown fence stripping and json.loads.
+            # - Set thinking_budget=0 on gemini-3-flash-preview so internal thinking
+            #   tokens do not consume the output budget (previous 512-token limit
+            #   was being exhausted by ~400 thinking tokens, truncating the JSON).
+            # - Keep max_output_tokens generous (1024) as a safety margin.
+            def _sync_call():
+                return self.client.models.generate_content(
                     model=self.model_name,
                     contents=prompt_text,
                     config=types.GenerateContentConfig(
                         temperature=0.9,
-                        max_output_tokens=512,
+                        max_output_tokens=1024,
+                        response_mime_type="application/json",
+                        response_schema=VisualIdentity,
+                        thinking_config=types.ThinkingConfig(thinking_budget=0),
                     )
                 )
-                return response.text or ""
             
-            response_text_raw = await asyncio.wait_for(
+            response = await asyncio.wait_for(
                 asyncio.to_thread(_sync_call),
-                timeout=10.0
+                timeout=30.0
             )
-            # Parse JSON response
-            if not response_text_raw or not response_text_raw.strip():
-                raise ValueError("Visual identity API returned empty response.")
             
-            # Clean response text (remove markdown code blocks if present)
-            response_text = response_text_raw.strip()
-            if response_text.startswith("```json"):
-                response_text = response_text[7:]  # Remove ```json
-            if response_text.startswith("```"):
-                response_text = response_text[3:]  # Remove ```
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]  # Remove trailing ```
-            response_text = response_text.strip()
-            
-            identity_data = json.loads(response_text)
-            
-            identity = VisualIdentity(
-                primary_color=identity_data["primary_color"],
-                secondary_color=identity_data["secondary_color"],
-                color_mood=identity_data["color_mood"],
-                aesthetic=identity_data["aesthetic"],
-                visual_keywords=identity_data.get("visual_keywords", []),
-                reasoning=identity_data.get("reasoning", "")
-            )
+            # Structured Output: SDK returns a parsed Pydantic instance directly.
+            identity = response.parsed
+            if not isinstance(identity, VisualIdentity):
+                # Defensive: fall back to manual parsing if parsed is missing
+                # (e.g., empty response due to safety filter or MAX_TOKENS).
+                finish_reason = None
+                try:
+                    finish_reason = response.candidates[0].finish_reason
+                except Exception:
+                    pass
+                raise ValueError(
+                    f"Visual identity response missing parsed payload "
+                    f"(finish_reason={finish_reason}, text={response.text!r:.200})"
+                )
             
             logger.info(f"Generated visual identity: {identity.primary_color}, {identity.secondary_color}")
             console.print(f"[green]✓ Visual identity generated[/green]")

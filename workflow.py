@@ -1024,7 +1024,7 @@ def _save_research_results(
             queries=[research_data.topic],  # topicをクエリとして使用
             angle="自動生成",
             curated_topics=None,
-            perplexity_usage=research_data.usage.model_dump() if research_data.usage else None,
+            perplexity_usage=asdict(research_data.usage) if research_data.usage else None,
             gemini_usage_planning=None
         )
         
@@ -1270,7 +1270,7 @@ async def generate_video_workflow(
                     queries=[research_data.topic],
                     angle="自動生成",
                     curated_topics=None,
-                    perplexity_usage=research_data.usage.model_dump() if research_data.usage else None,
+                    perplexity_usage=asdict(research_data.usage) if research_data.usage else None,
                     gemini_usage_planning=None
                 )
                 

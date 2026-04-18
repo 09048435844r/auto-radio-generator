@@ -93,7 +93,7 @@ def save_comparison_session(
         
         # Extract usage data
         usage: LLMUsage = data["usage"]
-        input_rate, output_rate = calculator.get_llm_rate(usage.model_name)
+        input_rate, output_rate = calculator.get_llm_rate(usage.provider, usage.model_name)
         cost_usd = (
             (usage.input_tokens / 1_000_000) * input_rate +
             (usage.output_tokens / 1_000_000) * output_rate
