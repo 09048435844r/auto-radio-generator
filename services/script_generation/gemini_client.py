@@ -640,6 +640,7 @@ class GeminiClient(IScriptGenerator):
         current_segment_turns = []
         current_segment_id = None
         current_segment_type = "intro"  # Default type
+        assigned_ids: set[str] = set()  # Actually-assigned IDs to guarantee uniqueness
         
         for turn in script.sections:
             if turn.section:  # New segment starts
@@ -652,8 +653,19 @@ class GeminiClient(IScriptGenerator):
                         context_summary=""
                     ))
                 
-                # Start new segment
-                current_segment_id = turn.section
+                # Ensure unique segment_id by checking against already-assigned IDs.
+                # Use a double-underscore separator so that disambiguated IDs cannot
+                # collide with raw section names that happen to match the naive pattern
+                # (e.g., Gemini emitting both "deep_dive" and "deep_dive_2").
+                base_id = turn.section
+                new_id = base_id
+                counter = 2
+                while new_id in assigned_ids:
+                    new_id = f"{base_id}__{counter}"
+                    counter += 1
+                assigned_ids.add(new_id)
+                current_segment_id = new_id
+                
                 # Infer segment type from section name
                 if "intro" in turn.section.lower():
                     current_segment_type = "intro"

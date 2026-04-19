@@ -5,7 +5,6 @@ This is Phase A of the 3-phase rendering pipeline.
 """
 import logging
 from pathlib import Path
-from typing import Optional
 
 from rich.console import Console
 
@@ -63,12 +62,21 @@ class TimelineCalculator:
         timeline_entries = []
         
         for i, segment in enumerate(segments):
-            # Find corresponding audio timing
-            timing = self._find_timing_for_segment(segment, synthesis_result.segment_timings)
-            
-            if not timing:
-                logger.warning(f"No timing found for segment {segment.segment_id}, using estimated timing")
-                # Estimate timing based on position
+            # Index-based correspondence: segments[i] <-> segment_timings[i]
+            # This correctly handles duplicate segment_ids (e.g., multiple "deep_dive")
+            if i < len(synthesis_result.segment_timings):
+                timing = synthesis_result.segment_timings[i]
+                # Sanity check: warn if IDs diverge (does not block processing)
+                if timing.segment_id != segment.segment_id:
+                    logger.warning(
+                        f"segment_id mismatch at index {i}: "
+                        f"script='{segment.segment_id}' vs timing='{timing.segment_id}'. "
+                        f"Using timing by index (safe)."
+                    )
+            else:
+                logger.warning(
+                    f"No timing at index {i} for segment {segment.segment_id}, using estimated timing"
+                )
                 timing = self._estimate_timing(segment, i, len(segments), synthesis_result.total_duration_sec)
             
             # Get background image for this segment
@@ -121,16 +129,16 @@ class TimelineCalculator:
                 f"image: {bg_image.name})[/dim]"
             )
         
-        # Calculate total duration including pre-jingle pauses
-        # Count jingles (all segments except last)
+        # Total duration equals the synthesized audio duration.
+        # Pre-jingle pauses and jingle silences are already baked into combined_audio
+        # by VoicevoxClient._combine_audio_with_pauses; adding them again would
+        # double-count and cause the video timeline to exceed the audio track.
         jingle_count = sum(1 for entry in timeline_entries if entry.jingle_path is not None)
-        total_pause_duration = jingle_count * self.pre_jingle_pause_sec
-        total_duration_with_pauses = synthesis_result.total_duration_sec + total_pause_duration
+        total_duration_with_pauses = synthesis_result.total_duration_sec
         
         logger.debug(
             f"Timeline duration: audio={synthesis_result.total_duration_sec:.2f}s, "
-            f"jingles={jingle_count}, pre-pause={total_pause_duration:.2f}s, "
-            f"total={total_duration_with_pauses:.2f}s"
+            f"jingles={jingle_count}, total={total_duration_with_pauses:.2f}s"
         )
         
         # Get video settings from config
@@ -152,26 +160,6 @@ class TimelineCalculator:
         console.print(f"[green]✓ Timeline calculated: {len(timeline_entries)} segments[/green]")
         
         return timeline
-    
-    def _find_timing_for_segment(
-        self,
-        segment: ScriptSegment,
-        segment_timings: list[SegmentTiming]
-    ) -> Optional[SegmentTiming]:
-        """Find audio timing for a segment
-        
-        Args:
-            segment: Script segment
-            segment_timings: List of segment timings from audio synthesis
-        
-        Returns:
-            SegmentTiming: Matching timing, or None if not found
-        """
-        for timing in segment_timings:
-            if timing.segment_id == segment.segment_id:
-                return timing
-        
-        return None
     
     def _estimate_timing(
         self,

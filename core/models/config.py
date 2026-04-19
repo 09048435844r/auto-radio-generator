@@ -87,7 +87,7 @@ class AnthropicConfig(BaseModel):
 class OllamaConfig(BaseModel):
     """Ollama（ローカルLLM）設定"""
     model: str = "gpt-oss:20b-long"
-    base_url: str = "http://192.168.0.73:11434/v1"  # Production: Mac server IP
+    base_url: str = "http://192.168.0.73:11435/v1"  # Production: Mac server IP (via queue proxy on 11435)
     max_tokens: int = 16384  # Increased for long-form content
     temperature: float = 0.85
     costs: Dict[str, ModelCost] = Field(default_factory=dict)

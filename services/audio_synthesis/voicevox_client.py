@@ -248,40 +248,58 @@ class VoicevoxClient(IAudioSynthesizer):
         
         return synthesis_response.content
     
-    def _calculate_segment_pauses(self, segments: Optional[list]) -> dict[str, tuple[float, Optional[Path], Optional[float]]]:
+    def _calculate_segment_pauses(self, segments: Optional[list]) -> list[tuple[float, Optional[Path], Optional[float]]]:
         """Calculate pause duration after each segment based on jingle length
         
         Pause structure: [pre-jingle pause] + [jingle duration]
         - Pre-jingle pause: A brief breathing space before jingle starts (e.g., 0.5s)
         - Jingle duration: Full jingle playback time
         
+        Note: Returns a list indexed by segment position (not segment_id) to correctly
+        handle duplicate segment_ids (e.g., multiple "deep_dive" sections from Gemini).
+        
         Args:
             segments: List of ScriptSegment objects
         
         Returns:
-            dict[segment_id, (pause_sec, jingle_path, jingle_duration)]: Pause duration, jingle path, and jingle duration for each segment
+            list[(pause_sec, jingle_path, jingle_duration)]: One entry per segment.
+            The last segment always has (0.0, None, None) since no jingle plays after it.
+            Length equals len(segments).
         """
-        pauses = {}
+        # Return empty list for invalid inputs
+        if not segments:
+            return []
         
-        if not segments or not self.enable_jingles or not self.jingle_provider.is_available():
+        # Initialize with (0.0, None, None) for all segments
+        pauses: list[tuple[float, Optional[Path], Optional[float]]] = [
+            (0.0, None, None) for _ in segments
+        ]
+        
+        if not self.enable_jingles or not self.jingle_provider.is_available():
             return pauses
         
-        # Calculate pause for each segment (except the last one)
+        # Calculate pause for each segment (except the last one).
+        # Skip empty segments (num_turns == 0) defensively: there is no spoken
+        # content before which the jingle would play, so injecting a jingle here
+        # would desynchronize audio and visual timelines.
         for i, segment in enumerate(segments[:-1]):
+            if len(segment.turns) == 0:
+                console.print(
+                    f"[dim]  Segment[{i}] {segment.segment_id}: empty (num_turns=0), skip jingle[/dim]"
+                )
+                continue
             # Select random jingle and get its duration
             jingle_path = self.jingle_provider.get_random_jingle()
             if jingle_path:
                 jingle_duration = self.jingle_provider.get_jingle_duration(jingle_path)
                 # Pause = pre-jingle pause + full jingle duration (no overlap, perfect sync)
                 pause_sec = self.pre_jingle_pause_sec + jingle_duration
-                pauses[segment.segment_id] = (pause_sec, jingle_path, jingle_duration)
+                pauses[i] = (pause_sec, jingle_path, jingle_duration)
                 console.print(
-                    f"[dim]  Segment {segment.segment_id}: jingle={jingle_path.name} "
+                    f"[dim]  Segment[{i}] {segment.segment_id}: jingle={jingle_path.name} "
                     f"({jingle_duration:.2f}s), pre-pause={self.pre_jingle_pause_sec:.2f}s, "
                     f"total_pause={pause_sec:.2f}s[/dim]"
                 )
-            else:
-                pauses[segment.segment_id] = (0.0, None, None)
         
         return pauses
     
@@ -289,7 +307,7 @@ class VoicevoxClient(IAudioSynthesizer):
         self,
         phrase_data: list,
         pause_ms: int,
-        segment_pauses: dict[str, tuple[float, Optional[Path], Optional[float]]],
+        segment_pauses: list[tuple[float, Optional[Path], Optional[float]]],
         segments: Optional[list]
     ) -> tuple[AudioSegment, list]:
         """Combine audio with dynamic segment pauses and adjust phrase timestamps
@@ -297,7 +315,7 @@ class VoicevoxClient(IAudioSynthesizer):
         Args:
             phrase_data: List of (audio_segment, start_ms, end_ms, text, speaker) tuples
             pause_ms: Pause between individual phrases (250ms)
-            segment_pauses: Dict of {segment_id: (pause_sec, jingle_path, jingle_duration)}
+            segment_pauses: List of (pause_sec, jingle_path, jingle_duration) indexed by segment position
             segments: List of ScriptSegment objects
         
         Returns:
@@ -348,18 +366,19 @@ class VoicevoxClient(IAudioSynthesizer):
                 phrase_index += 1
             
             # Insert pause after segment (if not last segment)
-            pause_info = segment_pauses.get(segment.segment_id)
-            if pause_info:
-                pause_sec, jingle_path, jingle_duration = pause_info
+            # Use index-based access to handle duplicate segment_ids correctly
+            if seg_idx < len(segment_pauses):
+                pause_sec, jingle_path, jingle_duration = segment_pauses[seg_idx]
                 if pause_sec > 0:
                     pause_ms_seg = int(pause_sec * 1000)
                     combined += AudioSegment.silent(duration=pause_ms_seg)
                     cumulative_offset_ms += pause_ms_seg
                     
+                    jingle_name = jingle_path.name if jingle_path is not None else 'None'
+                    jingle_dur_str = f"{jingle_duration:.2f}s" if jingle_duration is not None else "0s"
                     console.print(
-                        f"[yellow]  → Inserted {pause_sec:.2f}s pause after {segment.segment_id} "
-                        f"(jingle: {jingle_path.name if jingle_path else 'None'}, "
-                        f"duration: {jingle_duration:.2f}s if jingle_duration else 0), "
+                        f"[yellow]  → Inserted {pause_sec:.2f}s pause after segment[{seg_idx}] {segment.segment_id} "
+                        f"(jingle: {jingle_name}, duration: {jingle_dur_str}), "
                         f"cumulative offset: {cumulative_offset_ms/1000:.2f}s[/yellow]"
                     )
         
