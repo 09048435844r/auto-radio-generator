@@ -353,3 +353,42 @@ class OllamaClient(IScriptGenerator):
             "Research planning is currently handled by GeminiClient. "
             "Use GeminiClient.create_research_plan() instead."
         )
+
+    def generate_packaging_prompt(self, theme: str, script_summary: str) -> str:
+        """packaging プロンプトを使用して YouTube メタデータ JSON を生成
+
+        他プロバイダー（Gemini/OpenAI/Anthropic）と同様のシグネチャで同期呼び出しされる
+        (workflow._generate_youtube_metadata から同期的にコールされるため)。
+        Ollama は通常 AsyncOpenAI を使うが、このメソッドは同期コンテキストで動作させるため
+        openai.OpenAI (sync client) を都度生成して Ollama の OpenAI 互換エンドポイントを叩く。
+
+        Args:
+            theme: テーマ（字幕・タイトル生成用）
+            script_summary: 台本の要約
+
+        Returns:
+            生成された YouTube メタデータ JSON 文字列
+        """
+        from openai import OpenAI  # sync client (avoids asyncio.run inside possibly-running loop)
+
+        packaging_prompt = self.prompt_manager.get_prompt("packaging", "default")
+        formatted_prompt = packaging_prompt.format(
+            theme=theme,
+            script_summary=script_summary,
+        )
+
+        # Use a synchronous OpenAI-compatible client against the Ollama endpoint.
+        # Creating a client per call is cheap and avoids mixing async/sync lifetimes.
+        sync_client = OpenAI(
+            base_url=self.base_url,
+            api_key="ollama",  # Dummy; Ollama does not require auth
+        )
+
+        response = sync_client.chat.completions.create(
+            model=self.model_name,
+            messages=[{"role": "user", "content": formatted_prompt}],
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+            response_format={"type": "json_object"},
+        )
+        return response.choices[0].message.content or ""

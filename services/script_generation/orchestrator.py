@@ -99,6 +99,7 @@ class ScriptOrchestrator(IScriptOrchestrator):
         avoid_topics: Optional[str] = None,
         excluded_topics: Optional[str] = None,
         progress_callback=None,
+        preset_curation: Optional["CurationResult"] = None,
     ) -> Script:
         """テーマとリサーチデータから長尺台本を生成する
 
@@ -108,6 +109,8 @@ class ScriptOrchestrator(IScriptOrchestrator):
             avoid_topics: 避けてほしい話題（Negative Prompt）
             excluded_topics: 第2部モード用、第1部コンテキスト（現バージョンでは未使用）
             progress_callback: 進捗報告オブジェクト（.log() / .progress() メソッドを持つ）
+            preset_curation: 事前に用意された CurationResult（HITL で人間が編集済みなど）。
+                             渡された場合は Step 1 の Curator 実行をスキップして直接使用する。
 
         Returns:
             Script: 統合された台本オブジェクト
@@ -122,18 +125,28 @@ class ScriptOrchestrator(IScriptOrchestrator):
         self._reset_usage()
 
         # --------------------------------------------------------
-        # Step 1: トピックキュレーション
+        # Step 1: トピックキュレーション（preset_curation があればスキップ）
         # --------------------------------------------------------
-        log("\n[cyan]--- Step 1/3: トピックキュレーション ---[/cyan]")
-        if progress_callback:
-            progress_callback.progress(0.50, "🔍 面白いトピックを選定中...")
+        if preset_curation is not None and preset_curation.topics:
+            # HITL で人間が編集済みのトピックを使う
+            log("\n[cyan]--- Step 1/3: トピックキュレーション（プリセット使用、Curator スキップ） ---[/cyan]")
+            if progress_callback:
+                progress_callback.progress(0.50, "🔍 人間編集済みトピックを使用...")
+            curation_result = preset_curation
+            log(f"  [green]✓ プリセット {len(curation_result.topics)} トピックを使用[/green]")
+            for i, topic in enumerate(curation_result.topics, 1):
+                log(f"    {i}. {topic.title} (推定{topic.estimated_turns}ターン, tone={topic.tone})")
+        else:
+            log("\n[cyan]--- Step 1/3: トピックキュレーション ---[/cyan]")
+            if progress_callback:
+                progress_callback.progress(0.50, "🔍 面白いトピックを選定中...")
 
-        curation_result = await self.curate_topics(
-            research_data,
-            target_count=self.orch_cfg.max_topics,
-            progress_log=log,
-        )
-        self._accumulate_usage(self.curator.last_usage)
+            curation_result = await self.curate_topics(
+                research_data,
+                target_count=self.orch_cfg.max_topics,
+                progress_log=log,
+            )
+            self._accumulate_usage(self.curator.last_usage)
 
         topic_titles = [t.title for t in curation_result.topics]
         log(f"  選定トピック: {', '.join(topic_titles)}")
@@ -153,12 +166,22 @@ class ScriptOrchestrator(IScriptOrchestrator):
             pct = 0.52 + (seg_num / total_segments) * 0.12
             progress_callback.progress(pct, "📝 導入部を生成中...")
 
+        # 施策②: 筆頭トピックの最重要ファクトを冒頭フック用に抽出
+        # Defensive: topics may be empty or key_facts may be missing/empty
+        hook_fact: Optional[str] = None
+        if curation_result.topics:
+            top_topic = curation_result.topics[0]
+            top_facts = getattr(top_topic, "key_facts", None) or []
+            if top_facts and isinstance(top_facts[0], str) and top_facts[0].strip():
+                hook_fact = top_facts[0].strip()
+
         intro = await self._generate_with_retry(
             lambda: self.generator.generate_intro(
                 theme=theme,
                 topic_titles=topic_titles,
                 context=context,
                 progress_log=log,
+                hook_fact=hook_fact,
             ),
             label="導入セグメント",
             log=log,
@@ -195,12 +218,36 @@ class ScriptOrchestrator(IScriptOrchestrator):
         if progress_callback:
             progress_callback.progress(0.63, "📝 まとめを生成中...")
 
+        # 施策②: 全トピックの key_facts と各セグメントの振り返りを総括素材として集約
+        # Defensive: topics/key_facts may be missing; guard with getattr and isinstance
+        all_key_facts: list[str] = []
+        for t in curation_result.topics or []:
+            facts = getattr(t, "key_facts", None) or []
+            for f in facts:
+                if isinstance(f, str) and f.strip():
+                    all_key_facts.append(f.strip())
+
+        # Build segments_recap from each previously generated segment's context_summary.
+        # We tag each line with the topic title so the LLM can ground its recap on concrete references.
+        recap_lines: list[str] = []
+        # all_segments at this point: [intro, deep_dive_1, ..., deep_dive_N]
+        for seg in all_segments:
+            summary = (getattr(seg, "context_summary", "") or "").strip()
+            if not summary:
+                continue
+            # Label by topic title when available (deep_dive), else by segment_type
+            label = getattr(seg, "topic_title", None) or getattr(seg, "segment_type", "segment")
+            recap_lines.append(f"- [{label}] {summary}")
+        segments_recap = "\n".join(recap_lines) if recap_lines else ""
+
         conclusion = await self._generate_with_retry(
             lambda: self.generator.generate_conclusion(
                 theme=theme,
                 topic_titles=topic_titles,
                 context=context,
                 progress_log=log,
+                all_key_facts=all_key_facts or None,
+                segments_recap=segments_recap or None,
             ),
             label="まとめセグメント",
             log=log,

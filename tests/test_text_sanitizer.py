@@ -114,6 +114,30 @@ def test_validate_chapter_format_invalid():
     ]
     assert validate_chapter_format(invalid_chapters) is False
 
+
+def test_validate_chapter_format_japanese_punctuation():
+    """日本語の一般的な記号を含むチャプターは有効と扱う（実運用で使われるパターン）"""
+    # 実運用で生成されたチャプタータイトルをそのまま使用
+    chapters_with_jp_punct = [
+        "00:00 1200万円の衝撃！？",          # 全角！？
+        "01:13 1200万vs25万のAI格差",       # 半角記号のみ
+        "02:34 AI時代のクリエイティブ格差",  # 問題なし
+        "04:52 AIは魔法の杖か、創造性の泥棒か",  # 全角読点
+        "08:20 AIと歩む未来の描き方",        # 問題なし
+    ]
+    assert validate_chapter_format(chapters_with_jp_punct) is True
+
+
+def test_validate_chapter_format_extended_punctuation():
+    """CJK記号類（「」『』〜・。…）を含むチャプターも有効と扱う"""
+    chapters = [
+        "00:00 「衝撃の真実」を暴く",
+        "02:30 『独占崩壊』の舞台裏",
+        "05:00 さらに深く掘り下げる…",
+        "07:15 A社・B社の対立構造",
+    ]
+    assert validate_chapter_format(chapters) is True
+
 def test_filter_emojis_allowed():
     """許可された絵文字の保持"""
     text = "📄 タイトル 🔗 URL"

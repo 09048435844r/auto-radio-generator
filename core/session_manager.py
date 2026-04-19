@@ -10,6 +10,7 @@ from typing import Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from core.models.artifacts import ResearchBrief
     from core.models.script import RadioScriptArtifact
+    from core.models.curation import CurationResult
 
 
 class SessionManager:
@@ -142,7 +143,51 @@ class SessionManager:
     def has_script_artifact(self) -> bool:
         """Check if RadioScriptArtifact exists"""
         return self.get_script_artifact_path().exists()
-    
+
+    # ------------------------------------------------------------------
+    # CurationResult persistence (Phase 2 HITL 施策⑤)
+    # ------------------------------------------------------------------
+
+    def get_curation_result_path(self) -> Path:
+        """Get path to CurationResult file (human-editable topic selection)."""
+        return self.session_dir / "curation_result.json"
+
+    def save_curation_result(self, curation: "CurationResult") -> Path:
+        """Save CurationResult to file (typically after human editing in HITL).
+
+        Args:
+            curation: CurationResult instance
+
+        Returns:
+            Path to saved file
+        """
+        path = self.get_curation_result_path()
+        path.write_text(curation.model_dump_json(indent=2), encoding="utf-8")
+        return path
+
+    def load_curation_result(self) -> "CurationResult":
+        """Load CurationResult from file.
+
+        Returns:
+            CurationResult instance
+
+        Raises:
+            FileNotFoundError: If curation_result.json does not exist
+        """
+        from core.models.curation import CurationResult
+
+        path = self.get_curation_result_path()
+        if not path.exists():
+            raise FileNotFoundError(
+                f"CurationResult not found: {path}\n"
+                f"Please run curation phase first (Gate 2a in HITL)."
+            )
+        return CurationResult.model_validate_json(path.read_text(encoding="utf-8"))
+
+    def has_curation_result(self) -> bool:
+        """Check if CurationResult exists (i.e., user already ran Gate 2a)."""
+        return self.get_curation_result_path().exists()
+
     def get_session_status(self) -> dict:
         """Get current session status
         
@@ -153,5 +198,6 @@ class SessionManager:
             "session_id": self.session_id,
             "session_dir": str(self.session_dir),
             "research_completed": self.has_research_brief(),
+            "curation_completed": self.has_curation_result(),
             "scripting_completed": self.has_script_artifact(),
         }

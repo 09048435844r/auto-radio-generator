@@ -14,11 +14,13 @@ logger = logging.getLogger(__name__)
 from core.session_manager import SessionManager
 from core.models.artifacts import ResearchBrief
 from core.models.script import RadioScriptArtifact, Script, DialogueTurn
+from core.models.curation import CurationResult, CuratedTopic
 from core.models import load_config
 from services.pipeline import (
     execute_research_phase,
+    execute_curation_only,
     execute_scripting_phase,
-    execute_production_phase
+    execute_production_phase,
 )
 from workflow import ProgressCallback
 
@@ -168,25 +170,293 @@ def _show_research_preview(
         return gr.update(visible=False), gr.update(interactive=False)
 
 
+# ----------------------------------------------------------------------
+# Gate 2a: Topic Curation handlers (Phase 2 HITL 施策⑤)
+# ----------------------------------------------------------------------
+
+def _curation_to_dataframe(curation: CurationResult) -> List[List]:
+    """Convert CurationResult to Dataframe rows (editable columns only).
+
+    Columns: [#, タイトル, 選定理由, トーン, 推定ターン, 優先度]
+    """
+    rows: List[List] = []
+    for i, t in enumerate(curation.topics, 1):
+        rows.append([
+            i,
+            t.title or "",
+            getattr(t, "selection_reason", "") or "",
+            t.tone or "",
+            int(t.estimated_turns or 30),
+            int(t.priority or i),
+        ])
+    return rows
+
+
+def _dataframe_to_curation(
+    topics_df,
+    original: Optional[CurationResult],
+) -> CurationResult:
+    """Merge Dataframe edits back into CurationResult.
+
+    Preserves `content` and `key_facts` from the original (not in Dataframe),
+    while applying edits from UI for title/selection_reason/tone/turns/priority.
+
+    Defensive: accepts List[List] or pandas.DataFrame.
+    """
+    # Normalize to list-of-lists
+    try:
+        import pandas as pd  # noqa: F401
+        if hasattr(topics_df, "values") and hasattr(topics_df, "columns"):
+            topics_df = topics_df.values.tolist()
+    except ImportError:
+        pass
+
+    original_topics = (original.topics if original else []) or []
+    new_topics: List[CuratedTopic] = []
+    for idx, row in enumerate(topics_df or []):
+        if not row or len(row) < 2:
+            continue
+        title = str(row[1]).strip() if row[1] is not None else ""
+        if not title:
+            # Skip empty rows (user may have removed a topic)
+            continue
+        selection_reason = str(row[2]).strip() if len(row) > 2 and row[2] is not None else ""
+        tone = str(row[3]).strip() if len(row) > 3 and row[3] is not None else "解説"
+        try:
+            estimated_turns = int(row[4]) if len(row) > 4 and row[4] not in (None, "") else 30
+        except (TypeError, ValueError):
+            estimated_turns = 30
+        try:
+            priority = int(row[5]) if len(row) > 5 and row[5] not in (None, "") else (idx + 1)
+        except (TypeError, ValueError):
+            priority = idx + 1
+
+        # Preserve content / key_facts from original if available at same index
+        base = original_topics[idx] if idx < len(original_topics) else None
+        content = base.content if base else ""
+        key_facts = list(base.key_facts) if base and base.key_facts else []
+
+        new_topics.append(CuratedTopic(
+            title=title,
+            content=content,
+            priority=priority,
+            estimated_turns=estimated_turns,
+            tone=tone or "解説",
+            key_facts=key_facts,
+            selection_reason=selection_reason,
+        ))
+
+    # Sort by priority (ascending) to keep downstream ordering consistent
+    new_topics.sort(key=lambda t: t.priority)
+
+    return CurationResult(
+        topics=new_topics,
+        curator_reasoning=(original.curator_reasoning if original else "") or "",
+    )
+
+
+async def hitl_execute_curation(
+    session_state: str,
+    provider: str,
+    progress=gr.Progress(),
+) -> Tuple[str, List, str]:
+    """Gate 2a: Run Curator only and return topics for human editing.
+
+    Returns:
+        (progress_text, topics_df_rows, curation_json_text)
+    """
+    if not session_state:
+        return (
+            "❌ エラー: セッションが見つかりません。先にリサーチを完了してください。",
+            [],
+            "",
+        )
+
+    try:
+        config = load_config(PROJECT_ROOT)
+        session_manager = SessionManager(
+            project_root=PROJECT_ROOT,
+            session_id=session_state,
+        )
+
+        # Need a ResearchBrief to run Curator
+        if not session_manager.has_research_brief():
+            return (
+                "❌ エラー: このセッションに research_brief.json がありません。",
+                [],
+                "",
+            )
+        research_brief = session_manager.load_research_brief()
+
+        progress(0.1, desc="Curator 起動中...")
+
+        log_messages: List[str] = []
+
+        def log_cb(msg: str):
+            log_messages.append(msg)
+
+        def prog_cb(ratio: float, description: str):
+            progress(ratio, desc=description)
+
+        callbacks = ProgressCallback(log_callback=log_cb, progress_callback=prog_cb)
+
+        curation_result = await execute_curation_only(
+            research_brief=research_brief,
+            session_manager=session_manager,
+            config=config,
+            provider=provider,
+            callbacks=callbacks,
+        )
+
+        progress(0.95, desc="エディタ準備中...")
+        topics_df = _curation_to_dataframe(curation_result)
+        curation_json = curation_result.model_dump_json(indent=2)
+
+        progress_text = f"セッションID: {session_manager.session_id}\n"
+        progress_text += "\n".join(log_messages[-10:])
+        progress_text += f"\n\n✅ Curator 完了: {len(curation_result.topics)} トピック選定"
+
+        progress(1.0, desc="完了!")
+        return progress_text, topics_df, curation_json
+
+    except Exception as e:
+        import traceback
+        logger.error(f"Curation execution failed: {e}")
+        logger.error(traceback.format_exc())
+        return (
+            f"❌ Curator 実行中にエラーが発生しました: {e}",
+            [],
+            "",
+        )
+
+
+def _show_curation_editor(
+    progress_text: str,
+    topics_df: List,
+    curation_json: str,
+) -> gr.update:
+    """Show curation editor section after data is populated.
+
+    Called via .then() to avoid the Gradio visibility + child-value loss bug
+    (same pattern as _show_research_preview).
+    """
+    # Show only on success (non-error progress text AND non-empty topics)
+    if progress_text and "❌" not in progress_text and topics_df:
+        return gr.update(visible=True)
+    return gr.update(visible=False)
+
+
+def hitl_save_curation_edits(
+    session_state: str,
+    topics_df,
+    curation_json: str,
+) -> str:
+    """Save edited CurationResult back to session.
+
+    Priority: If `curation_json` has been edited and is valid JSON, use it as the
+    source of truth (advanced editor takes precedence). Otherwise rebuild from
+    the Dataframe edits while preserving content/key_facts from the saved file.
+    """
+    if not session_state:
+        return "❌ エラー: セッションが見つかりません。"
+
+    try:
+        session_manager = SessionManager(
+            project_root=PROJECT_ROOT,
+            session_id=session_state,
+        )
+
+        # Load the on-disk curation (if any) for preservation of non-editable fields
+        existing: Optional[CurationResult] = None
+        if session_manager.has_curation_result():
+            try:
+                existing = session_manager.load_curation_result()
+            except Exception as e:
+                logger.warning(f"Could not load existing curation_result.json: {e}")
+
+        merged: Optional[CurationResult] = None
+
+        # Attempt 1: JSON editor takes priority if user edited it
+        if curation_json and curation_json.strip():
+            try:
+                merged = CurationResult.model_validate_json(curation_json)
+            except Exception as e:
+                logger.info(
+                    f"JSON editor content invalid, falling back to Dataframe merge: {e}"
+                )
+
+        # Attempt 2: Build from Dataframe (merge with existing to preserve content)
+        if merged is None:
+            merged = _dataframe_to_curation(topics_df, existing)
+
+        if not merged.topics:
+            return "❌ エラー: 保存するトピックがありません。"
+
+        session_manager.save_curation_result(merged)
+        return (
+            f"✅ 編集内容を保存しました ({datetime.now().strftime('%H:%M:%S')}) - "
+            f"{len(merged.topics)} トピック"
+        )
+
+    except Exception as e:
+        import traceback
+        logger.error(f"Curation save failed: {e}")
+        logger.error(traceback.format_exc())
+        return f"❌ 保存中にエラーが発生しました: {e}"
+
+
+def hitl_approve_curation(session_state: str) -> Tuple[gr.update, str]:
+    """Approve edited curation and open Gate 2.
+
+    Returns:
+        (gate2_accordion_update, status_message)
+    """
+    if not session_state:
+        return gr.update(open=False), "❌ エラー: セッションが見つかりません。"
+
+    try:
+        session_manager = SessionManager(
+            project_root=PROJECT_ROOT,
+            session_id=session_state,
+        )
+        if not session_manager.has_curation_result():
+            return gr.update(open=False), (
+                "❌ エラー: 先にトピック選定（および保存）を完了してください。"
+            )
+    except Exception as e:
+        return gr.update(open=False), f"❌ セッション確認エラー: {e}"
+
+    return gr.update(open=True), (
+        "✅ Gate 2 を開放しました。Curator はスキップされ、編集済みトピックで台本が生成されます。"
+    )
+
+
 def hitl_approve_research(
     session_state: str
-) -> Tuple[gr.update, str]:
-    """Approve research and open Gate 2
-    
+) -> Tuple[gr.update, gr.update, str]:
+    """Approve research and open Gate 2a (Topic Curation, optional) + Gate 2 (Script).
+
+    Both accordions are opened so users can either edit topics via Gate 2a
+    or skip straight to Gate 2 for the traditional flow.
+
     Args:
         session_state: Current session ID
-        
+
     Returns:
-        Tuple of (gate2_accordion_update, status_message)
+        Tuple of (gate2a_accordion_update, gate2_accordion_update, status_message)
     """
     print(f"[DEBUG] hitl_approve_research called with session_state: '{session_state}'")
-    
+
     if not session_state:
         print("[DEBUG] session_state is empty, returning error")
-        return gr.update(open=False), "❌ エラー: セッションが見つかりません。"
-    
-    print(f"[DEBUG] Opening Gate 2 for session: {session_state}")
-    return gr.update(open=True), f"✅ Gate 2を開放しました。台本生成を開始できます。"
+        return gr.update(open=False), gr.update(open=False), "❌ エラー: セッションが見つかりません。"
+
+    print(f"[DEBUG] Opening Gate 2a + Gate 2 for session: {session_state}")
+    return (
+        gr.update(open=True),
+        gr.update(open=True),
+        "✅ Gate 2a（トピック選定・オプショナル）/ Gate 2（台本生成）を開放しました。",
+    )
 
 
 def hitl_redo_research() -> Tuple[gr.update, str]:

@@ -116,7 +116,8 @@ class TopicCurator:
             f'      "priority": 1,\n'
             f'      "estimated_turns": 30,\n'
             f'      "tone": "驚き",\n'
-            f'      "key_facts": ["ファクト1", "ファクト2", "ファクト3"]\n'
+            f'      "key_facts": ["ファクト1", "ファクト2", "ファクト3"],\n'
+            f'      "selection_reason": "なぜこのトピックが面白いのか80〜120文字で（切り口の核心を具体的に）"\n'
             f'    }}\n'
             f'  ],\n'
             f'  "curator_reasoning": "選定理由（デバッグ用、改行なし）"\n'
@@ -199,6 +200,8 @@ class TopicCurator:
                 estimated_turns=t.get("estimated_turns", 30),
                 tone=t.get("tone", "解説"),
                 key_facts=t.get("key_facts", []),
+                # Backward compatible: older LLM responses may not include selection_reason
+                selection_reason=t.get("selection_reason", "") or "",
             ))
 
         # 優先度でソート

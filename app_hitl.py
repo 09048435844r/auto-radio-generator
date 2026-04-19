@@ -118,6 +118,85 @@ def create_hitl_tab(assets: dict) -> dict[str, object]:
                     variant="secondary"
                 )
     
+    # ========== Gate 2a: Topic Curation (Phase 2 HITL 施策⑤) ==========
+    with gr.Accordion("🎯 Gate 2a: Topic Curation (オプショナル)", open=False) as gate2a_accordion:
+        gr.Markdown("""
+        ### トピック選定フェーズ（Human-in-the-Loop）
+        
+        Curator が選定したトピックを**人間が編集**できます。タイトル・選定理由・トーン・キーファクトを直接修正し、
+        編集済みのトピックで台本を生成させることができます。
+        
+        **このステップはスキップ可能です**。スキップした場合は Gate 2 で Curator が自動実行されます。
+        """)
+
+        with gr.Row():
+            hitl_curation_provider_dropdown = gr.Dropdown(
+                label="LLMプロバイダー（Curator用）",
+                choices=["gemini", "openai", "anthropic", "ollama"],
+                value="gemini",
+                scale=1,
+            )
+            hitl_curation_run_btn = gr.Button(
+                "🔍 トピック候補を選定",
+                variant="primary",
+                size="lg",
+                scale=2,
+            )
+
+        hitl_curation_progress = gr.Textbox(
+            label="進捗",
+            interactive=False,
+            lines=3,
+        )
+
+        # Editor section (initially hidden)
+        with gr.Column(visible=False) as hitl_curation_editor_section:
+            gr.Markdown("### ✏️ トピック編集")
+            gr.Markdown(
+                "**編集可能な列**: タイトル / 選定理由 / トーン / 推定ターン / 優先度。"
+                "key_facts と content は JSON 編集で調整してください。"
+            )
+
+            hitl_curation_topics_editor = gr.Dataframe(
+                label="選定されたトピック（編集可）",
+                headers=["#", "タイトル", "選定理由", "トーン", "推定ターン", "優先度"],
+                datatype=["number", "str", "str", "str", "number", "number"],
+                col_count=(6, "fixed"),
+                row_count=(3, "dynamic"),
+                interactive=True,
+                wrap=True,
+                value=[],
+            )
+
+            with gr.Accordion("🔧 詳細編集 (key_facts / content) - JSON エディタ", open=False):
+                hitl_curation_json_editor = gr.Code(
+                    label="CurationResult JSON（直接編集可）",
+                    language="json",
+                    lines=20,
+                    interactive=True,
+                )
+
+            with gr.Row():
+                hitl_curation_save_btn = gr.Button(
+                    "💾 編集内容を保存",
+                    variant="primary",
+                    size="lg",
+                )
+                hitl_curation_approve_btn = gr.Button(
+                    "✅ このトピックで台本生成へ進む",
+                    variant="primary",
+                    size="lg",
+                )
+                hitl_curation_reset_btn = gr.Button(
+                    "🔄 Curator を再実行",
+                    variant="secondary",
+                )
+
+            hitl_curation_save_status = gr.Textbox(
+                label="保存ステータス",
+                interactive=False,
+            )
+
     # ========== Gate 2: Script Generation & Editing ==========
     with gr.Accordion("📝 Gate 2: Script Generation & Editing", open=False) as gate2_accordion:
         gr.Markdown("""
@@ -322,6 +401,19 @@ def create_hitl_tab(assets: dict) -> dict[str, object]:
         "hitl_research_approve_btn": hitl_research_approve_btn,
         "hitl_research_redo_btn": hitl_research_redo_btn,
         
+        # Gate 2a components (Topic Curation - Phase 2 HITL 施策⑤)
+        "gate2a_accordion": gate2a_accordion,
+        "hitl_curation_provider_dropdown": hitl_curation_provider_dropdown,
+        "hitl_curation_run_btn": hitl_curation_run_btn,
+        "hitl_curation_progress": hitl_curation_progress,
+        "hitl_curation_editor_section": hitl_curation_editor_section,
+        "hitl_curation_topics_editor": hitl_curation_topics_editor,
+        "hitl_curation_json_editor": hitl_curation_json_editor,
+        "hitl_curation_save_btn": hitl_curation_save_btn,
+        "hitl_curation_approve_btn": hitl_curation_approve_btn,
+        "hitl_curation_reset_btn": hitl_curation_reset_btn,
+        "hitl_curation_save_status": hitl_curation_save_status,
+
         # Gate 2 components
         "gate2_accordion": gate2_accordion,
         "hitl_provider_dropdown": hitl_provider_dropdown,

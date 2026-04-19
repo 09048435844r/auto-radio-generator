@@ -49,6 +49,11 @@ from app_hitl_handlers import (
     hitl_regenerate_script,
     _show_script_editor,
     _show_production_output,
+    # Gate 2a (Topic Curation) - Phase 2 HITL 施策⑤
+    hitl_execute_curation,
+    hitl_save_curation_edits,
+    hitl_approve_curation,
+    _show_curation_editor,
 )
 import json
 import os
@@ -2616,6 +2621,7 @@ def create_ui() -> gr.Blocks:
             fn=hitl_approve_research,
             inputs=[hitl_components["hitl_session_state"]],
             outputs=[
+                hitl_components["gate2a_accordion"],
                 hitl_components["gate2_accordion"],
                 hitl_components["hitl_research_progress"]
             ]
@@ -2660,6 +2666,71 @@ def create_ui() -> gr.Blocks:
             ]
         )
         
+        # -------------------------------------------------------------
+        # Gate 2a: Topic Curation (Phase 2 HITL 施策⑤)
+        # Two-step pattern to avoid Gradio bug with Column visibility
+        # -------------------------------------------------------------
+        _curation_outputs = [
+            hitl_components["hitl_curation_progress"],
+            hitl_components["hitl_curation_topics_editor"],
+            hitl_components["hitl_curation_json_editor"],
+        ]
+        hitl_components["hitl_curation_run_btn"].click(
+            fn=hitl_execute_curation,
+            inputs=[
+                hitl_components["hitl_session_state"],
+                hitl_components["hitl_curation_provider_dropdown"],
+            ],
+            outputs=_curation_outputs,
+        ).then(
+            fn=_show_curation_editor,
+            inputs=_curation_outputs,
+            outputs=[hitl_components["hitl_curation_editor_section"]],
+        )
+
+        # Re-run Curator (same as run button)
+        hitl_components["hitl_curation_reset_btn"].click(
+            fn=hitl_execute_curation,
+            inputs=[
+                hitl_components["hitl_session_state"],
+                hitl_components["hitl_curation_provider_dropdown"],
+            ],
+            outputs=_curation_outputs,
+        ).then(
+            fn=_show_curation_editor,
+            inputs=_curation_outputs,
+            outputs=[hitl_components["hitl_curation_editor_section"]],
+        )
+
+        # Save edited topics to session (curation_result.json)
+        hitl_components["hitl_curation_save_btn"].click(
+            fn=hitl_save_curation_edits,
+            inputs=[
+                hitl_components["hitl_session_state"],
+                hitl_components["hitl_curation_topics_editor"],
+                hitl_components["hitl_curation_json_editor"],
+            ],
+            outputs=[hitl_components["hitl_curation_save_status"]],
+        )
+
+        # Approve curation: save then open Gate 2
+        hitl_components["hitl_curation_approve_btn"].click(
+            fn=hitl_save_curation_edits,
+            inputs=[
+                hitl_components["hitl_session_state"],
+                hitl_components["hitl_curation_topics_editor"],
+                hitl_components["hitl_curation_json_editor"],
+            ],
+            outputs=[hitl_components["hitl_curation_save_status"]],
+        ).then(
+            fn=hitl_approve_curation,
+            inputs=[hitl_components["hitl_session_state"]],
+            outputs=[
+                hitl_components["gate2_accordion"],
+                hitl_components["hitl_curation_save_status"],
+            ],
+        )
+
         # Gate 2: Scripting (Two-step pattern to avoid Gradio bug)
         hitl_components["hitl_script_generate_btn"].click(
             fn=hitl_execute_scripting,

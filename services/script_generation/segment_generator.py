@@ -87,6 +87,7 @@ class SegmentGenerator:
         topic_titles: list[str],
         context: str = "",
         progress_log=None,
+        hook_fact: Optional[str] = None,
     ) -> ScriptSegment:
         """番組導入部セグメントを生成
 
@@ -95,11 +96,13 @@ class SegmentGenerator:
             topic_titles: これから扱うトピックのタイトル一覧
             context: 前セグメントの文脈要約（通常は空）
             progress_log: 進捗ログ関数
+            hook_fact: 冒頭フックに使う具体事実（Curator選定の筆頭トピックの key_facts[0] 相当）。
+                       無値の場合は従来の扱い（タイトル列挙のみ）にフォールバック
         """
         log = progress_log or (lambda msg: console.print(msg))
         log(f"[cyan]📝 導入セグメント生成中...[/cyan]")
 
-        user_prompt = self._build_intro_user_prompt(theme, topic_titles, context)
+        user_prompt = self._build_intro_user_prompt(theme, topic_titles, context, hook_fact)
 
         if self.two_phase_enabled:
             # 2段階生成モード
@@ -203,6 +206,8 @@ class SegmentGenerator:
         topic_titles: list[str],
         context: str,
         progress_log=None,
+        all_key_facts: Optional[list[str]] = None,
+        segments_recap: Optional[str] = None,
     ) -> ScriptSegment:
         """まとめセグメントを生成
 
@@ -211,11 +216,15 @@ class SegmentGenerator:
             topic_titles: 今日扱ったトピックのタイトル一覧
             context: 前セグメントの文脈要約
             progress_log: 進捗ログ関数
+            all_key_facts: 全トピックの key_facts をフラット化したリスト（総括時の材料）。None/空の場合は使わない
+            segments_recap: 各セグメントの context_summary を連結した振り返りテキスト。None/空の場合は使わない
         """
         log = progress_log or (lambda msg: console.print(msg))
         log(f"[cyan]📝 まとめセグメント生成中...[/cyan]")
 
-        user_prompt = self._build_conclusion_user_prompt(theme, topic_titles)
+        user_prompt = self._build_conclusion_user_prompt(
+            theme, topic_titles, all_key_facts, segments_recap
+        )
 
         if self.two_phase_enabled:
             # 2段階生成モード
@@ -258,11 +267,23 @@ class SegmentGenerator:
     # ------------------------------------------------------------------
 
     def _build_intro_user_prompt(
-        self, theme: str, topic_titles: list[str], context: str
+        self,
+        theme: str,
+        topic_titles: list[str],
+        context: str,
+        hook_fact: Optional[str] = None,
     ) -> str:
-        topics_preview = "\n".join(f"- {t}" for t in topic_titles)
+        # Defensive: topic_titles may be None or empty in edge cases
+        titles = topic_titles or []
+        topics_preview = "\n".join(f"- {t}" for t in titles) if titles else "（トピック未定）"
         prompt = f"## テーマ\n{theme}\n\n"
         prompt += f"## 今日深掘りするトピック（予告用）\n{topics_preview}\n\n"
+        # 新規: 冒頭フックとなる具体事実を渡す（有効な場合のみ）
+        if hook_fact and isinstance(hook_fact, str) and hook_fact.strip():
+            prompt += (
+                f"## 冒頭フック事実（具体事実で視聴者の興味を掴むための材料）\n"
+                f"{hook_fact.strip()}\n\n"
+            )
         if context:
             prompt += f"## 引き継ぎ文脈\n{context}\n\n"
         prompt += "上記の情報をもとに、番組の導入部（イントロ）を生成してください。"
@@ -274,6 +295,14 @@ class SegmentGenerator:
         if topic.key_facts:
             facts = "\n".join(f"- {f}" for f in topic.key_facts)
             prompt += f"## 必ず会話に織り込むべきキーファクト\n{facts}\n\n"
+        # 新規: Curator がトピックごとに記述した selection_reason を流す
+        # 後方互換性: 旧バージョンの CuratedTopic データに存在しない可能性があるため getattr で空文字列にフォールバック
+        selection_reason = getattr(topic, "selection_reason", "") or ""
+        if selection_reason.strip():
+            prompt += (
+                f"## 選定理由（切り口の指針）\n"
+                f"Curatorがこのトピックを選んだ理由: {selection_reason.strip()}\n\n"
+            )
         prompt += f"## 推奨トーン\n{topic.tone}\n\n"
         prompt += (
             "上記のトピックについて、深掘りセグメントを生成してください。\n"
@@ -282,11 +311,33 @@ class SegmentGenerator:
         return prompt
 
     def _build_conclusion_user_prompt(
-        self, theme: str, topic_titles: list[str]
+        self,
+        theme: str,
+        topic_titles: list[str],
+        all_key_facts: Optional[list[str]] = None,
+        segments_recap: Optional[str] = None,
     ) -> str:
-        topics_list = "\n".join(f"- {t}" for t in topic_titles)
+        # Defensive: topic_titles may be None in edge cases
+        titles = topic_titles or []
+        topics_list = "\n".join(f"- {t}" for t in titles) if titles else "（トピック情報なし）"
         prompt = f"## テーマ\n{theme}\n\n"
         prompt += f"## 今日扱ったトピック\n{topics_list}\n\n"
+        # 新規: 全トピックの key_facts を渡す（有効な場合のみ）
+        if all_key_facts:
+            # Defensive: filter out non-string / empty entries
+            facts = [f.strip() for f in all_key_facts if isinstance(f, str) and f.strip()]
+            if facts:
+                facts_text = "\n".join(f"- {f}" for f in facts)
+                prompt += (
+                    f"## 全トピックのキーファクト（総括に使う数字・固有名詞）\n"
+                    f"{facts_text}\n\n"
+                )
+        # 新規: 各セグメントの振り返りを渡す（有効な場合のみ）
+        if segments_recap and isinstance(segments_recap, str) and segments_recap.strip():
+            prompt += (
+                f"## 各セグメントの振り返り\n"
+                f"{segments_recap.strip()}\n\n"
+            )
         prompt += "上記をふまえて、番組のまとめとエンディングを生成してください。"
         return prompt
 

@@ -8,7 +8,25 @@ from urllib.parse import urlparse
 CONTROL_CHARS = re.compile(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]')
 
 # YouTubeチャプター認識を妨げる可能性のある文字
-CHAPTER_PROBLEMATIC = re.compile(r'[^\w\s\-:().\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]')
+# 許可範囲:
+#   - 英数字/_、空白、-、:、()、.
+#   - CJK記号類 U+3000-U+303F（、。「」『』〜・など）
+#   - ひらがな U+3040-U+309F
+#   - カタカナ U+30A0-U+30FF（ー・など含む）
+#   - CJK統合漢字 U+4E00-U+9FFF
+#   - 全角感嘆符！(U+FF01) / 全角疑問符？(U+FF1F)
+#   - 三点リーダ … (U+2026)
+# これらはYouTubeチャプターで実用上問題なく認識されるため許容する
+CHAPTER_PROBLEMATIC = re.compile(
+    r'[^\w\s\-:().'
+    r'\u3000-\u303F'
+    r'\u3040-\u309F'
+    r'\u30A0-\u30FF'
+    r'\u4E00-\u9FFF'
+    r'\uFF01\uFF1F'
+    r'\u2026'
+    r']'
+)
 
 # 許可する絵文字（YouTubeで安全に表示されるもの）
 ALLOWED_EMOJIS = {'📄', '🔗', '🎵', '🎬', '📝', '🎯', '🎪', '🎭'}

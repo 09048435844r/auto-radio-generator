@@ -22,6 +22,78 @@ from workflow import (
 )
 
 
+async def execute_curation_only(
+    research_brief: ResearchBrief,
+    session_manager: SessionManager,
+    config: AppConfig,
+    provider: str = "gemini",
+    callbacks: Optional[ProgressCallback] = None,
+):
+    """Curator 単独実行: リサーチ結果からトピックを選定し CurationResult を session に保存する
+
+    HITL (Gate 2a) で使用する。ユーザーが編集する前の生の Curator 出力を取得する。
+
+    Args:
+        research_brief: ResearchBrief from research phase
+        session_manager: SessionManager instance (saves curation_result.json)
+        config: Application config
+        provider: LLM provider
+        callbacks: Progress callback
+
+    Returns:
+        CurationResult: トピック選定結果（session にも保存済み）
+    """
+    from services.script_generation.topic_curator import TopicCurator
+    from core.models.research import ResearchSource
+
+    cb = callbacks or ProgressCallback()
+
+    # Build ExecutionContext just to get the LLM port wiring (same as scripting_phase)
+    context = ExecutionContext(
+        provider=provider,
+        config=config,
+        log_callback=cb.log if cb else None,
+        progress_callback=cb.progress if cb else None,
+        use_orchestrator=True,
+        enable_research=True,
+        session_dir=session_manager.session_dir,
+    )
+
+    # Convert ResearchBrief to ResearchResult for the curator
+    research_sources = [
+        ResearchSource.model_validate(source_dict)
+        for source_dict in research_brief.research_sources
+    ]
+    research_data = ResearchResult(
+        topic=research_brief.theme,
+        mode=research_brief.research_mode,
+        content=research_brief.research_content,
+        sources=research_sources,
+        usage=None,
+    )
+
+    cb.log(f"\n== Curation Only Phase: TopicCurator ==")
+    cb.log(f"Theme: {research_brief.theme}")
+    cb.log(f"Provider: {provider}")
+    cb.progress(0.10, "🔍 トピック選定中...")
+
+    # Create curator using the curator-specific LLM port from ExecutionContext
+    llm_port = context.create_llm_port(role="curator") if hasattr(context, "create_llm_port") else context.create_llm_port()
+    curator = TopicCurator(llm_port, config)
+
+    curation_result = await curator.curate_topics(
+        research_data=research_data,
+        progress_log=cb.log,
+    )
+
+    # Persist to session
+    saved_path = session_manager.save_curation_result(curation_result)
+    cb.log(f"✓ CurationResult saved: {saved_path}")
+    cb.progress(1.0, "✅ トピック選定完了")
+
+    return curation_result
+
+
 async def execute_scripting_phase(
     research_brief: ResearchBrief,
     session_manager: SessionManager,
@@ -29,7 +101,8 @@ async def execute_scripting_phase(
     excluded_topics: Optional[str] = None,
     avoid_topics: Optional[str] = None,
     provider: str = "gemini",
-    callbacks: Optional[ProgressCallback] = None
+    callbacks: Optional[ProgressCallback] = None,
+    preset_curation=None,
 ) -> RadioScriptArtifact:
     """Execute scripting phase and generate RadioScriptArtifact
     
@@ -41,6 +114,9 @@ async def execute_scripting_phase(
         avoid_topics: Topics to avoid (Negative Prompt, optional)
         provider: LLM provider ("gemini" | "openai" | "anthropic" | "ollama")
         callbacks: Progress callback
+        preset_curation: Optional CurationResult from HITL (human-edited topics).
+                         If provided, skip Curator invocation inside orchestrator.
+                         If None and session has curation_result.json, it will be loaded automatically.
         
     Returns:
         RadioScriptArtifact: Scripting phase output artifact
@@ -88,7 +164,21 @@ async def execute_scripting_phase(
     if context.use_orchestrator and research_data is not None:
         # Hierarchical Agentic Workflow with ExecutionContext
         from services.script_generation.orchestrator import ScriptOrchestrator
-        
+
+        # HITL Gate 2a support: auto-load curation_result.json if present and not explicitly passed
+        effective_preset = preset_curation
+        if effective_preset is None and session_manager.has_curation_result():
+            try:
+                effective_preset = session_manager.load_curation_result()
+                cb.log(
+                    f"[Orchestrator] Auto-loaded human-edited CurationResult from session "
+                    f"({len(effective_preset.topics)} topics); Curator will be skipped"
+                )
+            except Exception as e:
+                # Defensive: if load fails, fall through to normal Curator execution
+                cb.log(f"[WARN] Failed to load curation_result.json ({e}); running Curator normally")
+                effective_preset = None
+
         cb.log(f"[Orchestrator] Long-form script generation with {context.provider} (TopicCuration → SegmentGeneration)")
         orchestrator = ScriptOrchestrator(context)
         script = await orchestrator.generate_script(
@@ -97,6 +187,7 @@ async def execute_scripting_phase(
             avoid_topics=avoid_topics,
             excluded_topics=excluded_topics,
             progress_callback=cb,
+            preset_curation=effective_preset,
         )
         llm_usage = orchestrator.get_total_usage()
         segments = orchestrator.segments

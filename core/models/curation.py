@@ -14,6 +14,10 @@ class CuratedTopic(BaseModel):
         default_factory=list,
         description="最重要ファクトのリスト（数値・固有名詞・エピソード）"
     )
+    selection_reason: str = Field(
+        default="",
+        description="このトピックを選んだ理由（80〜120字、面白さの核心。下流のSegmentGeneratorに渡される）"
+    )
 
 
 class ScriptSegment(BaseModel):
