@@ -7,6 +7,23 @@
 
 ## [Unreleased]
 
+### 追加（2026-04-23: ShowRunner - 番組構成プランナーエージェント）
+- **新エージェント `ShowRunner`** — Curator 選定後に番組全体の物語構造を設計する階層の追加
+  - 設計 5 軸: 全体アーク / 導入フック戦略 / トピック間ブリッジ / 締め戦略 / トーン配分
+  - `services/script_generation/show_runner.py`, `core/models/show_plan.py` 新規追加
+  - `ScriptOrchestrator` に Step 1.5 として統合。`SegmentGenerator` の `generate_intro/deep_dive/conclusion` に `show_plan_hint` 引数を追加し、設計意図を各セグメント生成プロンプトに defensively 差し込む
+  - セッションへ自動永続化 (`workspace/{session_id}/show_plan.json`)。`SessionManager.save_show_plan/load_show_plan/has_show_plan` を追加。再実行時は自動ロード
+  - HITL Gate 2b 対応基盤: `execute_scripting_phase(preset_show_plan=...)` でユーザー編集済み ShowPlan を受け取れる
+  - 設定: `config.yaml > orchestrator.show_runner.enabled` で ON/OFF。Pydantic モデル既定は `false`（後方互換）、同梱の `config.yaml` では `true` で有効化済み
+  - 失敗時フォールバック: ShowRunner の LLM 呼び出しが失敗しても警告ログのみで従来フローを継続
+  - プロンプト: `config/prompts.yaml > orchestrator.show_runner` 新設
+  - テスト: `tests/test_show_runner.py` に 10 件追加（データモデル往復 / JSON パース耐性 / プロンプト差し込み / 後方互換 / SessionManager 往復）
+
+### 修正（2026-04-23）
+- **`services/script_generation/topic_curator.py` ローカル LLM 対策**: `qwen3:8b` 等が稀に `title` フィールドを省略する症状に対し、`key_facts[0]` → `selection_reason` → プレースホルダの順でタイトルを合成するフォールバックを追加。ShowRunner が空タイトルで動作不能にならないよう防御的に対応
+- **`app_hitl_handlers.py::_show_curation_editor` DataFrame truthiness バグ**: `if topics_df:` が pandas.DataFrame で `ValueError: The truth value of a DataFrame is ambiguous` を吐いていた箇所を、`len(topics_df) > 0` による明示的な空判定に修正
+- **`services/pipeline/scripting_phase.py` 実在しない API 呼び出しの除去**: `execute_curation_only` / メタデータ生成部が `ExecutionContext.create_llm_port()`（未実装メソッド）を呼んでいた箇所を `LLMAdapterFactory.create()` に統一（`ScriptOrchestrator` と同じパターン）
+
 ### 修正（2026-04-18: コードレビュー対応・耐障害性とSSOT強化）
 - **`services/script_generation/gemini_client.py` フォールバック分割ロジックの堅牢化**
   - `script.sections` が空のとき `ValueError` を送出して早期リターン（無意味な分割処理を防止）

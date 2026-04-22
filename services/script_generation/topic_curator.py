@@ -193,8 +193,32 @@ class TopicCurator:
         topics_data = data.get("topics", [])
         topics = []
         for t in topics_data:
+            # Defensive: some local LLMs (e.g. qwen3:8b) occasionally omit the `title`
+            # field even though content / key_facts / selection_reason are populated.
+            # In that case, synthesize a usable title so downstream ShowRunner and
+            # SegmentGenerator have a non-empty label to reference.
+            raw_title = (t.get("title", "") or "").strip()
+            if not raw_title:
+                key_facts = t.get("key_facts", []) or []
+                first_fact = next(
+                    (str(f).strip() for f in key_facts if isinstance(f, str) and f.strip()),
+                    "",
+                )
+                fallback_source = first_fact or (t.get("selection_reason", "") or "").strip()
+                if fallback_source:
+                    raw_title = fallback_source[:40].rstrip("、。 ")
+                    logger.warning(
+                        f"[TopicCurator] LLM omitted 'title'; synthesized from fallback: {raw_title!r}"
+                    )
+                else:
+                    raw_title = f"トピック{len(topics) + 1}"
+                    logger.warning(
+                        f"[TopicCurator] LLM omitted both 'title' and fallback sources; "
+                        f"using placeholder: {raw_title!r}"
+                    )
+
             topics.append(CuratedTopic(
-                title=t.get("title", ""),
+                title=raw_title,
                 content=t.get("content", ""),
                 priority=t.get("priority", len(topics) + 1),
                 estimated_turns=t.get("estimated_turns", 30),

@@ -407,6 +407,12 @@ script_generator:
     conclusion:
       min_turns: 10
       max_turns: 20
+    # Phase 3 施策④: 番組構成プランナー（ShowRunner）
+    # Curator 選定後にアーク・ブリッジ・トーンを設計し、ダイジェスト感を避ける
+    # 後方互換: enabled=false（既定）なら従来動作と完全同一
+    show_runner:
+      enabled: true      # true: ShowRunnerを実行 / false: 無効（従来フロー）
+      model: ""          # 空=curator_model と同じ軽量モデルを使用
 
 # -----------------------------------------------------------------------------
 # 音声合成設定（VOICEVOX）

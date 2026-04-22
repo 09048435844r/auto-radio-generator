@@ -19,7 +19,9 @@ from core.models import AppConfig, Script, LLMUsage
 from core.models.curation import CurationResult, ScriptSegment
 from core.models.script import DialogueTurn, TurnType
 from core.models.execution_context import ExecutionContext
+from core.models.show_plan import ShowPlan
 from services.script_generation.topic_curator import TopicCurator
+from services.script_generation.show_runner import ShowRunner
 from services.script_generation.segment_generator import SegmentGenerator
 from services.script_generation.metadata_generator import MetadataGenerator
 from services.script_generation.adapters.factory import LLMAdapterFactory
@@ -76,7 +78,20 @@ class ScriptOrchestrator(IScriptOrchestrator):
         
         # Initialize components with LLM ports
         self.curator = TopicCurator(self._curator_port, context.config)
-        
+
+        # Phase 3: ShowRunner (backward compatible - enabled via config flag)
+        # Uses its own LLM port so an independent model can be configured; falls back
+        # to curator_model when show_runner.model is empty.
+        sr_cfg = getattr(self.orch_cfg, "show_runner", None)
+        self._show_runner_enabled = bool(getattr(sr_cfg, "enabled", False))
+        show_runner_model = (getattr(sr_cfg, "model", "") or "").strip() or curator_model
+        self._show_runner_port = LLMAdapterFactory.create(
+            context.config,
+            context.provider,
+            model_override=show_runner_model,
+        )
+        self.show_runner = ShowRunner(self._show_runner_port, context.config)
+
         # Pass session_dir to SegmentGenerator for markdown script saving
         markdown_output_dir = getattr(context, 'session_dir', None)
         self.generator = SegmentGenerator(self._segment_port, context.config, markdown_output_dir=markdown_output_dir)
@@ -100,6 +115,7 @@ class ScriptOrchestrator(IScriptOrchestrator):
         excluded_topics: Optional[str] = None,
         progress_callback=None,
         preset_curation: Optional["CurationResult"] = None,
+        preset_show_plan: Optional["ShowPlan"] = None,
     ) -> Script:
         """テーマとリサーチデータから長尺台本を生成する
 
@@ -111,6 +127,9 @@ class ScriptOrchestrator(IScriptOrchestrator):
             progress_callback: 進捗報告オブジェクト（.log() / .progress() メソッドを持つ）
             preset_curation: 事前に用意された CurationResult（HITL で人間が編集済みなど）。
                              渡された場合は Step 1 の Curator 実行をスキップして直接使用する。
+            preset_show_plan: 事前に用意された ShowPlan（Phase 3、HITL で人間が編集済みなど）。
+                              渡された場合は Step 1.5 の ShowRunner 実行をスキップ。
+                              None かつ show_runner.enabled=True の場合のみ ShowRunner を走らせる。
 
         Returns:
             Script: 統合された台本オブジェクト
@@ -152,6 +171,39 @@ class ScriptOrchestrator(IScriptOrchestrator):
         log(f"  選定トピック: {', '.join(topic_titles)}")
 
         # --------------------------------------------------------
+        # Step 1.5: 番組構成プランニング（ShowRunner、Phase 3 施策④）
+        # 有効化条件:
+        #   - preset_show_plan が渡されていれば即採用
+        #   - それ以外で show_runner.enabled=True ならこのタイミングで走らせる
+        #   - それ以外（既定）は show_plan=None で従来動作
+        # 失敗時は警告ログのみ出して show_plan=None で継続（後方互換）
+        # --------------------------------------------------------
+        show_plan: Optional[ShowPlan] = None
+        if preset_show_plan is not None:
+            log("\n[cyan]--- Step 1.5/3: 番組構成プランニング（プリセット使用、ShowRunner スキップ） ---[/cyan]")
+            show_plan = preset_show_plan
+            log(f"  [green]✓ プリセット ShowPlan を使用 (bridges={len(show_plan.topic_bridges)})[/green]")
+        elif self._show_runner_enabled and curation_result.topics:
+            log("\n[cyan]--- Step 1.5/3: 番組構成プランニング（ShowRunner） ---[/cyan]")
+            if progress_callback:
+                progress_callback.progress(0.51, "🎬 番組構成を設計中...")
+            try:
+                show_plan = await self.show_runner.plan_show(
+                    theme=theme,
+                    curation_result=curation_result,
+                    progress_log=log,
+                )
+                self._accumulate_usage(self.show_runner.last_usage)
+            except Exception as e:
+                # Backward compat: if ShowRunner fails, fall through to legacy flow
+                log(f"[yellow]⚠ ShowRunner 失敗（従来フローで継続）: {e}[/yellow]")
+                logger.warning(f"ShowRunner.plan_show failed; proceeding without ShowPlan: {e}")
+                show_plan = None
+        else:
+            # Backward compat: ShowRunner disabled
+            log("[dim]  (ShowRunner は無効。従来フローでセグメント生成)[/dim]")
+
+        # --------------------------------------------------------
         # Step 2: セグメント順次生成
         # --------------------------------------------------------
         total_segments = 1 + len(curation_result.topics) + 1  # intro + N + conclusion
@@ -182,6 +234,7 @@ class ScriptOrchestrator(IScriptOrchestrator):
                 context=context,
                 progress_log=log,
                 hook_fact=hook_fact,
+                show_plan_hint=self._build_intro_hint(show_plan),
             ),
             label="導入セグメント",
             log=log,
@@ -198,12 +251,14 @@ class ScriptOrchestrator(IScriptOrchestrator):
                 pct = 0.52 + (seg_num / total_segments) * 0.12
                 progress_callback.progress(pct, f"📝 深掘り「{topic.title[:20]}」生成中...")
 
+            deep_dive_hint = self._build_deep_dive_hint(show_plan, topic_index=idx - 1)
             deep_dive = await self._generate_with_retry(
-                lambda t=topic, i=idx: self.generator.generate_deep_dive(
+                lambda t=topic, i=idx, h=deep_dive_hint: self.generator.generate_deep_dive(
                     topic=t,
                     segment_index=i,
                     context=context,
                     progress_log=log,
+                    show_plan_hint=h,
                 ),
                 label=f"深掘りセグメント{idx}「{topic.title}」",
                 log=log,
@@ -248,6 +303,9 @@ class ScriptOrchestrator(IScriptOrchestrator):
                 progress_log=log,
                 all_key_facts=all_key_facts or None,
                 segments_recap=segments_recap or None,
+                show_plan_hint=self._build_conclusion_hint(
+                    show_plan, topic_count=len(curation_result.topics)
+                ),
             ),
             label="まとめセグメント",
             log=log,
@@ -310,6 +368,85 @@ class ScriptOrchestrator(IScriptOrchestrator):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _build_intro_hint(self, show_plan: Optional[ShowPlan]) -> Optional[str]:
+        """ShowPlan から導入セグメント用のヒント文字列を生成
+
+        Returns:
+            ヒント文字列。show_plan が None の場合や内容が空の場合は None
+            （SegmentGenerator 側で無視される）。
+        """
+        if show_plan is None:
+            return None
+        parts: list[str] = []
+        if show_plan.overall_arc:
+            parts.append(f"【番組全体アーク】{show_plan.overall_arc}")
+        if show_plan.intro_hook_strategy:
+            parts.append(f"【導入フック戦略】{show_plan.intro_hook_strategy}")
+        # intro → topic[0] のブリッジ
+        bridge = show_plan.get_bridge_out_of(-1)
+        if bridge and bridge.transition_hint:
+            parts.append(f"【導入→トピック1への接続】{bridge.transition_hint}")
+        if show_plan.overall_tone:
+            parts.append(f"【トーン配分】{show_plan.overall_tone}")
+        return "\n".join(parts) if parts else None
+
+    def _build_deep_dive_hint(
+        self, show_plan: Optional[ShowPlan], topic_index: int
+    ) -> Optional[str]:
+        """ShowPlan から深掘りセグメント用のヒント文字列を生成
+
+        Args:
+            show_plan: 番組構成プラン（None可）
+            topic_index: 対象トピックの 0-based インデックス
+
+        Returns:
+            ヒント文字列 or None
+        """
+        if show_plan is None:
+            return None
+        parts: list[str] = []
+        # このトピックに"入る"ブリッジ（前のセグメントからの接続ヒント）
+        bridge_in = show_plan.get_bridge_into(topic_index)
+        if bridge_in and bridge_in.transition_hint:
+            src_label = "導入" if bridge_in.from_topic_index == -1 else f"前の深掘り({bridge_in.from_topic_index})"
+            parts.append(f"【{src_label}からの接続意図】{bridge_in.transition_hint}")
+        # このトピックから"出る"ブリッジ（次への布石として意識させる）
+        bridge_out = show_plan.get_bridge_out_of(topic_index)
+        if bridge_out and bridge_out.transition_hint:
+            dst_label = "まとめ" if bridge_out.to_topic_index == -1 else f"次の深掘り({bridge_out.to_topic_index})"
+            parts.append(f"【{dst_label}への橋渡し意図（セグメント末尾で布石を置く）】{bridge_out.transition_hint}")
+        if show_plan.overall_tone:
+            parts.append(f"【番組全体のトーン配分】{show_plan.overall_tone}")
+        return "\n".join(parts) if parts else None
+
+    def _build_conclusion_hint(
+        self, show_plan: Optional[ShowPlan], topic_count: int
+    ) -> Optional[str]:
+        """ShowPlan からまとめセグメント用のヒント文字列を生成
+
+        Args:
+            show_plan: 番組構成プラン（None可）
+            topic_count: 深掘りトピック総数（最後のトピックインデックスを特定するため）
+
+        Returns:
+            ヒント文字列 or None
+        """
+        if show_plan is None:
+            return None
+        parts: list[str] = []
+        # 最終深掘り → まとめ のブリッジ
+        if topic_count > 0:
+            bridge = show_plan.get_bridge_into(-1)
+            if bridge and bridge.transition_hint:
+                parts.append(f"【最終深掘りからの接続意図】{bridge.transition_hint}")
+        if show_plan.conclusion_strategy:
+            parts.append(f"【締め戦略】{show_plan.conclusion_strategy}")
+        if show_plan.overall_arc:
+            parts.append(f"【番組全体アーク（着地点の参考）】{show_plan.overall_arc}")
+        if show_plan.overall_tone:
+            parts.append(f"【トーン配分】{show_plan.overall_tone}")
+        return "\n".join(parts) if parts else None
 
     def _integrate_segments(self, theme: str, segments: list[ScriptSegment]) -> Script:
         """全セグメントの turns を結合して Script オブジェクトを生成"""

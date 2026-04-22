@@ -44,6 +44,7 @@ async def execute_curation_only(
         CurationResult: トピック選定結果（session にも保存済み）
     """
     from services.script_generation.topic_curator import TopicCurator
+    from services.script_generation.adapters.factory import LLMAdapterFactory
     from core.models.research import ResearchSource
 
     cb = callbacks or ProgressCallback()
@@ -77,8 +78,14 @@ async def execute_curation_only(
     cb.log(f"Provider: {provider}")
     cb.progress(0.10, "🔍 トピック選定中...")
 
-    # Create curator using the curator-specific LLM port from ExecutionContext
-    llm_port = context.create_llm_port(role="curator") if hasattr(context, "create_llm_port") else context.create_llm_port()
+    # Create curator-specific LLM port via LLMAdapterFactory (same pattern as ScriptOrchestrator).
+    # ExecutionContext does not expose a factory method; we use the adapter factory directly.
+    curator_model = config.yaml.script_generator.orchestrator.curator_model
+    llm_port = LLMAdapterFactory.create(
+        config,
+        provider,
+        model_override=curator_model,
+    )
     curator = TopicCurator(llm_port, config)
 
     curation_result = await curator.curate_topics(
@@ -103,6 +110,7 @@ async def execute_scripting_phase(
     provider: str = "gemini",
     callbacks: Optional[ProgressCallback] = None,
     preset_curation=None,
+    preset_show_plan=None,
 ) -> RadioScriptArtifact:
     """Execute scripting phase and generate RadioScriptArtifact
     
@@ -117,7 +125,10 @@ async def execute_scripting_phase(
         preset_curation: Optional CurationResult from HITL (human-edited topics).
                          If provided, skip Curator invocation inside orchestrator.
                          If None and session has curation_result.json, it will be loaded automatically.
-        
+        preset_show_plan: Optional ShowPlan from HITL (human-edited show plan, Phase 3).
+                          If provided, skip ShowRunner invocation inside orchestrator.
+                          If None and session has show_plan.json, it will be loaded automatically.
+
     Returns:
         RadioScriptArtifact: Scripting phase output artifact
     """
@@ -179,6 +190,19 @@ async def execute_scripting_phase(
                 cb.log(f"[WARN] Failed to load curation_result.json ({e}); running Curator normally")
                 effective_preset = None
 
+        # HITL Phase 3 support: auto-load show_plan.json if present and not explicitly passed
+        effective_show_plan = preset_show_plan
+        if effective_show_plan is None and session_manager.has_show_plan():
+            try:
+                effective_show_plan = session_manager.load_show_plan()
+                cb.log(
+                    f"[Orchestrator] Auto-loaded ShowPlan from session "
+                    f"(bridges={len(effective_show_plan.topic_bridges)}); ShowRunner will be skipped"
+                )
+            except Exception as e:
+                cb.log(f"[WARN] Failed to load show_plan.json ({e}); ShowRunner will run if enabled")
+                effective_show_plan = None
+
         cb.log(f"[Orchestrator] Long-form script generation with {context.provider} (TopicCuration → SegmentGeneration)")
         orchestrator = ScriptOrchestrator(context)
         script = await orchestrator.generate_script(
@@ -188,9 +212,25 @@ async def execute_scripting_phase(
             excluded_topics=excluded_topics,
             progress_callback=cb,
             preset_curation=effective_preset,
+            preset_show_plan=effective_show_plan,
         )
         llm_usage = orchestrator.get_total_usage()
         segments = orchestrator.segments
+
+        # Phase 3: Persist the ShowPlan that was actually used (if any), so downstream
+        # steps (HITL, debug, re-runs) can inspect it. This is purely additive.
+        try:
+            actually_used_show_plan = effective_show_plan
+            if actually_used_show_plan is None:
+                # ShowRunner ran inside the orchestrator; pull it from the agent
+                actually_used_show_plan = getattr(
+                    getattr(orchestrator, "show_runner", None), "last_show_plan", None
+                )
+            if actually_used_show_plan is not None and not session_manager.has_show_plan():
+                session_manager.save_show_plan(actually_used_show_plan)
+                cb.log(f"✓ ShowPlan saved: {session_manager.get_show_plan_path().name}")
+        except Exception as e:
+            cb.log(f"[WARN] Failed to save show_plan.json (non-fatal): {e}")
     else:
         # Single API call (fallback) - still uses provider selection
         script_generator = create_script_generator(config, provider=context.provider)
@@ -306,10 +346,14 @@ async def execute_scripting_phase(
     
     try:
         from services.script_generation.metadata_generator import MetadataGenerator
-        
-        # Create LLM port for metadata generation
-        llm_port = context.create_llm_port()
-        
+        from services.script_generation.adapters.factory import LLMAdapterFactory
+
+        # Create LLM port for metadata generation (uses default model for provider)
+        llm_port = LLMAdapterFactory.create(
+            config,
+            context.provider,
+        )
+
         metadata_generator = MetadataGenerator(llm_port, config)
         script = await metadata_generator.generate(
             theme=research_brief.theme,

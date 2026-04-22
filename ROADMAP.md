@@ -2,7 +2,7 @@
 
 > **Created:** 2026-02-07  
 > **Base Version:** v3.6.1 (HITL Mode + Bug Fixes)  
-> **Last Updated:** 2026-04-15  
+> **Last Updated:** 2026-04-23  
 > **Author:** AI Tech Lead (Cascade)
 
 ---
@@ -87,6 +87,18 @@
 - [x] **Cost Calculator** — API 使用量トラッキング + コストレポート生成
 
 ### Recent Achievements（直近の達成事項）
+- [x] **ShowRunner - Show Structure Planner (2026-04-23)** — Curator 選定後に番組全体の構成（アーク・トピック間ブリッジ・トーン・導入フック・締め戦略）を設計する新エージェントを導入。台本のダイジェスト感を解消し、因果でつながる物語構造を生成可能に
+  - 新モジュール: `core/models/show_plan.py`（`ShowPlan` / `TopicBridge` データモデル）、`services/script_generation/show_runner.py`（`TopicCurator` と同型の `ILLMPort` エージェント）
+  - パイプライン統合: `ScriptOrchestrator` に Step 1.5 を追加。`SegmentGenerator` の `generate_intro/deep_dive/conclusion` に `show_plan_hint: Optional[str]` 引数を追加し、ブリッジ意図をプロンプトへ defensively 差し込む
+  - 永続化: `SessionManager.save_show_plan()` / `load_show_plan()` / `has_show_plan()` を実装。実行後は `workspace/{session_id}/show_plan.json` に自動保存、再実行時は自動ロード
+  - プロンプト: `config/prompts.yaml` に `orchestrator.show_runner` システムプロンプトを新設（5軸「アーク／フック／ブリッジ／締め／トーン」で計画させる）
+  - 設定: `config.yaml > orchestrator.show_runner.enabled` で ON/OFF 切替。Pydantic モデル上の既定値は `false`（後方互換）、同梱の `config.yaml` では `true` で有効化済み
+  - HITL 対応基盤: `execute_scripting_phase(preset_show_plan=...)` を追加。人間が編集済み `show_plan.json` をセッションに置けば自動で反映（将来の Gate 2b UI 向け）
+  - 失敗時フォールバック: ShowRunner が LLM エラーを起こしても警告ログのみで従来フロー継続（`show_plan=None`）
+  - 回帰テスト: `tests/test_show_runner.py`（10 件） — モデル往復、JSON パース耐性、プロンプト差し込み、後方互換、SessionManager 往復をカバー
+  - 動作検証済み: Ollama `qwen3:8b` で 3トピック + 4ブリッジの ShowPlan が正しく生成されることを実機確認（2026-04-23）
+- [x] **TopicCurator - Defensive Title Fallback (2026-04-23)** — ローカル LLM（qwen3:8b 等）が稀に `title` フィールドを省略した JSON を返す問題に対し、`key_facts[0]` → `selection_reason` → プレースホルダの順でタイトルを合成するフォールバックを追加
+- [x] **HITL Gate 2a - DataFrame Truthiness Fix (2026-04-23)** — `_show_curation_editor` で pandas.DataFrame が暗黙の bool コンテキストで評価され `ValueError` を吐くバグを修正。`len(df) > 0` による明示的な空判定に置換
 - [x] **Research Data Reusability (2026-04-15)** — 自動モードで生成したリサーチデータの再利用機能を実装
   - `output/[session_id]/research_brief.json` を自動保存（インポート機能で再利用可能）
   - 既存の `research.json` は参照用として維持（後方互換性を完全保持）

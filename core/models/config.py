@@ -111,6 +111,21 @@ class OrchestratorSegmentConfig(BaseModel):
     max_turns: int = 20
 
 
+class ShowRunnerConfig(BaseModel):
+    """ShowRunner（番組構成プランナー）設定 - Phase 3 施策④
+
+    後方互換: 既定は enabled=False で、有効化しない限り従来通りの動作。
+    """
+    enabled: bool = Field(
+        default=False,
+        description="Trueにするとショーランナー（番組構成プランナー）をCurator後に実行する"
+    )
+    model: str = Field(
+        default="",
+        description="ShowRunner用モデル（空=curator_modelと同じ軽量モデルを使用）"
+    )
+
+
 class OrchestratorConfig(BaseModel):
     """Hierarchical Agentic Workflow オーケストレーター設定"""
     
@@ -148,6 +163,8 @@ class OrchestratorConfig(BaseModel):
     conclusion: OrchestratorSegmentConfig = Field(
         default_factory=lambda: OrchestratorSegmentConfig(min_turns=10, max_turns=20)
     )
+    # Phase 3 施策④: 番組構成プランナー（後方互換: 既定は disabled）
+    show_runner: ShowRunnerConfig = Field(default_factory=ShowRunnerConfig)
 
 
 class ScriptGeneratorConfig(BaseModel):

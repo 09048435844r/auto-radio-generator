@@ -340,8 +340,17 @@ def _show_curation_editor(
     Called via .then() to avoid the Gradio visibility + child-value loss bug
     (same pattern as _show_research_preview).
     """
-    # Show only on success (non-error progress text AND non-empty topics)
-    if progress_text and "❌" not in progress_text and topics_df:
+    # Show only on success (non-error progress text AND non-empty topics).
+    # Note: topics_df may be a pandas.DataFrame at runtime (despite the List hint),
+    # so we MUST avoid implicit boolean coercion. Use explicit length check, which
+    # works uniformly for list, tuple, and DataFrame.
+    has_topics = topics_df is not None
+    if has_topics:
+        try:
+            has_topics = len(topics_df) > 0
+        except TypeError:
+            has_topics = False
+    if progress_text and "❌" not in progress_text and has_topics:
         return gr.update(visible=True)
     return gr.update(visible=False)
 

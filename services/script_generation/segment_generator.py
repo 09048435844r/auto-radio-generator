@@ -88,6 +88,7 @@ class SegmentGenerator:
         context: str = "",
         progress_log=None,
         hook_fact: Optional[str] = None,
+        show_plan_hint: Optional[str] = None,
     ) -> ScriptSegment:
         """番組導入部セグメントを生成
 
@@ -98,11 +99,13 @@ class SegmentGenerator:
             progress_log: 進捗ログ関数
             hook_fact: 冒頭フックに使う具体事実（Curator選定の筆頭トピックの key_facts[0] 相当）。
                        無値の場合は従来の扱い（タイトル列挙のみ）にフォールバック
+            show_plan_hint: ShowRunnerが設計した番組構成ヒント（intro_hook_strategy + overall_tone +
+                            intro→topic[0]のtransition_hint を連結した文字列）。Noneなら従来動作
         """
         log = progress_log or (lambda msg: console.print(msg))
         log(f"[cyan]📝 導入セグメント生成中...[/cyan]")
 
-        user_prompt = self._build_intro_user_prompt(theme, topic_titles, context, hook_fact)
+        user_prompt = self._build_intro_user_prompt(theme, topic_titles, context, hook_fact, show_plan_hint)
 
         if self.two_phase_enabled:
             # 2段階生成モード
@@ -145,6 +148,7 @@ class SegmentGenerator:
         segment_index: int,
         context: str,
         progress_log=None,
+        show_plan_hint: Optional[str] = None,
     ) -> ScriptSegment:
         """深掘りセグメントを生成
 
@@ -153,12 +157,14 @@ class SegmentGenerator:
             segment_index: 深掘りセグメントの番号（1始まり）
             context: 前セグメントの文脈要約
             progress_log: 進捗ログ関数
+            show_plan_hint: ShowRunnerが設計したこのトピックへのブリッジヒント
+                            （入りのtransition_hint + overall_tone）。Noneなら従来動作
         """
         log = progress_log or (lambda msg: console.print(msg))
         log(f"[cyan]📝 深掘りセグメント{segment_index}生成中: 「{topic.title}」[/cyan]")
 
         segment_id = f"deep_dive_{segment_index}"
-        user_prompt = self._build_deep_dive_user_prompt(topic)
+        user_prompt = self._build_deep_dive_user_prompt(topic, show_plan_hint)
 
         if self.two_phase_enabled:
             # 2段階生成モード
@@ -208,6 +214,7 @@ class SegmentGenerator:
         progress_log=None,
         all_key_facts: Optional[list[str]] = None,
         segments_recap: Optional[str] = None,
+        show_plan_hint: Optional[str] = None,
     ) -> ScriptSegment:
         """まとめセグメントを生成
 
@@ -218,12 +225,14 @@ class SegmentGenerator:
             progress_log: 進捗ログ関数
             all_key_facts: 全トピックの key_facts をフラット化したリスト（総括時の材料）。None/空の場合は使わない
             segments_recap: 各セグメントの context_summary を連結した振り返りテキスト。None/空の場合は使わない
+            show_plan_hint: ShowRunnerが設計した締め戦略（conclusion_strategy + 最終→conclusionの
+                            transition_hint + overall_tone）。Noneなら従来動作
         """
         log = progress_log or (lambda msg: console.print(msg))
         log(f"[cyan]📝 まとめセグメント生成中...[/cyan]")
 
         user_prompt = self._build_conclusion_user_prompt(
-            theme, topic_titles, all_key_facts, segments_recap
+            theme, topic_titles, all_key_facts, segments_recap, show_plan_hint
         )
 
         if self.two_phase_enabled:
@@ -272,6 +281,7 @@ class SegmentGenerator:
         topic_titles: list[str],
         context: str,
         hook_fact: Optional[str] = None,
+        show_plan_hint: Optional[str] = None,
     ) -> str:
         # Defensive: topic_titles may be None or empty in edge cases
         titles = topic_titles or []
@@ -284,12 +294,22 @@ class SegmentGenerator:
                 f"## 冒頭フック事実（具体事実で視聴者の興味を掴むための材料）\n"
                 f"{hook_fact.strip()}\n\n"
             )
+        # Phase 3: ShowRunnerが設計した番組構成ヒント（有効な場合のみ差し込む）
+        if show_plan_hint and isinstance(show_plan_hint, str) and show_plan_hint.strip():
+            prompt += (
+                f"## 番組構成ヒント（ShowRunnerによる設計）\n"
+                f"{show_plan_hint.strip()}\n\n"
+            )
         if context:
             prompt += f"## 引き継ぎ文脈\n{context}\n\n"
         prompt += "上記の情報をもとに、番組の導入部（イントロ）を生成してください。"
         return prompt
 
-    def _build_deep_dive_user_prompt(self, topic: CuratedTopic) -> str:
+    def _build_deep_dive_user_prompt(
+        self,
+        topic: CuratedTopic,
+        show_plan_hint: Optional[str] = None,
+    ) -> str:
         prompt = f"## 深掘りするトピック\n**{topic.title}**\n\n"
         prompt += f"## トピックの詳細情報\n{topic.content}\n\n"
         if topic.key_facts:
@@ -304,6 +324,12 @@ class SegmentGenerator:
                 f"Curatorがこのトピックを選んだ理由: {selection_reason.strip()}\n\n"
             )
         prompt += f"## 推奨トーン\n{topic.tone}\n\n"
+        # Phase 3: ShowRunnerが設計した番組構成ヒント（有効な場合のみ）
+        if show_plan_hint and isinstance(show_plan_hint, str) and show_plan_hint.strip():
+            prompt += (
+                f"## 番組構成ヒント（ShowRunnerによるブリッジ設計）\n"
+                f"{show_plan_hint.strip()}\n\n"
+            )
         prompt += (
             "上記のトピックについて、深掘りセグメントを生成してください。\n"
             "key_factsに含まれる情報はすべて会話に織り込むこと。"
@@ -316,6 +342,7 @@ class SegmentGenerator:
         topic_titles: list[str],
         all_key_facts: Optional[list[str]] = None,
         segments_recap: Optional[str] = None,
+        show_plan_hint: Optional[str] = None,
     ) -> str:
         # Defensive: topic_titles may be None in edge cases
         titles = topic_titles or []
@@ -337,6 +364,12 @@ class SegmentGenerator:
             prompt += (
                 f"## 各セグメントの振り返り\n"
                 f"{segments_recap.strip()}\n\n"
+            )
+        # Phase 3: ShowRunnerが設計した締め戦略ヒント（有効な場合のみ）
+        if show_plan_hint and isinstance(show_plan_hint, str) and show_plan_hint.strip():
+            prompt += (
+                f"## 番組構成ヒント（ShowRunnerによる締め戦略）\n"
+                f"{show_plan_hint.strip()}\n\n"
             )
         prompt += "上記をふまえて、番組のまとめとエンディングを生成してください。"
         return prompt

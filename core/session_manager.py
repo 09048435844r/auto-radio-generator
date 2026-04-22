@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from core.models.artifacts import ResearchBrief
     from core.models.script import RadioScriptArtifact
     from core.models.curation import CurationResult
+    from core.models.show_plan import ShowPlan
 
 
 class SessionManager:
@@ -188,6 +189,50 @@ class SessionManager:
         """Check if CurationResult exists (i.e., user already ran Gate 2a)."""
         return self.get_curation_result_path().exists()
 
+    # ------------------------------------------------------------------
+    # ShowPlan persistence (Phase 3 施策④)
+    # ------------------------------------------------------------------
+
+    def get_show_plan_path(self) -> Path:
+        """Get path to ShowPlan file (番組構成プラン)."""
+        return self.session_dir / "show_plan.json"
+
+    def save_show_plan(self, show_plan: "ShowPlan") -> Path:
+        """Save ShowPlan to file.
+
+        Args:
+            show_plan: ShowPlan instance
+
+        Returns:
+            Path to saved file
+        """
+        path = self.get_show_plan_path()
+        path.write_text(show_plan.model_dump_json(indent=2), encoding="utf-8")
+        return path
+
+    def load_show_plan(self) -> "ShowPlan":
+        """Load ShowPlan from file.
+
+        Returns:
+            ShowPlan instance
+
+        Raises:
+            FileNotFoundError: If show_plan.json does not exist
+        """
+        from core.models.show_plan import ShowPlan
+
+        path = self.get_show_plan_path()
+        if not path.exists():
+            raise FileNotFoundError(
+                f"ShowPlan not found: {path}\n"
+                f"Please run ShowRunner (Phase 3) first."
+            )
+        return ShowPlan.model_validate_json(path.read_text(encoding="utf-8"))
+
+    def has_show_plan(self) -> bool:
+        """Check if ShowPlan exists in this session."""
+        return self.get_show_plan_path().exists()
+
     def get_session_status(self) -> dict:
         """Get current session status
         
@@ -199,5 +244,6 @@ class SessionManager:
             "session_dir": str(self.session_dir),
             "research_completed": self.has_research_brief(),
             "curation_completed": self.has_curation_result(),
+            "show_plan_completed": self.has_show_plan(),
             "scripting_completed": self.has_script_artifact(),
         }
