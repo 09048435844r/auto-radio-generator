@@ -61,6 +61,11 @@ class MetadataGenerator:
         # Use model from injected LLM port (already configured by orchestrator)
         self.model = llm_port.model_name
 
+        # PR-D Issue C: max_tokens config 駆動化。旧ハードコード 2048 を既定値として踏襲
+        orch_cfg = config.yaml.script_generator.orchestrator
+        mg_cfg = getattr(orch_cfg, "metadata_generator", None)
+        self.max_tokens = int(getattr(mg_cfg, "max_tokens", 2048) or 2048)
+
         # 最後の使用量を保持（オーケストレーターが累積するため）
         self.last_usage: Optional[LLMUsage] = None
 
@@ -169,18 +174,23 @@ class MetadataGenerator:
             system_prompt="",  # MetadataGenerator uses user prompt only
             user_prompt=prompt,
             model=self.model,
-            max_tokens=2048,  # Increased: prevent truncation for detailed descriptions
+            max_tokens=self.max_tokens,  # PR-D: config 駆動（旧ハードコード 2048）
             temperature=0.6,  # Balanced: creative enough, stable enough
             response_format="json"
         )
-        
+
         response = await self._llm.generate(request)
-        
-        # Warn if output was truncated
+
+        # PR-D Issue C: fail-fast on truncation. The caller (scripting_phase / orchestrator)
+        # already wraps this with try/except and falls back to default metadata, so the
+        # user-visible behavior is identical ("using defaults") but we avoid attempting to
+        # parse a truncated JSON (which could silently return a half-formed title).
         if response.finish_reason == "length":
-            logger.warning(
-                f"⚠️ MetadataGenerator output was truncated (finish_reason=length). "
-                f"Consider increasing max_output_tokens."
+            raise RuntimeError(
+                "MetadataGenerator output was truncated (finish_reason=length). "
+                f"Current max_tokens={self.max_tokens}. "
+                "Increase orchestrator.metadata_generator.max_tokens in config.yaml. "
+                "Caller will fall back to default metadata."
             )
         
         logger.debug(

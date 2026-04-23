@@ -48,6 +48,9 @@ class TopicCurator:
         orch_cfg = config.yaml.script_generator.orchestrator
         self.curator_model = orch_cfg.curator_model
         self.max_topics = orch_cfg.max_topics
+        # PR-D Issue C: max_tokens config 駆動化。旧ハードコード 8192 を既定値として踏襲
+        tc_cfg = getattr(orch_cfg, "topic_curator", None)
+        self.max_tokens = int(getattr(tc_cfg, "max_tokens", 8192) or 8192)
 
         self.last_usage: Optional[LLMUsage] = None
 
@@ -181,18 +184,22 @@ class TopicCurator:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             model=model_to_use,
-            max_tokens=8192,  # JSON途中切断を防ぐため増量
+            max_tokens=self.max_tokens,  # PR-D: config 駆動（旧ハードコード 8192）
             temperature=0.3,  # キュレーションは低温度で安定性を確保
             response_format="json"
         )
-        
+
         response = await self._llm.generate(request)
-        
-        # Warn if output was truncated
+
+        # PR-D Issue C: fail-fast on truncation (same pattern as FactExtractor in PR-A).
+        # Partial JSON would later fail `CurationResult.topics` min_length validator (PR-B)
+        # anyway; raising here gives a clearer error path with the current max_tokens value.
         if response.finish_reason == "length":
-            logger.warning(
-                f"⚠️ TopicCurator output was truncated (finish_reason=length). "
-                f"Consider increasing max_output_tokens."
+            raise RuntimeError(
+                "TopicCurator output was truncated (finish_reason=length). "
+                f"Current max_tokens={self.max_tokens}. "
+                "Increase orchestrator.topic_curator.max_tokens in config.yaml. "
+                "Aborting rather than returning partial topics."
             )
         
         logger.debug(

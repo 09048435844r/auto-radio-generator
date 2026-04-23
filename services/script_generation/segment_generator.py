@@ -79,6 +79,13 @@ class SegmentGenerator:
         self.deep_dive_cfg = orch_cfg.deep_dive
         self.conclusion_cfg = orch_cfg.conclusion
 
+        # PR-D Issue C: max_tokens config 駆動化（3 つのフェーズ別設定）
+        # 既定値は旧ハードコード値（single=8192, phase1=4096, phase2=2048）を踏襲
+        sg_cfg = getattr(orch_cfg, "segment_generator", None)
+        self.max_tokens_single = int(getattr(sg_cfg, "max_tokens_single", 8192) or 8192)
+        self.max_tokens_phase1 = int(getattr(sg_cfg, "max_tokens_phase1", 4096) or 4096)
+        self.max_tokens_phase2 = int(getattr(sg_cfg, "max_tokens_phase2", 2048) or 2048)
+
         self.last_usage: Optional[LLMUsage] = None
 
     async def generate_intro(
@@ -398,24 +405,29 @@ class SegmentGenerator:
                 model_to_use = None
         
         console.print(
-            f"[dim]SegmentGenerator API: provider={self._llm.provider_name}, model={model_to_use or 'default'}, max_tokens=8192[/dim]"
+            f"[dim]SegmentGenerator API: provider={self._llm.provider_name}, "
+            f"model={model_to_use or 'default'}, max_tokens={self.max_tokens_single}[/dim]"
         )
-        
+
         request = LLMRequest(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             model=model_to_use,
-            max_tokens=8192,  # 1セグメント分は 8K で十分
+            max_tokens=self.max_tokens_single,  # PR-D: config 駆動（旧ハードコード 8192）
             temperature=0.85,
             response_format="json"
         )
-        
+
         response = await self._llm.generate(request)
-        
-        # Warn if output was truncated
+
+        # PR-D Issue C: fail-fast on truncation. Partial segment JSON would break the
+        # downstream integration step; raising lets `_generate_with_retry` in orchestrator
+        # retry, and repeat failure surfaces the real config problem (max_tokens too low).
         if response.finish_reason == "length":
-            logger.warning(
-                f"SegmentGenerator: MAX_TOKENS に到達。出力が切り詰められた可能性あり (model={model_to_use})"
+            raise RuntimeError(
+                "SegmentGenerator (1-phase JSON) output was truncated (finish_reason=length). "
+                f"Current max_tokens={self.max_tokens_single}, model={model_to_use or 'default'}. "
+                "Increase orchestrator.segment_generator.max_tokens_single in config.yaml."
             )
         
         logger.debug(
@@ -521,23 +533,34 @@ class SegmentGenerator:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             model=phase1_model,
-            max_tokens=4096,  # Phase 1は長めに
+            max_tokens=self.max_tokens_phase1,  # PR-D: config 駆動（旧ハードコード 4096）
             temperature=0.85,  # 創造性重視
             response_format="text"  # JSON不要
         )
-        
+
         console.print(
             f"[dim]  Phase 1 API: provider={self._llm.provider_name}, model={phase1_model or 'default'}, "
-            f"max_tokens=4096, temperature=0.85[/dim]"
+            f"max_tokens={self.max_tokens_phase1}, temperature=0.85[/dim]"
         )
-        
+
         response = await self._llm.generate(request)
-        
+
+        # PR-D Issue C: fail-fast on truncation. Phase 1 は元々 finish_reason チェックが
+        # 無かった（warning も出さず silent に切り詰め markdown が Phase 2 に渡っていた）。
+        # Phase 2 で JSON 変換失敗するケースが多く、原因究明を困難にしていたため
+        # fail-fast 化して早期検知する。
+        if response.finish_reason == "length":
+            raise RuntimeError(
+                "SegmentGenerator Phase 1 (Markdown creative) output was truncated (finish_reason=length). "
+                f"Current max_tokens={self.max_tokens_phase1}, model={phase1_model or 'default'}. "
+                "Increase orchestrator.segment_generator.max_tokens_phase1 in config.yaml."
+            )
+
         logger.debug(
             f"Phase 1 (Creative): provider={response.usage.provider}, model={response.usage.model_name}, "
             f"in={response.usage.input_tokens}, out={response.usage.output_tokens}"
         )
-        
+
         return response.content, response.usage
 
     async def _convert_markdown_to_json(
@@ -578,23 +601,33 @@ class SegmentGenerator:
             system_prompt="You are a JSON converter. Convert Markdown dialogue to JSON format.",
             user_prompt=system_prompt,  # プロンプト全体をuser_promptに移動
             model=phase2_model,  # Phase 2専用モデルを使用
-            max_tokens=2048,  # Phase 2は短めでOK
+            max_tokens=self.max_tokens_phase2,  # PR-D: config 駆動（旧ハードコード 2048）
             temperature=0.1,  # 正確性最優先
             response_format="json"
         )
-        
+
         console.print(
             f"[dim]  Phase 2 API: provider={self._llm.provider_name}, model={phase2_model or 'default'}, "
-            f"max_tokens=2048, temperature=0.1[/dim]"
+            f"max_tokens={self.max_tokens_phase2}, temperature=0.1[/dim]"
         )
-        
+
         response = await self._llm.generate(request)
-        
+
+        # PR-D Issue C: fail-fast on truncation. Truncated JSON would fail the parser
+        # or yield partial segments with missing turns; raising lets `_generate_with_retry`
+        # handle the retry and surface persistent config issues.
+        if response.finish_reason == "length":
+            raise RuntimeError(
+                "SegmentGenerator Phase 2 (JSON conversion) output was truncated (finish_reason=length). "
+                f"Current max_tokens={self.max_tokens_phase2}, model={phase2_model or 'default'}. "
+                "Increase orchestrator.segment_generator.max_tokens_phase2 in config.yaml."
+            )
+
         logger.debug(
             f"Phase 2 (JSON): provider={response.usage.provider}, model={response.usage.model_name}, "
             f"in={response.usage.input_tokens}, out={response.usage.output_tokens}"
         )
-        
+
         return response.content, response.usage
 
     async def _convert_markdown_to_json_with_fallback(
