@@ -217,3 +217,45 @@ def test_session_manager_load_show_plan_missing_raises(tmp_path: Path):
     sm.session_dir.mkdir(parents=True, exist_ok=True)
     with pytest.raises(FileNotFoundError):
         sm.load_show_plan()
+
+
+# ---------------------------------------------------------------------------
+# SessionManager.session_dir override (Gradio auto-mode compatibility)
+# ---------------------------------------------------------------------------
+
+def test_session_manager_session_dir_override(tmp_path: Path):
+    """Explicit `session_dir` must bypass the workspace/ convention and use
+    the provided directory verbatim. This is required for the Gradio auto
+    mode which writes to `output/{timestamp}/`, so that a single pipeline
+    implementation can serve both HITL/CLI (workspace/) and Gradio (output/)."""
+    from core.session_manager import SessionManager
+
+    custom_dir = tmp_path / "output" / "20260101_120000"
+
+    sm = SessionManager(project_root=tmp_path, session_dir=custom_dir)
+
+    # Must use the override path directly, NOT workspace/.
+    assert sm.session_dir == custom_dir
+    # session_id must be derived from directory name.
+    assert sm.session_id == "20260101_120000"
+    # Directory should be auto-created.
+    assert custom_dir.exists() and custom_dir.is_dir()
+    # Workspace root should not have been touched under this session id.
+    assert not (tmp_path / "workspace" / "20260101_120000").exists()
+
+
+def test_session_manager_session_dir_override_roundtrip(tmp_path: Path):
+    """Artifacts written via the override path must round-trip correctly
+    so delegation from workflow.py → services.pipeline works end-to-end."""
+    from core.session_manager import SessionManager
+
+    custom_dir = tmp_path / "output" / "rt_test"
+    sm = SessionManager(project_root=tmp_path, session_dir=custom_dir)
+
+    plan = _make_sample_show_plan()
+    saved = sm.save_show_plan(plan)
+    assert saved.parent == custom_dir
+    assert sm.has_show_plan() is True
+
+    loaded = sm.load_show_plan()
+    assert loaded.overall_arc == plan.overall_arc

@@ -7,6 +7,16 @@
 
 ## [Unreleased]
 
+### リファクタリング（2026-04-23: 台本生成の単一情報源化 / SSOT）
+- **`workflow.py::execute_scripting_phase` 削除 → `_execute_gradio_scripting_phase` へ改名**: Gradio 自動モードの台本生成フェーズと HITL/CLI 向けの `services.pipeline.execute_scripting_phase` で挙動が乖離していた問題を解消
+  - リサーチステップだけを Gradio 層（`workflow.py`）に残し、台本生成ロジックは `services.pipeline.execute_scripting_phase` に完全委譲
+  - 結果として **全モード（Gradio 自動 / HITL / CLI main.py）で ShowRunner・MetadataGenerator・VisualIdentity・show_plan.json 永続化 などが同一挙動で動作**
+  - `ResearchResult → ResearchBrief` 変換と `RadioScriptArtifact → ScriptingPhaseResult` 変換のブリッジ層を新設（`dataclass` / `pydantic` 両対応）
+  - 2-Story Mode（第1部＋第2部）でも動作。Part2 では `preloaded_research_data` 経路から `ResearchBrief` を合成して保存
+  - 旧 workflow.py 版のセグメント生成・speaker diagnostics・visual identity 実装を削除（pipeline 版が完全上位互換）
+- **`SessionManager` に `session_dir` 明示指定オプションを追加**: 既定の `workspace/{session_id}/` 規約を上書きし、Gradio 自動モードの `output/{timestamp}/` に直接マウント可能に。既存の呼び出しは完全後方互換
+- **回帰テスト追加**: `tests/test_show_runner.py` に `session_dir` オーバーライド動作 2 件を追加（全 51 件 pass）
+
 ### 追加（2026-04-23: ShowRunner - 番組構成プランナーエージェント）
 - **新エージェント `ShowRunner`** — Curator 選定後に番組全体の物語構造を設計する階層の追加
   - 設計 5 軸: 全体アーク / 導入フック戦略 / トピック間ブリッジ / 締め戦略 / トーン配分

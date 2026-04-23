@@ -87,6 +87,12 @@
 - [x] **Cost Calculator** — API 使用量トラッキング + コストレポート生成
 
 ### Recent Achievements（直近の達成事項）
+- [x] **Scripting Phase Unification / SSOT (2026-04-23)** — Gradio 自動モード・HITL・CLI の 3 つのエントリーポイントで分岐していた台本生成フェーズのロジックを、`services.pipeline.execute_scripting_phase` の 1 実装に完全統一
+  - `workflow.py::execute_scripting_phase` を `_execute_gradio_scripting_phase` に改名し、内部実装を pipeline 版への薄い委譲ラッパーに置換
+  - Gradio 自動モードでも ShowRunner / MetadataGenerator / VisualIdentity / `show_plan.json` 永続化が動作するようになり、モード間の挙動差がゼロに
+  - `SessionManager` に `session_dir` 明示オプションを追加し、Gradio 自動モードの `output/{timestamp}/` に直接マウント可能に（後方互換維持）
+  - `ResearchResult ↔ ResearchBrief` / `RadioScriptArtifact ↔ ScriptingPhaseResult` のブリッジ層を新設（既存呼び出し元は無改修）
+  - 回帰テスト 2 件追加（全 51 件 pass）
 - [x] **ShowRunner - Show Structure Planner (2026-04-23)** — Curator 選定後に番組全体の構成（アーク・トピック間ブリッジ・トーン・導入フック・締め戦略）を設計する新エージェントを導入。台本のダイジェスト感を解消し、因果でつながる物語構造を生成可能に
   - 新モジュール: `core/models/show_plan.py`（`ShowPlan` / `TopicBridge` データモデル）、`services/script_generation/show_runner.py`（`TopicCurator` と同型の `ILLMPort` エージェント）
   - パイプライン統合: `ScriptOrchestrator` に Step 1.5 を追加。`SegmentGenerator` の `generate_intro/deep_dive/conclusion` に `show_plan_hint: Optional[str]` 引数を追加し、ブリッジ意図をプロンプトへ defensively 差し込む

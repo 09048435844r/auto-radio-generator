@@ -661,7 +661,7 @@ async def execute_planning_phase(
         raise
 
 
-async def execute_scripting_phase(
+async def _execute_gradio_scripting_phase(
     theme: str,
     mode: ResearchMode,
     queries: list[str],
@@ -674,31 +674,52 @@ async def execute_scripting_phase(
     provider: str = "gemini",
     callbacks: Optional[ProgressCallback] = None
 ) -> ScriptingPhaseResult:
-    """台本作成フェーズ: リサーチ → 台本生成
-    
+    """Gradio 自動モード向け台本作成フェーズ（リサーチ + 台本生成）
+
+    内部実装は `services.pipeline.execute_scripting_phase` に委譲するため、
+    HITL / CLI モードと完全に同一の挙動（ShowRunner, MetadataGenerator,
+    VisualIdentity, show_plan.json 永続化 等）を提供する。
+
+    リサーチステップだけは Gradio 側のここで引き続き実行し、得られた
+    ResearchResult を ResearchBrief に変換してパイプライン層へ渡す。
+
     Args:
         theme: 動画のテーマ
         mode: リサーチモード
         queries: 検索クエリリスト（企画フェーズの出力）
         config: アプリケーション設定
-        output_dir: 出力ディレクトリ（リサーチ結果保存用）
+        output_dir: 出力ディレクトリ（`output/{timestamp}/`）
         enable_research: リサーチを実行するか
+        preloaded_research_data: 事前に取得済みのリサーチ結果（2-Story Mode 用）
         excluded_topics: 除外すべき既出情報（オプション）
         avoid_topics: 避けてほしい話題（Negative Prompt、オプション）
-        provider: LLMプロバイダー名（"gemini" | "openai" | "anthropic"）
+        provider: LLMプロバイダー名（"gemini" | "openai" | "anthropic" | "ollama"）
         callbacks: 進捗コールバック
-    
+
     Returns:
-        ScriptingPhaseResult: 台本とリサーチ結果
+        ScriptingPhaseResult: 台本とリサーチ結果（レガシー呼び出し元との契約維持）
     """
+    # Lazy imports to avoid circular dependency
+    # (services.pipeline.scripting_phase imports helpers from workflow.py).
+    from services.pipeline.scripting_phase import (
+        execute_scripting_phase as pipeline_execute_scripting,
+    )
+    from core.session_manager import SessionManager
+    from core.models.artifacts import ResearchBrief
+    from core.models.visual import VisualIdentity as _VisualIdentityModel
+    from core.models.script import ScriptSegment as _ScriptSegmentModel
+    from dataclasses import asdict as _dc_asdict, is_dataclass as _is_dataclass
+
     cb = callbacks or ProgressCallback()
     research_start = time.time()
     research_data = preloaded_research_data
-    research_content = None
-    perplexity_usage = None
+    research_content: Optional[str] = None
+    perplexity_usage: Optional[PerplexityUsage] = None
     research_duration = 0.0
-    
-    # Step 1: リサーチ
+
+    # ---------------------------------------------------------------
+    # Step 1: Research (unchanged from legacy workflow.py behavior)
+    # ---------------------------------------------------------------
     if research_data is not None:
         cb.log("[INFO] 既存リサーチ結果を再利用します（API呼び出しなし）")
         research_content = research_data.content
@@ -707,130 +728,158 @@ async def execute_scripting_phase(
         cb.log(f"\n== Phase 2-1: リサーチ ==")
         cb.log(f"モード: {mode}")
         if excluded_topics:
-            cb.log(f"除外トピック: {excluded_topics[:100]}..." if len(excluded_topics) > 100 else f"除外トピック: {excluded_topics}")
+            cb.log(
+                f"除外トピック: {excluded_topics[:100]}..."
+                if len(excluded_topics) > 100
+                else f"除外トピック: {excluded_topics}"
+            )
         cb.progress(0.30, "🔍 リサーチを実行中 (Perplexity)...")
-        
+
         try:
             researcher = create_researcher(config)
-            research_data = await researcher.research_multi(queries, mode, avoid_topics=avoid_topics)
-            
+            research_data = await researcher.research_multi(
+                queries, mode, avoid_topics=avoid_topics
+            )
+
             cb.log(f"✓ リサーチ完了")
             cb.log(f"収集した情報: {len(research_data.content)}文字")
-            
+
             research_content = research_data.content
             perplexity_usage = research_data.usage
             research_duration = time.time() - research_start
-            
-            # リサーチ結果を保存
+
+            # Legacy side effect: write research.json / research_brief.json /
+            # research_report.md into `output_dir`. Kept intact for UI / import flows.
             _save_research_results(research_data, output_dir, cb)
-            
+
         except Exception as e:
             cb.log(f"❌ リサーチエラー（処理中断）: {e}")
             import traceback
             cb.log(f"[DEBUG] {traceback.format_exc()}")
             raise
     else:
-        cb.log(f"[INFO] リサーチスキップ")
-    
+        cb.log("[INFO] リサーチスキップ")
+
     cb.progress(0.45, "✅ リサーチ完了")
-    
-    # Step 2: 台本生成
-    cb.log(f"\n== Phase 2-2: 台本生成 ==")
-    cb.log(f"テーマ: {theme}")
-    use_orchestrator = config.yaml.script_generator.orchestrator.enabled
-    cb.log(f"使用エンジン: {'ScriptOrchestrator (Agentic)' if use_orchestrator else provider}")
-    cb.progress(0.50, f"📝 台本を執筆中 ({'Orchestrator' if use_orchestrator else provider})...")
-    
-    script_start = time.time()
 
-    segments = None  # セグメント情報を保持（動画生成で使用）
-    
-    if use_orchestrator and research_data is not None:
-        # --- 新アーキテクチャ: Hierarchical Agentic Workflow ---
-        cb.log("[cyan][Orchestrator] 長尺台本生成モード（TopicCuration → SegmentGeneration）[/cyan]")
-        context = ExecutionContext(
-            provider=provider,
-            config=config,
-            log_callback=cb.log if cb else None,
-            progress_callback=cb.progress if cb else None,
+    # ---------------------------------------------------------------
+    # Step 2: Bridge ResearchResult → ResearchBrief and hand off to the
+    # unified pipeline version (SSOT for scripting across all modes).
+    # ---------------------------------------------------------------
+    if research_data is None:
+        raise RuntimeError(
+            "台本生成にはリサーチデータが必要ですが、research_data が None のため継続できません。"
         )
-        orchestrator = ScriptOrchestrator(context)
-        script = await orchestrator.generate_script(
-            theme=theme,
-            research_data=research_data,
-            avoid_topics=avoid_topics,
-            excluded_topics=excluded_topics,
-            progress_callback=cb,
-        )
-        gemini_usage = orchestrator.get_total_usage()
-        segments = orchestrator.segments  # セグメント情報を取得
+
+    # Mount SessionManager on the Gradio output_dir so downstream artifacts
+    # (script.json, show_plan.json, script_artifact.json, metadata) land alongside
+    # the existing Gradio auto-mode outputs rather than under workspace/.
+    project_root_path = (
+        Path(getattr(config, "project_root", None) or output_dir.parent.parent)
+        .resolve()
+    )
+    session_manager = SessionManager(
+        project_root=project_root_path,
+        session_dir=output_dir,
+    )
+
+    # If _save_research_results already wrote research_brief.json, reuse it verbatim;
+    # otherwise synthesize one (e.g. preloaded_research_data path for 2-Story Part 2).
+    if session_manager.has_research_brief():
+        research_brief = session_manager.load_research_brief()
     else:
-        # --- 旧アーキテクチャ: 単一API呼び出し（フォールバック） ---
-        script_generator = create_script_generator(config, provider=provider)
-        script = await script_generator.generate(theme, research_data, avoid_topics=avoid_topics, excluded_topics=excluded_topics)
-        gemini_usage = script_generator.last_usage
+        # Serialize sources safely (they may be pydantic or dataclass instances).
+        raw_sources = getattr(research_data, "sources", None) or []
+        serialized_sources = []
+        for src in raw_sources:
+            if hasattr(src, "model_dump"):
+                serialized_sources.append(src.model_dump())
+            elif _is_dataclass(src):
+                serialized_sources.append(_to_json_safe(_dc_asdict(src)))
+            else:
+                serialized_sources.append(_to_json_safe(src))
 
-    phase_label = "Part 2" if excluded_topics and excluded_topics.strip() else "Part 1/Single"
-    diagnostics, suspected_swap = _build_speaker_diagnostics(script, label=phase_label)
-    for msg in diagnostics:
-        cb.log(msg)
-    if suspected_swap:
-        cb.log("[yellow][WARN] 口調ヒント上、A/B話者の役割逆転を検出。自動補正を適用します[/yellow]")
-        script = _swap_script_speakers(script)
-        fixed_diagnostics, _ = _build_speaker_diagnostics(script, label=f"{phase_label} (fixed)")
-        for msg in fixed_diagnostics:
-            cb.log(msg)
-    
-    script_duration = time.time() - script_start
-    
-    cb.log(f"✓ 台本生成完了: {len(script.sections)}フレーズ ({script_duration:.1f}秒)")
-    cb.log(f"タイトル: {script.title}")
-    cb.progress(0.65, "✅ 台本生成完了")
-    
-    # 台本を保存
-    script_path = output_dir / "script.json"
-    script_path.parent.mkdir(parents=True, exist_ok=True)
-    script_path.write_text(script.model_dump_json(indent=2), encoding="utf-8")
-    cb.log(f"✓ 台本保存: {script_path.name}")
-    
-    # Step 3: Visual Identity Generation (for dynamic background mode)
-    visual_identity = None
-    video_config = getattr(config.yaml, "video_renderer", None)
-    background_mode = getattr(video_config, "background_mode", "static") if video_config else "static"
-    
-    if background_mode == "dynamic":
+        research_brief = ResearchBrief(
+            session_id=output_dir.name,
+            theme=theme or getattr(research_data, "topic", ""),
+            research_mode=str(getattr(research_data, "mode", mode)),
+            research_content=research_data.content,
+            research_sources=serialized_sources,
+            queries=list(queries) if queries else [theme or getattr(research_data, "topic", "")],
+            angle="自動生成",
+            curated_topics=None,
+            perplexity_usage=(
+                _to_json_safe(_dc_asdict(research_data.usage))
+                if research_data.usage and _is_dataclass(research_data.usage)
+                else None
+            ),
+            gemini_usage_planning=None,
+        )
         try:
-            cb.log("\n== Phase 2-3: ビジュアルアイデンティティ生成 ==")
-            cb.log("[INFO] 動画固有のビジュアルブランド（色+スタイル）を生成中（FLUX.1用）...")
-            
-            from services.script_generation.visual_palette_generator import VisualPaletteGenerator
-            
-            palette_generator = VisualPaletteGenerator(config)
-            script_summary = script.description[:300] if script.description else theme
-            
-            visual_identity = await palette_generator.generate_palette(
-                theme=theme,
-                script_summary=script_summary
-            )
-            
-            cb.log(f"✓ ビジュアルアイデンティティ決定: {visual_identity}")
+            session_manager.save_research_brief(research_brief)
         except Exception as e:
-            cb.log(f"⚠ ビジュアルアイデンティティ生成失敗: {e}")
-            cb.log("[INFO] 各コンポーネントのデフォルト色にフォールバックします")
+            cb.log(f"[WARN] ResearchBrief 保存に失敗（非致命的）: {e}")
+
+    # ---------------------------------------------------------------
+    # Step 3: Delegate to the unified pipeline (ShowRunner + Metadata +
+    # VisualIdentity + speaker diagnostics are all handled inside).
+    # ---------------------------------------------------------------
+    script_start = time.time()
+    script_artifact = await pipeline_execute_scripting(
+        research_brief=research_brief,
+        session_manager=session_manager,
+        config=config,
+        excluded_topics=excluded_topics,
+        avoid_topics=avoid_topics,
+        provider=provider,
+        callbacks=cb,
+    )
+    script_duration = time.time() - script_start
+
+    # ---------------------------------------------------------------
+    # Step 4: Adapt RadioScriptArtifact → ScriptingPhaseResult so that
+    # existing Gradio-side callers (run_workflow_sync, 2-Story Mode) see
+    # no contract change.
+    # ---------------------------------------------------------------
+    # segments: List[dict] → List[ScriptSegment] when possible
+    segments = None
+    if script_artifact.segments:
+        try:
+            segments = [
+                _ScriptSegmentModel.model_validate(seg) for seg in script_artifact.segments
+            ]
+        except Exception as e:
+            cb.log(f"[WARN] segments の再構築に失敗、dict のまま返却します: {e}")
+            segments = list(script_artifact.segments)
+
+    # visual_identity: dict → VisualIdentity
+    visual_identity: Optional[VisualIdentity] = None
+    if script_artifact.visual_identity:
+        try:
+            visual_identity = _VisualIdentityModel.model_validate(script_artifact.visual_identity)
+        except Exception as e:
+            cb.log(f"[WARN] VisualIdentity の再構築に失敗: {e}")
             visual_identity = None
-    else:
-        cb.log("[INFO] Static mode: ビジュアルアイデンティティ生成をスキップ")
-    
+
+    # gemini_usage: reconstruct LLMUsage if present
+    gemini_usage: Optional[LLMUsage] = None
+    if script_artifact.llm_usage:
+        try:
+            gemini_usage = LLMUsage(**script_artifact.llm_usage)
+        except Exception as e:
+            cb.log(f"[WARN] LLMUsage の再構築に失敗: {e}")
+            gemini_usage = None
+
     return ScriptingPhaseResult(
-        script=script,
+        script=script_artifact.script,
         research_content=research_content,
         research_sources=getattr(research_data, "sources", None),
         perplexity_usage=perplexity_usage,
         gemini_usage=gemini_usage,
         research_duration_sec=research_duration,
         script_duration_sec=script_duration,
-        segments=segments,  # セグメント情報を返す
-        visual_identity=visual_identity  # ビジュアルアイデンティティを返す
+        segments=segments,
+        visual_identity=visual_identity,
     )
 
 
@@ -1739,7 +1788,7 @@ def run_workflow_sync(
                 
                 # 第1部の台本を生成
                 callbacks.progress(0.15, "第1部の台本を生成中...")
-                part1_result = await execute_scripting_phase(
+                part1_result = await _execute_gradio_scripting_phase(
                     theme=theme,
                     mode=overrides_obj.research_mode or "trivia",
                     queries=queries,
@@ -1763,7 +1812,7 @@ def run_workflow_sync(
                 callbacks.log(f"[INFO] 第1部の全量コンテキストを第2部へ渡しました ({len(part1_full_transcript)}文字)")
                 
                 callbacks.progress(0.25, "第2部の台本を生成中...")
-                part2_result = await execute_scripting_phase(
+                part2_result = await _execute_gradio_scripting_phase(
                     theme=theme,
                     mode=second_mode,
                     queries=queries,
@@ -1801,7 +1850,7 @@ def run_workflow_sync(
                 callbacks.log(f"[INFO] 台本結合完了: 第1部({len(part1_result.script.sections)}行) + 第2部({len(part2_result.script.sections)}行) = {len(scripting_result.script.sections)}行")
             else:
                 # 通常の単一部台本生成
-                scripting_result = await execute_scripting_phase(
+                scripting_result = await _execute_gradio_scripting_phase(
                     theme=theme,
                     mode=overrides_obj.research_mode or "trivia",
                     queries=queries,

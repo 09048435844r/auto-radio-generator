@@ -21,24 +21,40 @@ class SessionManager:
     各フェーズの中間成果物を永続化し、フェーズ単位での実行・再開を可能にする。
     """
     
-    def __init__(self, project_root: Path, session_id: Optional[str] = None):
+    def __init__(
+        self,
+        project_root: Path,
+        session_id: Optional[str] = None,
+        session_dir: Optional[Path] = None,
+    ):
         """Initialize SessionManager
-        
+
         Args:
             project_root: Project root directory
-            session_id: Session ID (if None, create new session with timestamp)
+            session_id: Session ID (if None, create new session with timestamp).
+                        Ignored when `session_dir` is provided (derived from dir name instead).
+            session_dir: Explicit session directory override. When provided, this path is
+                        used verbatim instead of the default `project_root/workspace/{session_id}/`.
+                        This allows the legacy Gradio auto mode (which writes to
+                        `output/{timestamp}/`) to share the same SessionManager API with
+                        HITL / CLI modes that write to `workspace/{session_id}/`.
         """
         self.project_root = Path(project_root)
         self.workspace_root = self.project_root / "workspace"
-        
-        # Create new session if session_id is None or empty string
-        if session_id is None or session_id == "":
-            # Create new session with timestamp
-            self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        if session_dir is not None:
+            # Explicit directory override: use as-is and derive session_id from its name.
+            self.session_dir = Path(session_dir)
+            self.session_id = self.session_dir.name
         else:
-            self.session_id = session_id
-        
-        self.session_dir = self.workspace_root / self.session_id
+            # Default behavior: workspace/{session_id}/
+            if session_id is None or session_id == "":
+                # Create new session with timestamp
+                self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+            else:
+                self.session_id = session_id
+            self.session_dir = self.workspace_root / self.session_id
+
         try:
             self.session_dir.mkdir(parents=True, exist_ok=True)
         except FileExistsError:
