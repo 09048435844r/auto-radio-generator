@@ -153,7 +153,7 @@ class TopicCurator:
             f"{{\n"
             f'  "topics": [\n'
             f'    {{\n'
-            f'      "title": "トピックタイトル",\n'
+            f'      "title": "20〜40文字、必ず数値か固有名詞を含む（例: デンマーク研究で70%が関節痛軽減）",\n'
             f'      "content": "詳細情報（500〜800文字、改行なし）",\n'
             f'      "priority": 1,\n'
             f'      "estimated_turns": 30,\n'
