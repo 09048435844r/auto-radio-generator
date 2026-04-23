@@ -31,3 +31,24 @@ PR-A で採用した方針と同じく、docstring/コード側を現実 (shippe
 
 ### スコープ外になった理由
 PR-A の Guardrails で「スコープ外指摘 (#3, #4, #8, #9, #10) には一切触らない」と明示指示されており、ShowRunnerConfig は #1 (FactExtractorConfig) の類似問題ではあるが別モデル・別 Phase の管轄のため、スコープ厳守を優先して記録に留めた。
+
+---
+
+## [BACKLOG] ExtractedFact.category の実データ分布調査
+
+**記録日**: 2026-04-23
+**発見経緯**: PR-B (`review/phase4-fact-extractor-b`) の #8 対応時、実データ 0 件のため分布調査を見送ったことによる
+
+### 内容
+PR-B では `config/prompts.yaml` の 6 カテゴリ（数値／人物／事件／比較／引用／その他）を SSOT として `FactCategory = Literal[...]` で型固定する戦略を採用した。しかし実運用開始後、LLM が想定外の category 値を返して `_DEFAULT_FACT_CATEGORY = "その他"` にフォールバックする頻度を調査する必要がある。
+
+### 発動条件
+`fact_sheet.json` が数十件程度蓄積した時点（当面は該当ファイル 0 件のため着手不可）。
+
+### 調査観点
+- ログに残した warning「`[FactExtractor] Unknown category 'X' (not in SSOT [...]); normalizing to 'その他'.`」の頻度集計
+- 頻出する未知値があれば、SSOT（`config/prompts.yaml` + `core/models/fact_sheet.py::FactCategory`）への追加 or プロンプト文言改善を検討
+- Literal の拡張要否判断（例: 「引用」を「専門家発言」「研究結果」に分割すべきか等）
+
+### 優先度
+低（運用データ蓄積待ち）。PR-B で入れた防御層（warning + フォールバック）により、未知カテゴリでもシステム障害は起きない。

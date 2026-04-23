@@ -18,12 +18,12 @@ TopicCurator / ShowRunner と同型のアーキテクチャ:
 """
 import json
 import logging
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING, get_args as _typing_get_args
 
 from rich.console import Console
 
 from core.models import AppConfig, LLMUsage
-from core.models.fact_sheet import ExtractedFact, FactSheet
+from core.models.fact_sheet import ExtractedFact, FactCategory, FactSheet
 from core.utils import sanitize_json_response
 from core.prompt_manager import PromptManager
 from core.interfaces.llm_port import ILLMPort, LLMRequest
@@ -33,6 +33,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 console = Console()
+
+# Phase 4 review #8: SSOT (config/prompts.yaml > orchestrator.fact_extractor) と連動。
+# FactCategory リテラル型から runtime 集合を派生させ、LLM 出力検証に使う。
+# typing.get_args を経由することで FactCategory の値を一点管理にできる（SSOT 同期の代償ゼロ）。
+_VALID_FACT_CATEGORIES: frozenset[str] = frozenset(_typing_get_args(FactCategory))
+_DEFAULT_FACT_CATEGORY: FactCategory = "その他"
 
 
 class FactExtractor:
@@ -264,9 +270,25 @@ class FactExtractor:
                         return None
                     return s
 
+                # Phase 4 review #8: category を FactCategory リテラルに正規化する。
+                # LLM が SSOT（prompts.yaml の 6 カテゴリ）以外を返した場合、
+                # ValidationError を避けるため _DEFAULT_FACT_CATEGORY にフォールバック。
+                # 未知値の出現頻度は logger.warning で追跡可能（BACKLOG の将来分布調査用）。
+                raw_category = str(f.get("category", "") or "").strip()
+                if raw_category in _VALID_FACT_CATEGORIES:
+                    category: FactCategory = raw_category  # type: ignore[assignment]
+                else:
+                    if raw_category:
+                        logger.warning(
+                            f"[FactExtractor] Unknown category '{raw_category}' "
+                            f"(not in SSOT {sorted(_VALID_FACT_CATEGORIES)}); "
+                            f"normalizing to '{_DEFAULT_FACT_CATEGORY}'."
+                        )
+                    category = _DEFAULT_FACT_CATEGORY
+
                 facts.append(ExtractedFact(
                     statement=statement,
-                    category=str(f.get("category", "general") or "general").strip() or "general",
+                    category=category,
                     numeric_value=_norm_optional(f.get("numeric_value")),
                     entity=_norm_optional(f.get("entity")),
                     source_citation=_norm_optional(f.get("source_citation")),
