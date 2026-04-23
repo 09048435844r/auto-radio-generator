@@ -28,11 +28,22 @@ async def execute_fact_extraction_only(
     config: AppConfig,
     provider: str = "gemini",
     callbacks: Optional[ProgressCallback] = None,
+    force: bool = False,
 ):
     """FactExtractor 単独実行（Phase 4 施策③）
 
     リサーチ生文字列から構造化 FactSheet を抽出し session に保存する。
     HITL (Gate 1.5) での事前確認、ないし Curator の判断材料キャッシュ用途。
+
+    ## 上書きポリシー（Phase 4 review #2 対応 / Append-Only 思想）
+    既存の fact_sheet.json が存在する場合のデフォルト挙動は**拒否**。
+    HITL で人間が編集した成果物を無言で消さないため、明示的な上書き許可が必要:
+
+      - `force=False`（既定）: 既存ファイルがあれば `FileExistsError` を送出。
+      - `force=True`: 既存ファイルを `fact_sheet.bak.<timestamp>.json` に退避してから
+        新しい抽出結果で上書き（バックアップは同一セッションディレクトリに残る）。
+
+    session に fact_sheet.json が存在しない場合は `force` の値に関わらず通常実行。
 
     Args:
         research_brief: ResearchBrief from research phase
@@ -40,15 +51,32 @@ async def execute_fact_extraction_only(
         config: Application config
         provider: LLM provider
         callbacks: Progress callback
+        force: True なら既存の fact_sheet.json をバックアップして上書き。
+               False（既定）なら既存ファイルがあれば FileExistsError。
 
     Returns:
         FactSheet: 抽出された事実シート（session にも保存済み）
+
+    Raises:
+        FileExistsError: force=False かつ既存 fact_sheet.json が存在する場合
     """
+    from datetime import datetime
     from services.script_generation.fact_extractor import FactExtractor
     from services.script_generation.adapters.factory import LLMAdapterFactory
     from core.models.research import ResearchSource
 
     cb = callbacks or ProgressCallback()
+
+    # Phase 4 review #2: guard against silent overwrite of human-edited fact sheets.
+    # This check runs BEFORE the expensive LLM call so we never waste tokens on a
+    # run that would be rejected at save time.
+    fact_sheet_path = session_manager.get_fact_sheet_path()
+    if fact_sheet_path.exists() and not force:
+        raise FileExistsError(
+            f"FactSheet already exists at {fact_sheet_path}. "
+            f"Refusing to overwrite (HITL edits may be present). "
+            f"Pass force=True to backup + overwrite, or delete the file manually."
+        )
 
     research_sources = [
         ResearchSource.model_validate(source_dict)
@@ -82,6 +110,16 @@ async def execute_fact_extraction_only(
         research_data=research_data,
         progress_log=cb.log,
     )
+
+    # Phase 4 review #2: if we reach here with force=True AND the file still exists,
+    # back it up before overwriting so the previous (possibly human-edited) content
+    # is never lost. Timestamp resolution is seconds which is enough: concurrent
+    # overwrites on the same session are outside our threat model.
+    if fact_sheet_path.exists():
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = fact_sheet_path.with_name(f"fact_sheet.bak.{ts}.json")
+        backup_path.write_bytes(fact_sheet_path.read_bytes())
+        cb.log(f"ℹ Previous fact_sheet.json backed up to: {backup_path.name}")
 
     saved_path = session_manager.save_fact_sheet(fact_sheet)
     cb.log(f"✓ FactSheet saved: {saved_path}")

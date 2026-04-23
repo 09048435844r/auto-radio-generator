@@ -58,6 +58,9 @@ class FactExtractor:
         fe_cfg = getattr(orch_cfg, "fact_extractor", None)
         self.fact_extractor_model = (getattr(fe_cfg, "model", "") or "").strip() or orch_cfg.curator_model
         self.max_facts = int(getattr(fe_cfg, "max_facts", 30) or 30)
+        # Phase 4 review #7: max_tokens is now config-driven so production can scale it
+        # independently of max_facts without a code change.
+        self.max_tokens = int(getattr(fe_cfg, "max_tokens", 8192) or 8192)
 
         self.last_usage: Optional[LLMUsage] = None
         # Expose the last successfully-produced FactSheet so the pipeline layer
@@ -184,17 +187,25 @@ class FactExtractor:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             model=model_to_use,
-            max_tokens=8192,  # FactSheet は最大 max_facts 件の配列で、Curator より長くなりうる
+            max_tokens=self.max_tokens,  # Phase 4 review #7: config-driven
             temperature=0.2,   # 事実抽出は最低温度で安定性を確保
             response_format="json",
         )
 
         response = await self._llm.generate(request)
 
+        # Phase 4 review #7: fail-fast on truncation.
+        # Partial/broken JSON from length truncation was previously parsed optimistically,
+        # which produced silently-corrupted FactSheets (missing tail facts, unterminated
+        # strings re-accepted post-sanitize). The orchestrator has a fail-open around us
+        # and will proceed with fact_sheet=None, so raising here keeps the contract that
+        # a successful return means a syntactically complete LLM response.
         if response.finish_reason == "length":
-            logger.warning(
+            raise RuntimeError(
                 "FactExtractor output was truncated (finish_reason=length). "
-                "Consider increasing max_output_tokens or lowering max_facts."
+                f"Current max_tokens={self.max_tokens}. "
+                "Increase fact_extractor.max_tokens in config.yaml or lower max_facts. "
+                "Aborting rather than returning a partial FactSheet."
             )
 
         logger.debug(

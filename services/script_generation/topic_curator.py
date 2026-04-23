@@ -76,8 +76,14 @@ class TopicCurator:
 
         log(f"[cyan]🔍 トピックキュレーション開始 (プロバイダー: {self._llm.provider_name}, モデル: {self.curator_model})[/cyan]")
         log(f"  リサーチデータ: {len(research_data.content)}文字 → {count}トピックを選定")
+        # Phase 4 review #5: branch the log so the "0件のファクト" case is never misreported.
+        # FactSheet.is_empty() returns False when theme_summary exists even with zero facts,
+        # so we must inspect both fields to print an accurate message.
         if fact_sheet is not None and not fact_sheet.is_empty():
-            log(f"  FactSheet: {len(fact_sheet.facts)}件のファクトを判断材料として使用")
+            if fact_sheet.facts:
+                log(f"  FactSheet: {len(fact_sheet.facts)}件のファクトを判断材料として使用")
+            else:
+                log("  FactSheet: テーマ要約のみを判断材料として使用（facts 0件）")
 
         system_prompt = self.prompt_manager.get_prompt("orchestrator", "curation")
         user_prompt = self._build_curation_user_prompt(research_data, count, fact_sheet=fact_sheet)
@@ -114,7 +120,8 @@ class TopicCurator:
             prompt += "## 構造化ファクトシート（FactExtractor による事前分析）\n"
             if fact_sheet.theme_summary:
                 prompt += f"### テーマ要約\n{fact_sheet.theme_summary}\n\n"
-            top_facts = fact_sheet.top_facts(limit=min(20, len(fact_sheet.facts)))
+            # Phase 4 review #6: top_facts already handles len(facts) < limit internally
+            top_facts = fact_sheet.top_facts(limit=20)
             if top_facts:
                 prompt += f"### 意外性の高いファクト（上位{len(top_facts)}件、surprise_score 降順）\n"
                 for i, fact in enumerate(top_facts, 1):

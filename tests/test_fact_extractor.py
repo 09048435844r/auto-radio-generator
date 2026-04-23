@@ -303,3 +303,253 @@ def test_session_manager_load_fact_sheet_missing_raises(tmp_path: Path):
     sm.session_dir.mkdir(parents=True, exist_ok=True)
     with pytest.raises(FileNotFoundError):
         sm.load_fact_sheet()
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 review #1: FactExtractorConfig defaults align with shipped config.yaml
+# ---------------------------------------------------------------------------
+
+def test_fact_extractor_config_defaults_are_enabled_and_carry_max_tokens():
+    """FactExtractorConfig は enabled=True 既定、max_tokens が config 駆動可能。"""
+    from core.models.config import FactExtractorConfig
+
+    cfg = FactExtractorConfig()
+    assert cfg.enabled is True, "SSOT: default enabled must match shipped config.yaml (true)"
+    assert cfg.max_tokens == 8192
+    assert cfg.max_facts == 30
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 review #7: finish_reason=="length" must fail fast
+# ---------------------------------------------------------------------------
+
+class _FakeLLMResponse:
+    """Minimal stand-in for LLMResponse with controllable finish_reason."""
+
+    def __init__(self, content, usage, finish_reason):
+        self.content = content
+        self.usage = usage
+        self.finish_reason = finish_reason
+
+
+def test_extract_facts_raises_on_length_truncation(mock_app_config):
+    """Phase 4 review #7: truncated LLM output must raise RuntimeError, not return partial JSON."""
+    import asyncio
+    from core.models.usage import LLMUsage
+
+    extractor = _make_fact_extractor_for_parse(mock_app_config)
+
+    fake_usage = LLMUsage(
+        provider="gemini",
+        model_name="test",
+        input_tokens=10,
+        output_tokens=10,
+        request_count=1,
+    )
+    # Truncated JSON (intentionally malformed to prove we don't attempt to parse it)
+    fake_response = _FakeLLMResponse(
+        content='{"facts":[{"statement":"partial",',
+        usage=fake_usage,
+        finish_reason="length",
+    )
+
+    async def mock_generate(req):
+        return fake_response
+
+    extractor._llm.generate = mock_generate
+
+    rd = _make_research_result()
+
+    with pytest.raises(RuntimeError, match="finish_reason=length"):
+        asyncio.run(extractor.extract_facts(theme="test", research_data=rd))
+
+
+def test_extract_facts_uses_config_max_tokens(mock_app_config):
+    """Phase 4 review #7: max_tokens は config 駆動。request.max_tokens が設定値と一致する。"""
+    import asyncio
+    from core.models.usage import LLMUsage
+
+    # Override max_tokens on the mocked config before constructing the extractor
+    mock_app_config.yaml.script_generator = MagicMock()
+    mock_app_config.yaml.script_generator.orchestrator = MagicMock()
+    mock_app_config.yaml.script_generator.orchestrator.curator_model = "gemini-2.5-flash"
+    mock_app_config.yaml.script_generator.orchestrator.fact_extractor = MagicMock()
+    mock_app_config.yaml.script_generator.orchestrator.fact_extractor.model = ""
+    mock_app_config.yaml.script_generator.orchestrator.fact_extractor.max_facts = 30
+    mock_app_config.yaml.script_generator.orchestrator.fact_extractor.max_tokens = 16384
+
+    from services.script_generation.fact_extractor import FactExtractor
+
+    mock_port = MagicMock()
+    mock_port.provider_name = "gemini"
+    extractor = FactExtractor(mock_port, mock_app_config)
+
+    assert extractor.max_tokens == 16384
+
+    captured: dict = {}
+    fake_usage = LLMUsage(
+        provider="gemini", model_name="test", input_tokens=1, output_tokens=1, request_count=1
+    )
+    fake_response = _FakeLLMResponse(
+        content=json.dumps({"facts": [], "theme_summary": "ok"}),
+        usage=fake_usage,
+        finish_reason="stop",
+    )
+
+    async def mock_generate(req):
+        captured["max_tokens"] = req.max_tokens
+        return fake_response
+
+    extractor._llm.generate = mock_generate
+
+    rd = _make_research_result()
+    asyncio.run(extractor.extract_facts(theme="test", research_data=rd))
+
+    assert captured["max_tokens"] == 16384
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 review #2: execute_fact_extraction_only overwrite protection
+# ---------------------------------------------------------------------------
+
+def _make_minimal_research_brief(session_id: str):
+    from core.models.artifacts import ResearchBrief
+
+    return ResearchBrief(
+        session_id=session_id,
+        theme="テスト題材",
+        research_mode="trivia",
+        research_content="リサーチ本文（ダミー）",
+        research_sources=[],
+        queries=["q"],
+        angle="ダミー",
+    )
+
+
+class _StubFactExtractor:
+    """Drop-in replacement for FactExtractor that skips the LLM entirely."""
+
+    def __init__(self, llm_port, config):
+        self._llm = llm_port
+        self.config = config
+        self.last_usage = None
+        self.last_fact_sheet = None
+
+    async def extract_facts(self, theme: str, research_data, progress_log=None):
+        sheet = FactSheet(
+            facts=[ExtractedFact(statement="stubbed fact", surprise_score=5)],
+            theme_summary="stub summary",
+        )
+        self.last_fact_sheet = sheet
+        return sheet
+
+
+def _patch_scripting_phase_for_stub(monkeypatch):
+    """Swap in stubs for FactExtractor + LLMAdapterFactory so no real LLM call happens."""
+    import services.script_generation.fact_extractor as fe_module
+    import services.script_generation.adapters.factory as factory_module
+
+    monkeypatch.setattr(fe_module, "FactExtractor", _StubFactExtractor, raising=True)
+
+    class _StubFactory:
+        @staticmethod
+        def create(config, provider, model_override=None):
+            return MagicMock()
+
+    monkeypatch.setattr(factory_module, "LLMAdapterFactory", _StubFactory, raising=True)
+
+
+def test_execute_fact_extraction_only_refuses_overwrite_without_force(
+    tmp_path: Path, mock_app_config, monkeypatch
+):
+    """Phase 4 review #2: existing fact_sheet.json must not be silently overwritten."""
+    import asyncio
+    from services.pipeline.scripting_phase import execute_fact_extraction_only
+    from core.session_manager import SessionManager
+
+    _patch_scripting_phase_for_stub(monkeypatch)
+
+    sm = SessionManager(project_root=tmp_path, session_id="overwrite_guard")
+    sm.session_dir.mkdir(parents=True, exist_ok=True)
+
+    # Pre-populate with a "human-edited" fact sheet
+    edited = _make_sample_fact_sheet()
+    sm.save_fact_sheet(edited)
+    assert sm.has_fact_sheet()
+
+    brief = _make_minimal_research_brief(sm.session_id)
+
+    with pytest.raises(FileExistsError, match="Refusing to overwrite"):
+        asyncio.run(execute_fact_extraction_only(
+            research_brief=brief,
+            session_manager=sm,
+            config=mock_app_config,
+        ))
+
+    # Original content must be untouched
+    loaded = sm.load_fact_sheet()
+    assert loaded.facts[0].entity == "OpenAI", "existing HITL content was corrupted"
+
+
+def test_execute_fact_extraction_only_creates_backup_on_force(
+    tmp_path: Path, mock_app_config, monkeypatch
+):
+    """Phase 4 review #2: force=True backs up the previous file before overwriting."""
+    import asyncio
+    from services.pipeline.scripting_phase import execute_fact_extraction_only
+    from core.session_manager import SessionManager
+
+    _patch_scripting_phase_for_stub(monkeypatch)
+
+    sm = SessionManager(project_root=tmp_path, session_id="force_backup")
+    sm.session_dir.mkdir(parents=True, exist_ok=True)
+
+    edited = _make_sample_fact_sheet()
+    sm.save_fact_sheet(edited)
+    original_bytes = sm.get_fact_sheet_path().read_bytes()
+
+    brief = _make_minimal_research_brief(sm.session_id)
+
+    result = asyncio.run(execute_fact_extraction_only(
+        research_brief=brief,
+        session_manager=sm,
+        config=mock_app_config,
+        force=True,
+    ))
+
+    # New content came from the stub, not the pre-existing sheet
+    assert result.theme_summary == "stub summary"
+    assert sm.load_fact_sheet().theme_summary == "stub summary"
+
+    # A timestamped backup with the original bytes must exist alongside
+    backups = list(sm.session_dir.glob("fact_sheet.bak.*.json"))
+    assert len(backups) == 1, f"expected exactly one backup, found {backups}"
+    assert backups[0].read_bytes() == original_bytes, "backup must preserve pre-overwrite bytes"
+
+
+def test_execute_fact_extraction_only_runs_normally_when_no_prior_file(
+    tmp_path: Path, mock_app_config, monkeypatch
+):
+    """Phase 4 review #2: no backup is created when fact_sheet.json did not exist."""
+    import asyncio
+    from services.pipeline.scripting_phase import execute_fact_extraction_only
+    from core.session_manager import SessionManager
+
+    _patch_scripting_phase_for_stub(monkeypatch)
+
+    sm = SessionManager(project_root=tmp_path, session_id="fresh_run")
+    sm.session_dir.mkdir(parents=True, exist_ok=True)
+    assert not sm.has_fact_sheet()
+
+    brief = _make_minimal_research_brief(sm.session_id)
+
+    result = asyncio.run(execute_fact_extraction_only(
+        research_brief=brief,
+        session_manager=sm,
+        config=mock_app_config,
+    ))
+
+    assert sm.has_fact_sheet()
+    assert result.theme_summary == "stub summary"
+    # No backup files should be produced on a clean run
+    assert not list(sm.session_dir.glob("fact_sheet.bak.*.json"))
