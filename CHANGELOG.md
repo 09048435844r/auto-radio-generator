@@ -7,6 +7,16 @@
 
 ## [Unreleased]
 
+### 追加（2026-04-24: Python logger 出力の processing_log.txt への統合 / 運用観測性の向上）
+- **`workflow.py::LogFileWriter` に FileHandler ライフサイクルを追加**（Issue A / PR-C / `review/issue-A-logger-capture`）
+  - セッション開始時に root logger へ `FileHandler(processing_log.txt, level=WARNING)` をアタッチし、`finalize()` でデタッチ
+  - 従来 stderr にしか出ていなかった `logger.warning/error` 系が `processing_log.txt` に自動記録されるように（具体例: FactExtractor の "Unknown category" 警告、TopicCurator の title 欠落警告、MetadataGenerator の truncation 警告、Ollama adapter の空レスポンス例外メッセージ等）
+  - 既存の `.write(msg)` 呼び出し・rich markup 出力は挙動不変（純追加、破壊的変更なし）
+  - Formatter: `>>> [%(levelname)s] [%(name)s] %(message)s` — 既存の `[cyan]...` 等の rich markup 行と視覚的に区別
+  - ログレベルは **WARNING 固定**（DEBUG/INFO は意図的に除外、ノイズ抑止）。config 駆動化は将来 PR で検討
+- **残留ハンドラ汚染防止**: 専用サブクラス `_SessionLogFileHandler` を定義し、`LogFileWriter.__init__` で `isinstance` ベースで前回 session の残留ハンドラのみを安全に掃除（他目的の `logging.FileHandler` には干渉しない）。Gradio 長命プロセスで `finalize()` 漏れが起きた場合の「新 session の warning が前回ファイルへ書き込まれる」汚染バグを防止
+- **テスト**: `tests/test_logger_capture.py` 新規、9 件追加（basic capture / ERROR 捕捉 / INFO 非捕捉 / finalize 後隔離 / 複数 session 非汚染 / `.write()` 後方互換 / logger と `.write()` 共存 / 残留ハンドラ掃除 / 非 `_SessionLogFileHandler` の誤検知ゼロ）
+
 ### 破壊的変更（2026-04-23: CurationResult.topics 非空契約の強制）
 - **`core.models.curation.CurationResult.topics` を非空必須に**（Phase 4 review #4 / `review/phase4-fact-extractor-b`）
   - Pydantic `@field_validator` で `len(topics) == 0` の場合 `ValidationError` を送出
