@@ -707,7 +707,7 @@ async def _execute_gradio_scripting_phase(
     from core.session_manager import SessionManager
     from core.models.artifacts import ResearchBrief
     from core.models.visual import VisualIdentity as _VisualIdentityModel
-    from core.models.script import ScriptSegment as _ScriptSegmentModel
+    from core.models.curation import ScriptSegment as _ScriptSegmentModel
     from dataclasses import asdict as _dc_asdict, is_dataclass as _is_dataclass
 
     cb = callbacks or ProgressCallback()

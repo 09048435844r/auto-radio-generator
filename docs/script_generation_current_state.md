@@ -1,7 +1,8 @@
 # 台本生成パイプライン - 現状分析ドキュメント
 
 **作成日**: 2026年4月6日  
-**対象バージョン**: v3.6.1  
+**最終更新**: 2026年4月23日（SSOT 統合反映）  
+**対象バージョン**: v3.7（SSOT 統合後）  
 **目的**: 超・高密度リサーチデータを消化し、長尺で面白い台本を生成するアーキテクチャへの改修準備
 
 ---
@@ -10,45 +11,68 @@
 
 ### 1.1 コールグラフ（関数呼び出し順序）
 
+> **Note (2026-04-23)**: 台本生成は `services.pipeline.execute_scripting_phase` に
+> 一元化された。Gradio 自動モードは `workflow._execute_gradio_scripting_phase`
+> というリサーチ専用ラッパーを経由して同じパイプラインを呼び出す。HITL / CLI は
+> `ResearchBrief` を直接渡してパイプラインを起動する。
+
 ```
-workflow.py::execute_scripting_phase()
+services.pipeline.execute_scripting_phase(research_brief, session_manager, ...)
   │
-  ├─ [Step 1: リサーチ] (条件: enable_research=True かつ preloaded_research_data=None)
-  │   └─ PerplexityResearcher.research_multi(queries, mode, avoid_topics)
-  │       → ResearchResult (content: str, sources: list, usage: PerplexityUsage)
+  │  ※Gradio 自動モードの場合のみ、workflow._execute_gradio_scripting_phase
+  │   が事前段階で PerplexityResearcher.research_multi を実行し
+  │   ResearchBrief を session に保存した上で本関数を呼び出す
   │
-  └─ [Step 2: 台本生成]
-      ├─ create_script_generator(config, provider) → IScriptGenerator実装
-      │   └─ GeminiClient / OpenAIClient / AnthropicClient のいずれか
+  └─ [台本生成パイプライン]
+      ├─ ScriptOrchestrator（orchestrator.enabled=true の場合）
+      │   ├─ Step 1:   TopicCurator              → CurationResult
+      │   ├─ Step 1.5: ShowRunner                → ShowPlan（show_plan.json）
+      │   └─ Step 2:   SegmentGenerator × N      → ScriptSegment 群
       │
-      └─ script_generator.generate(theme, research_data, avoid_topics, excluded_topics)
-          │
-          ├─ _build_user_prompt() → ユーザープロンプト構築
-          │   ├─ テーマ
-          │   ├─ リサーチ結果 (research_data.content) ← **ここに数千文字のMarkdownが流し込まれる**
-          │   ├─ 参考リンク候補 (research_data.sources)
-          │   ├─ excluded_topics (第2部モード用)
-          │   └─ avoid_topics (Negative Prompt)
-          │
-          ├─ PromptManager.get_script_prompt() → システムプロンプト取得
-          │   └─ config/prompts.yaml から読み込み
-          │
-          ├─ _call_api(system_prompt, user_prompt, use_schema=True)
-          │   ├─ リトライ処理 (最大2回、指数バックオフ)
-          │   ├─ Gemini API呼び出し (response_schema=Script)
-          │   └─ finish_reason チェック (MAX_TOKENS, SAFETY, RECITATION)
-          │
-          └─ _parse_response(response_text) → Script オブジェクト
-              ├─ json.loads() でJSONパース
-              ├─ Pydantic Script(**json_data) でバリデーション
-              └─ エラー時: _sanitize_json_response() → 再パース試行
+      ├─ （fallback）IScriptGenerator.generate() — 単一 API 呼び出しの旧経路
+      │   └─ GeminiClient / OpenAIClient / AnthropicClient
+      │
+      ├─ _build_speaker_diagnostics() → 話者役割の自動補正
+      ├─ VisualPaletteGenerator.generate_palette() → VisualIdentity（dynamic BG 時）
+      └─ MetadataGenerator.generate() → title / description / hashtags / thumbnail_title
 ```
 
-### 1.2 現在の実装方式
+### 1.2 fallback 経路（`orchestrator.enabled=false` 時）
 
-- **1回のAPI呼び出しで全体を生成**: 現在、台本全体（導入〜深掘り〜まとめ）を **単一のAPI呼び出し** で生成している。
-- **分割（チャンキング）なし**: リサーチデータの長さに関わらず、全文をプロンプトに流し込む方式。
-- **第2部モード**: `excluded_topics`が指定された場合のみ、第1部の内容を前提知識として追加する特殊モード。
+`IScriptGenerator.generate(theme, research_data, avoid_topics, excluded_topics)` が呼ばれる。
+
+```
+script_generator.generate(...)
+  ├─ _build_user_prompt() → ユーザープロンプト構築
+  │   ├─ テーマ
+  │   ├─ リサーチ結果 (research_data.content) ← 数千文字の Markdown が流し込まれる
+  │   ├─ 参考リンク候補 (research_data.sources)
+  │   ├─ excluded_topics (第2部モード用)
+  │   └─ avoid_topics (Negative Prompt)
+  │
+  ├─ PromptManager.get_script_prompt() → システムプロンプト取得（config/prompts.yaml）
+  │
+  ├─ _call_api(system_prompt, user_prompt, use_schema=True)
+  │   ├─ リトライ処理 (最大2回、指数バックオフ)
+  │   ├─ Gemini API呼び出し (response_schema=Script)
+  │   └─ finish_reason チェック (MAX_TOKENS, SAFETY, RECITATION)
+  │
+  └─ _parse_response(response_text) → Script オブジェクト
+      ├─ json.loads() でJSONパース
+      ├─ Pydantic Script(**json_data) でバリデーション
+      └─ エラー時: _sanitize_json_response() → 再パース試行
+```
+
+### 1.3 実装方式の比較
+
+| 観点 | Orchestrator 経路（推奨） | fallback 経路 |
+|---|---|---|
+| API 呼び出し回数 | 複数（Curator + ShowRunner + Segment × N） | 1回 |
+| リサーチ消化 | Curator が 5-10 トピックへ精製 → 各セグメントが個別に深掘り | 全文をプロンプトに流し込む |
+| 物語構造 | ShowRunner が全体アーク・ブリッジ・締めを設計 | プロンプト任せ |
+| 永続化成果物 | `curation_result.json`, `show_plan.json`, `script_artifact.json` | `script.json` のみ |
+
+- **第2部モード**: `excluded_topics`が指定された場合、第1部の内容を前提知識として追加する特殊モード（両経路で共通）。
 
 ---
 

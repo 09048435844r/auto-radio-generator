@@ -370,21 +370,35 @@ orchestrator:
 
 ### 6.3 実行例
 
+> **Note (2026-04-23 更新)**: v3.7 で SSOT 化が完了し、台本生成の唯一の実装は
+> `services.pipeline.execute_scripting_phase` に一元化された。下記はその標準的な
+> 呼び出し方（HITL / CLI / Gradio 自動モード共通）。
+> Gradio 自動モードは内部で `workflow._execute_gradio_scripting_phase` という
+> 薄いラッパーがリサーチを実行した上で本関数に委譲する。
+
 ```python
-from workflow import execute_scripting_phase
+from core.session_manager import SessionManager
+from services.pipeline import execute_scripting_phase
 from core.models import load_config
+from core.models.artifacts import ResearchBrief
 
 config = load_config()
-result = await execute_scripting_phase(
-    theme="血糖値管理の最新技術",
-    mode=ResearchMode.DEBATE,
-    queries=["CGMの精度", "インスリンポンプの進化"],
+session_manager = SessionManager(
+    project_root=Path("."),
+    session_id="20260322_001",
+)
+
+# ResearchBrief は `execute_research_phase` / HITL Gate 1 / Gradio 自動モード側で事前に準備
+research_brief: ResearchBrief = session_manager.load_research_brief()
+
+script_artifact = await execute_scripting_phase(
+    research_brief=research_brief,
+    session_manager=session_manager,
     config=config,
-    output_dir=Path("output/20260322_001"),
-    enable_research=True,
     provider="gemini",
 )
-# → orchestrator.enabled=true の場合、ScriptOrchestrator が起動
+# → orchestrator.enabled=true の場合、ScriptOrchestrator（TopicCurator → ShowRunner → SegmentGenerator）が起動
+# → script_artifact.json / show_plan.json / script.json が session に永続化される
 ```
 
 ---

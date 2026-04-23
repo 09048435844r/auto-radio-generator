@@ -272,11 +272,19 @@ async def execute_planning_phase(theme, mode, config, instruction=None, callback
     """Phase 1: AIプロデューサーが検索計画を作成"""
     ...
 
-async def execute_scripting_phase(
+async def _execute_gradio_scripting_phase(
     theme, mode, queries, config, output_dir,
-    enable_research=True, excluded_topics=None, avoid_topics=None, callbacks=None
+    enable_research=True, preloaded_research_data=None,
+    excluded_topics=None, avoid_topics=None,
+    provider="gemini", callbacks=None
 ) -> ScriptingPhaseResult:
-    """Phase 2: リサーチ → 台本生成（avoid_topics=Negative Prompt対応）"""
+    """Phase 2: リサーチ → 台本生成（Gradio 自動モード専用の薄いラッパー）
+
+    v3.7 (2026-04-23) より、台本生成ロジックは
+    `services.pipeline.execute_scripting_phase` に一元化された（SSOT）。
+    本関数はリサーチステップのみを担当し、ResearchBrief を構築してから
+    パイプライン層に委譲する。戻り値は従来互換の ScriptingPhaseResult.
+    """
     ...
 
 async def execute_production_phase(script, config, output_dir, project_root, speed_scale=None, callbacks=None) -> ProductionPhaseResult:

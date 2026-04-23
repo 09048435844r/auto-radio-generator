@@ -21,6 +21,11 @@ app.py: research_only(theme, research_mode)
 ```
 
 #### **経路B: 全自動実行（動画生成）**
+
+> **Note (2026-04-23 更新)**: v3.7 で台本生成が SSOT 化され、Gradio 自動モードも
+> 内部で `services.pipeline.execute_scripting_phase` に委譲される。リサーチ部分の
+> みが `workflow._execute_gradio_scripting_phase` 内に残存。
+
 ```
 UI: 「🎬 動画を生成」ボタン
   ↓
@@ -28,11 +33,13 @@ app.py: generate_btn.click()
   ↓
 app.py: generate_video(...)
   ↓
-workflow.py: execute_workflow(...)
+workflow.py: execute_workflow(...) / run_workflow_sync(...)
   ↓
 workflow.py: execute_planning_phase(...)
   ↓
-workflow.py: execute_scripting_phase(...)
+workflow.py: _execute_gradio_scripting_phase(...)  ← リサーチ専用ラッパー
+  ├─ PerplexityResearcher.research_multi(...)
+  └─ services.pipeline.execute_scripting_phase(...)  ← SSOT な台本生成
 ```
 
 ### 1.2 リサーチ実行の詳細フロー
@@ -64,10 +71,14 @@ workflow.py: execute_scripting_phase(...)
 workflow.py: execute_planning_phase()
   └─ GeminiClient.create_research_plan() （同上）
 
-workflow.py: execute_scripting_phase()
-  ├─ PerplexityResearcher.research_multi() （同上）
-  └─ GeminiClient.generate(theme, research_data)
-      └─ 台本生成（リサーチ結果を基に3部構成の台本を作成）
+workflow.py: _execute_gradio_scripting_phase()   ← v3.7 より薄い委譲ラッパー
+  ├─ PerplexityResearcher.research_multi() （経路Aと同じ）
+  ├─ _save_research_results() → research_brief.json を session 直下に保存
+  └─ services.pipeline.execute_scripting_phase(research_brief, session_manager, config, ...)
+      ├─ ScriptOrchestrator（TopicCurator → ShowRunner → SegmentGenerator）
+      │   もしくは fallback の IScriptGenerator.generate()
+      ├─ VisualPaletteGenerator.generate_palette() → VisualIdentity（dynamic BG 時）
+      └─ MetadataGenerator.generate() → title / description / hashtags / thumbnail_title
 ```
 
 ---
