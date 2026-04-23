@@ -22,6 +22,74 @@ from workflow import (
 )
 
 
+async def execute_fact_extraction_only(
+    research_brief: ResearchBrief,
+    session_manager: SessionManager,
+    config: AppConfig,
+    provider: str = "gemini",
+    callbacks: Optional[ProgressCallback] = None,
+):
+    """FactExtractor 単独実行（Phase 4 施策③）
+
+    リサーチ生文字列から構造化 FactSheet を抽出し session に保存する。
+    HITL (Gate 1.5) での事前確認、ないし Curator の判断材料キャッシュ用途。
+
+    Args:
+        research_brief: ResearchBrief from research phase
+        session_manager: SessionManager instance (saves fact_sheet.json)
+        config: Application config
+        provider: LLM provider
+        callbacks: Progress callback
+
+    Returns:
+        FactSheet: 抽出された事実シート（session にも保存済み）
+    """
+    from services.script_generation.fact_extractor import FactExtractor
+    from services.script_generation.adapters.factory import LLMAdapterFactory
+    from core.models.research import ResearchSource
+
+    cb = callbacks or ProgressCallback()
+
+    research_sources = [
+        ResearchSource.model_validate(source_dict)
+        for source_dict in research_brief.research_sources
+    ]
+    research_data = ResearchResult(
+        topic=research_brief.theme,
+        mode=research_brief.research_mode,
+        content=research_brief.research_content,
+        sources=research_sources,
+        usage=None,
+    )
+
+    cb.log(f"\n== Fact Extraction Only Phase: FactExtractor ==")
+    cb.log(f"Theme: {research_brief.theme}")
+    cb.log(f"Provider: {provider}")
+    cb.progress(0.10, "📋 ファクト抽出中...")
+
+    orch_cfg = config.yaml.script_generator.orchestrator
+    fe_cfg = getattr(orch_cfg, "fact_extractor", None)
+    fact_extractor_model = (getattr(fe_cfg, "model", "") or "").strip() or orch_cfg.curator_model
+    llm_port = LLMAdapterFactory.create(
+        config,
+        provider,
+        model_override=fact_extractor_model,
+    )
+    extractor = FactExtractor(llm_port, config)
+
+    fact_sheet = await extractor.extract_facts(
+        theme=research_brief.theme,
+        research_data=research_data,
+        progress_log=cb.log,
+    )
+
+    saved_path = session_manager.save_fact_sheet(fact_sheet)
+    cb.log(f"✓ FactSheet saved: {saved_path}")
+    cb.progress(1.0, "✅ ファクト抽出完了")
+
+    return fact_sheet
+
+
 async def execute_curation_only(
     research_brief: ResearchBrief,
     session_manager: SessionManager,
@@ -32,6 +100,7 @@ async def execute_curation_only(
     """Curator 単独実行: リサーチ結果からトピックを選定し CurationResult を session に保存する
 
     HITL (Gate 2a) で使用する。ユーザーが編集する前の生の Curator 出力を取得する。
+    Phase 4: session に fact_sheet.json が存在すれば自動ロードして Curator に渡す。
 
     Args:
         research_brief: ResearchBrief from research phase
@@ -88,9 +157,23 @@ async def execute_curation_only(
     )
     curator = TopicCurator(llm_port, config)
 
+    # Phase 4: auto-load FactSheet from session if present (fall through gracefully on any error)
+    fact_sheet = None
+    if session_manager.has_fact_sheet():
+        try:
+            fact_sheet = session_manager.load_fact_sheet()
+            cb.log(
+                f"[Curation] Auto-loaded FactSheet from session "
+                f"({len(fact_sheet.facts)} facts); will be used as judgment material"
+            )
+        except Exception as e:
+            cb.log(f"[WARN] Failed to load fact_sheet.json ({e}); running Curator without FactSheet")
+            fact_sheet = None
+
     curation_result = await curator.curate_topics(
         research_data=research_data,
         progress_log=cb.log,
+        fact_sheet=fact_sheet,
     )
 
     # Persist to session
@@ -111,9 +194,10 @@ async def execute_scripting_phase(
     callbacks: Optional[ProgressCallback] = None,
     preset_curation=None,
     preset_show_plan=None,
+    preset_fact_sheet=None,
 ) -> RadioScriptArtifact:
     """Execute scripting phase and generate RadioScriptArtifact
-    
+
     Args:
         research_brief: ResearchBrief from research phase
         session_manager: SessionManager instance
@@ -128,6 +212,9 @@ async def execute_scripting_phase(
         preset_show_plan: Optional ShowPlan from HITL (human-edited show plan, Phase 3).
                           If provided, skip ShowRunner invocation inside orchestrator.
                           If None and session has show_plan.json, it will be loaded automatically.
+        preset_fact_sheet: Optional FactSheet from HITL/cache (Phase 4 施策③).
+                           If provided, skip FactExtractor invocation inside orchestrator.
+                           If None and session has fact_sheet.json, it will be loaded automatically.
 
     Returns:
         RadioScriptArtifact: Scripting phase output artifact
@@ -203,6 +290,19 @@ async def execute_scripting_phase(
                 cb.log(f"[WARN] Failed to load show_plan.json ({e}); ShowRunner will run if enabled")
                 effective_show_plan = None
 
+        # Phase 4 support: auto-load fact_sheet.json if present and not explicitly passed
+        effective_fact_sheet = preset_fact_sheet
+        if effective_fact_sheet is None and session_manager.has_fact_sheet():
+            try:
+                effective_fact_sheet = session_manager.load_fact_sheet()
+                cb.log(
+                    f"[Orchestrator] Auto-loaded FactSheet from session "
+                    f"({len(effective_fact_sheet.facts)} facts); FactExtractor will be skipped"
+                )
+            except Exception as e:
+                cb.log(f"[WARN] Failed to load fact_sheet.json ({e}); FactExtractor will run if enabled")
+                effective_fact_sheet = None
+
         cb.log(f"[Orchestrator] Long-form script generation with {context.provider} (TopicCuration → SegmentGeneration)")
         orchestrator = ScriptOrchestrator(context)
         script = await orchestrator.generate_script(
@@ -213,6 +313,7 @@ async def execute_scripting_phase(
             progress_callback=cb,
             preset_curation=effective_preset,
             preset_show_plan=effective_show_plan,
+            preset_fact_sheet=effective_fact_sheet,
         )
         llm_usage = orchestrator.get_total_usage()
         segments = orchestrator.segments
@@ -231,6 +332,20 @@ async def execute_scripting_phase(
                 cb.log(f"✓ ShowPlan saved: {session_manager.get_show_plan_path().name}")
         except Exception as e:
             cb.log(f"[WARN] Failed to save show_plan.json (non-fatal): {e}")
+
+        # Phase 4: Persist the FactSheet that was actually used (if any), so downstream
+        # re-runs can skip FactExtractor. Purely additive; failure is non-fatal.
+        try:
+            actually_used_fact_sheet = effective_fact_sheet
+            if actually_used_fact_sheet is None:
+                actually_used_fact_sheet = getattr(
+                    getattr(orchestrator, "fact_extractor", None), "last_fact_sheet", None
+                )
+            if actually_used_fact_sheet is not None and not session_manager.has_fact_sheet():
+                session_manager.save_fact_sheet(actually_used_fact_sheet)
+                cb.log(f"✓ FactSheet saved: {session_manager.get_fact_sheet_path().name}")
+        except Exception as e:
+            cb.log(f"[WARN] Failed to save fact_sheet.json (non-fatal): {e}")
     else:
         # Single API call (fallback) - still uses provider selection
         script_generator = create_script_generator(config, provider=context.provider)

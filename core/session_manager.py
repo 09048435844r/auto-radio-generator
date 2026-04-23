@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from core.models.script import RadioScriptArtifact
     from core.models.curation import CurationResult
     from core.models.show_plan import ShowPlan
+    from core.models.fact_sheet import FactSheet
 
 
 class SessionManager:
@@ -249,9 +250,53 @@ class SessionManager:
         """Check if ShowPlan exists in this session."""
         return self.get_show_plan_path().exists()
 
+    # ------------------------------------------------------------------
+    # FactSheet persistence (Phase 4 施策③)
+    # ------------------------------------------------------------------
+
+    def get_fact_sheet_path(self) -> Path:
+        """Get path to FactSheet file (リサーチ事実抽出結果)."""
+        return self.session_dir / "fact_sheet.json"
+
+    def save_fact_sheet(self, fact_sheet: "FactSheet") -> Path:
+        """Save FactSheet to file.
+
+        Args:
+            fact_sheet: FactSheet instance
+
+        Returns:
+            Path to saved file
+        """
+        path = self.get_fact_sheet_path()
+        path.write_text(fact_sheet.model_dump_json(indent=2), encoding="utf-8")
+        return path
+
+    def load_fact_sheet(self) -> "FactSheet":
+        """Load FactSheet from file.
+
+        Returns:
+            FactSheet instance
+
+        Raises:
+            FileNotFoundError: If fact_sheet.json does not exist
+        """
+        from core.models.fact_sheet import FactSheet
+
+        path = self.get_fact_sheet_path()
+        if not path.exists():
+            raise FileNotFoundError(
+                f"FactSheet not found: {path}\n"
+                f"Please run FactExtractor (Phase 4) first."
+            )
+        return FactSheet.model_validate_json(path.read_text(encoding="utf-8"))
+
+    def has_fact_sheet(self) -> bool:
+        """Check if FactSheet exists in this session."""
+        return self.get_fact_sheet_path().exists()
+
     def get_session_status(self) -> dict:
         """Get current session status
-        
+
         Returns:
             Dictionary with phase completion status
         """
@@ -259,6 +304,7 @@ class SessionManager:
             "session_id": self.session_id,
             "session_dir": str(self.session_dir),
             "research_completed": self.has_research_brief(),
+            "fact_extraction_completed": self.has_fact_sheet(),
             "curation_completed": self.has_curation_result(),
             "show_plan_completed": self.has_show_plan(),
             "scripting_completed": self.has_script_artifact(),

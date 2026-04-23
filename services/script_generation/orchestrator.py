@@ -20,8 +20,10 @@ from core.models.curation import CurationResult, ScriptSegment
 from core.models.script import DialogueTurn, TurnType
 from core.models.execution_context import ExecutionContext
 from core.models.show_plan import ShowPlan
+from core.models.fact_sheet import FactSheet
 from services.script_generation.topic_curator import TopicCurator
 from services.script_generation.show_runner import ShowRunner
+from services.script_generation.fact_extractor import FactExtractor
 from services.script_generation.segment_generator import SegmentGenerator
 from services.script_generation.metadata_generator import MetadataGenerator
 from services.script_generation.adapters.factory import LLMAdapterFactory
@@ -92,6 +94,18 @@ class ScriptOrchestrator(IScriptOrchestrator):
         )
         self.show_runner = ShowRunner(self._show_runner_port, context.config)
 
+        # Phase 4: FactExtractor (backward compatible - enabled via config flag)
+        # Runs BEFORE Curator to provide structured fact sheet as judgment material.
+        fe_cfg = getattr(self.orch_cfg, "fact_extractor", None)
+        self._fact_extractor_enabled = bool(getattr(fe_cfg, "enabled", False))
+        fact_extractor_model = (getattr(fe_cfg, "model", "") or "").strip() or curator_model
+        self._fact_extractor_port = LLMAdapterFactory.create(
+            context.config,
+            context.provider,
+            model_override=fact_extractor_model,
+        )
+        self.fact_extractor = FactExtractor(self._fact_extractor_port, context.config)
+
         # Pass session_dir to SegmentGenerator for markdown script saving
         markdown_output_dir = getattr(context, 'session_dir', None)
         self.generator = SegmentGenerator(self._segment_port, context.config, markdown_output_dir=markdown_output_dir)
@@ -116,6 +130,7 @@ class ScriptOrchestrator(IScriptOrchestrator):
         progress_callback=None,
         preset_curation: Optional["CurationResult"] = None,
         preset_show_plan: Optional["ShowPlan"] = None,
+        preset_fact_sheet: Optional["FactSheet"] = None,
     ) -> Script:
         """テーマとリサーチデータから長尺台本を生成する
 
@@ -130,6 +145,9 @@ class ScriptOrchestrator(IScriptOrchestrator):
             preset_show_plan: 事前に用意された ShowPlan（Phase 3、HITL で人間が編集済みなど）。
                               渡された場合は Step 1.5 の ShowRunner 実行をスキップ。
                               None かつ show_runner.enabled=True の場合のみ ShowRunner を走らせる。
+            preset_fact_sheet: 事前に用意された FactSheet（Phase 4、HITL ないし前回実行のキャッシュ）。
+                               渡された場合は Step 0.5 の FactExtractor 実行をスキップ。
+                               None かつ fact_extractor.enabled=True の場合のみ FactExtractor を走らせる。
 
         Returns:
             Script: 統合された台本オブジェクト
@@ -142,6 +160,42 @@ class ScriptOrchestrator(IScriptOrchestrator):
         log(f"  リサーチデータ: {len(research_data.content)}文字")
 
         self._reset_usage()
+
+        # --------------------------------------------------------
+        # Step 0.5: Research 事実抽出（FactExtractor、Phase 4 施策③）
+        # 有効化条件:
+        #   - preset_fact_sheet が渡されていれば即採用
+        #   - それ以外で fact_extractor.enabled=True かつ Curator を実際に走らせる場合のみ実行
+        #   - preset_curation が提供される（Curator スキップ）場合は FactExtractor も不要
+        # 失敗時は警告ログのみ出して fact_sheet=None で継続（後方互換）
+        # --------------------------------------------------------
+        fact_sheet: Optional[FactSheet] = None
+        curator_will_run = not (preset_curation is not None and preset_curation.topics)
+        if preset_fact_sheet is not None:
+            log("\n[cyan]--- Step 0.5/3: 事実抽出（プリセット使用、FactExtractor スキップ） ---[/cyan]")
+            fact_sheet = preset_fact_sheet
+            log(f"  [green]✓ プリセット FactSheet を使用 (facts={len(fact_sheet.facts)})[/green]")
+        elif self._fact_extractor_enabled and curator_will_run:
+            log("\n[cyan]--- Step 0.5/3: 事実抽出（FactExtractor） ---[/cyan]")
+            if progress_callback:
+                progress_callback.progress(0.49, "📋 リサーチから事実を抽出中...")
+            try:
+                fact_sheet = await self.fact_extractor.extract_facts(
+                    theme=theme,
+                    research_data=research_data,
+                    progress_log=log,
+                )
+                self._accumulate_usage(self.fact_extractor.last_usage)
+            except Exception as e:
+                # Backward compat: if FactExtractor fails, fall through to legacy flow
+                log(f"[yellow]⚠ FactExtractor 失敗（fact_sheet=None で継続）: {e}[/yellow]")
+                logger.warning(f"FactExtractor.extract_facts failed; proceeding without FactSheet: {e}")
+                fact_sheet = None
+        else:
+            if not curator_will_run:
+                log("[dim]  (preset_curation 指定のため FactExtractor は不要)[/dim]")
+            else:
+                log("[dim]  (FactExtractor は無効。従来フローで Curator を実行)[/dim]")
 
         # --------------------------------------------------------
         # Step 1: トピックキュレーション（preset_curation があればスキップ）
@@ -164,6 +218,7 @@ class ScriptOrchestrator(IScriptOrchestrator):
                 research_data,
                 target_count=self.orch_cfg.max_topics,
                 progress_log=log,
+                fact_sheet=fact_sheet,
             )
             self._accumulate_usage(self.curator.last_usage)
 
@@ -357,12 +412,19 @@ class ScriptOrchestrator(IScriptOrchestrator):
         research_data: "ResearchResult",
         target_count: int = 3,
         progress_log=None,
+        fact_sheet: Optional["FactSheet"] = None,
     ) -> CurationResult:
-        """リサーチデータからトピックを選定（IScriptOrchestrator の実装）"""
+        """リサーチデータからトピックを選定（IScriptOrchestrator の実装）
+
+        Args:
+            fact_sheet: Phase 4 施策③、Curator に判断材料として差し込む構造化ファクト。
+                        None の場合は従来通り動作（後方互換）。
+        """
         return await self.curator.curate_topics(
             research_data=research_data,
             target_count=target_count,
             progress_log=progress_log,
+            fact_sheet=fact_sheet,
         )
 
     # ------------------------------------------------------------------

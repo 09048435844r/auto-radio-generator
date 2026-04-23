@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/test_fact_extractor.py -v)",
+      "Bash(python -m pytest tests/test_show_runner.py -v)",
+      "Bash(python -m pytest tests/)",
+      "Bash(python *)"
+    ]
+  }
+}

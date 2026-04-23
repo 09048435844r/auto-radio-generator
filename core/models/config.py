@@ -126,6 +126,27 @@ class ShowRunnerConfig(BaseModel):
     )
 
 
+class FactExtractorConfig(BaseModel):
+    """FactExtractor（Research 事実抽出）設定 - Phase 4 施策③
+
+    後方互換: 既定は enabled=False で、有効化しない限り TopicCurator は
+    fact_sheet=None で従来通り動作する。
+    """
+    enabled: bool = Field(
+        default=False,
+        description="Trueにするとリサーチ生文字列からFactSheetを抽出してCuratorに渡す"
+    )
+    model: str = Field(
+        default="",
+        description="FactExtractor用モデル（空=curator_modelと同じ軽量モデルを使用）"
+    )
+    max_facts: int = Field(
+        default=30,
+        ge=1,
+        description="抽出するファクトの最大数（LLMへの指示値、実出力はこれ以下になりうる）"
+    )
+
+
 class OrchestratorConfig(BaseModel):
     """Hierarchical Agentic Workflow オーケストレーター設定"""
     
@@ -165,6 +186,8 @@ class OrchestratorConfig(BaseModel):
     )
     # Phase 3 施策④: 番組構成プランナー（後方互換: 既定は disabled）
     show_runner: ShowRunnerConfig = Field(default_factory=ShowRunnerConfig)
+    # Phase 4 施策③: Research 事実抽出エージェント（後方互換: 既定は disabled）
+    fact_extractor: FactExtractorConfig = Field(default_factory=FactExtractorConfig)
 
 
 class ScriptGeneratorConfig(BaseModel):

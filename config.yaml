@@ -413,6 +413,13 @@ script_generator:
     show_runner:
       enabled: true      # true: ShowRunnerを実行 / false: 無効（従来フロー）
       model: ""          # 空=curator_model と同じ軽量モデルを使用
+    # Phase 4 施策③: Research 事実抽出エージェント（FactExtractor）
+    # リサーチ生文字列から構造化された FactSheet を抽出し、Curator の判断精度を上げる
+    # 後方互換: enabled=false（既定）なら Curator は fact_sheet=None で従来通り動作
+    fact_extractor:
+      enabled: true      # true: FactExtractorを実行 / false: 無効（従来フロー）
+      model: ""          # 空=curator_model と同じ軽量モデルを使用
+      max_facts: 30      # 抽出するファクトの最大数（LLM への指示値）
 
 # -----------------------------------------------------------------------------
 # 音声合成設定（VOICEVOX）

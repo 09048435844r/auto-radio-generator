@@ -20,6 +20,7 @@ from core.interfaces.llm_port import ILLMPort, LLMRequest
 
 if TYPE_CHECKING:
     from core.interfaces.researcher import ResearchResult
+    from core.models.fact_sheet import FactSheet
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -55,6 +56,7 @@ class TopicCurator:
         research_data: "ResearchResult",
         target_count: Optional[int] = None,
         progress_log=None,
+        fact_sheet: Optional["FactSheet"] = None,
     ) -> CurationResult:
         """リサーチデータから面白いトピックを選定する
 
@@ -62,6 +64,9 @@ class TopicCurator:
             research_data: Perplexityから得たリサーチ結果
             target_count: 選定するトピック数（Noneの場合は設定値を使用）
             progress_log: 進捗ログ関数（オプション）
+            fact_sheet: Phase 4 施策③で生成された構造化ファクトシート（オプション）。
+                        渡された場合はユーザープロンプトに差し込み、Curator の判断精度を上げる。
+                        None の場合は従来通りリサーチ生文字列のみで動作（後方互換）。
 
         Returns:
             CurationResult: 選定されたトピックと選定理由
@@ -71,9 +76,11 @@ class TopicCurator:
 
         log(f"[cyan]🔍 トピックキュレーション開始 (プロバイダー: {self._llm.provider_name}, モデル: {self.curator_model})[/cyan]")
         log(f"  リサーチデータ: {len(research_data.content)}文字 → {count}トピックを選定")
+        if fact_sheet is not None and not fact_sheet.is_empty():
+            log(f"  FactSheet: {len(fact_sheet.facts)}件のファクトを判断材料として使用")
 
         system_prompt = self.prompt_manager.get_prompt("orchestrator", "curation")
-        user_prompt = self._build_curation_user_prompt(research_data, count)
+        user_prompt = self._build_curation_user_prompt(research_data, count, fact_sheet=fact_sheet)
 
         try:
             response_text, usage = await self._call_api(system_prompt, user_prompt)
@@ -95,10 +102,35 @@ class TopicCurator:
         self,
         research_data: "ResearchResult",
         target_count: int,
+        fact_sheet: Optional["FactSheet"] = None,
     ) -> str:
         """キュレーション用ユーザープロンプトを構築"""
         prompt = f"## テーマ\n{research_data.mode}モードでリサーチされたデータです。\n\n"
         prompt += f"## リサーチデータ（全文）\n{research_data.content}\n\n"
+
+        # Phase 4: FactSheet が提供されていれば、構造化ファクトを差し込む
+        # これにより Curator は数値・固有名詞ベースで選定判断を行える
+        if fact_sheet is not None and not fact_sheet.is_empty():
+            prompt += "## 構造化ファクトシート（FactExtractor による事前分析）\n"
+            if fact_sheet.theme_summary:
+                prompt += f"### テーマ要約\n{fact_sheet.theme_summary}\n\n"
+            top_facts = fact_sheet.top_facts(limit=min(20, len(fact_sheet.facts)))
+            if top_facts:
+                prompt += f"### 意外性の高いファクト（上位{len(top_facts)}件、surprise_score 降順）\n"
+                for i, fact in enumerate(top_facts, 1):
+                    meta_parts: list[str] = [f"surprise={fact.surprise_score}", f"cat={fact.category}"]
+                    if fact.numeric_value:
+                        meta_parts.append(f"数値={fact.numeric_value}")
+                    if fact.entity:
+                        meta_parts.append(f"主語={fact.entity}")
+                    prompt += f"{i}. [{' / '.join(meta_parts)}] {fact.statement}\n"
+                prompt += "\n"
+            prompt += (
+                "**重要**: 上記ファクトシートの意外性スコアと固有名詞を参考に、"
+                "key_facts を具体化し、selection_reason で「なぜこのトピックが面白いか」を"
+                "数字・固有名詞ベースで書くこと。\n\n"
+            )
+
         prompt += (
             f"## 指示\n"
             f"上記のリサーチデータから、最も面白い**{target_count}個**のトピックを選定してください。\n"
