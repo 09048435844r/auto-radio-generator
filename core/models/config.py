@@ -129,12 +129,14 @@ class ShowRunnerConfig(BaseModel):
 class FactExtractorConfig(BaseModel):
     """FactExtractor（Research 事実抽出）設定 - Phase 4 施策③
 
-    後方互換: 既定は enabled=False で、有効化しない限り TopicCurator は
-    fact_sheet=None で従来通り動作する。
+    SSOT: 既定値・docstring・shipped config.yaml はいずれも enabled=True で統一する。
+    Phase 4 施策③のロールアウト完了に伴い、ラジオ番組生成のデフォルトパイプラインの
+    一部として FactExtractor が自動実行される。意図的に無効化したい場合のみ
+    config.yaml 側で enabled: false を明示する（従来フローと完全互換）。
     """
     enabled: bool = Field(
-        default=False,
-        description="Trueにするとリサーチ生文字列からFactSheetを抽出してCuratorに渡す"
+        default=True,
+        description="Trueにするとリサーチ生文字列からFactSheetを抽出してCuratorに渡す（既定: True）"
     )
     model: str = Field(
         default="",
@@ -144,6 +146,16 @@ class FactExtractorConfig(BaseModel):
         default=30,
         ge=1,
         description="抽出するファクトの最大数（LLMへの指示値、実出力はこれ以下になりうる）"
+    )
+    max_tokens: int = Field(
+        default=8192,
+        ge=256,
+        description=(
+            "LLM への max_tokens（出力トークン上限）。"
+            "max_facts に見合う十分な値を与えること。"
+            "この上限で切り詰められた（finish_reason=length）場合、"
+            "FactExtractor は部分 JSON を返さず例外を投げる（フェイルファスト）。"
+        )
     )
 
 

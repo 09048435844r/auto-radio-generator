@@ -415,11 +415,13 @@ script_generator:
       model: ""          # 空=curator_model と同じ軽量モデルを使用
     # Phase 4 施策③: Research 事実抽出エージェント（FactExtractor）
     # リサーチ生文字列から構造化された FactSheet を抽出し、Curator の判断精度を上げる
-    # 後方互換: enabled=false（既定）なら Curator は fact_sheet=None で従来通り動作
+    # SSOT: 既定 enabled=true（FactExtractorConfig.enabled のデフォルトと一致）
+    # 無効化したい場合のみ enabled: false を明示（Curator は fact_sheet=None で従来動作）
     fact_extractor:
-      enabled: true      # true: FactExtractorを実行 / false: 無効（従来フロー）
+      enabled: true      # true: FactExtractorを実行（既定） / false: 無効（従来フロー）
       model: ""          # 空=curator_model と同じ軽量モデルを使用
       max_facts: 30      # 抽出するファクトの最大数（LLM への指示値）
+      max_tokens: 8192   # LLMの出力上限。length 切り詰め時はフェイルファストで例外
 
 # -----------------------------------------------------------------------------
 # 音声合成設定（VOICEVOX）
