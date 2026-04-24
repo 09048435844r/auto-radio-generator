@@ -127,3 +127,43 @@ qwen3:8b はプロンプト遵守力が弱く、本件の title 欠落・facts=[
 
 ### 優先度
 低（PR-E + 将来の Structured Output で効果が出れば不要）
+
+---
+
+## [BACKLOG] ユーザープロンプトの SSOT 化（Python コード埋め込みから prompts.yaml へ）
+
+**記録日**: 2026-04-24
+**発見経緯**: PR-E（`review/issue-B-prompt-pressure`）でプロンプト改修中に判明
+
+### 問題
+本プロジェクトはシステムプロンプトを `config/prompts.yaml` で SSOT 管理する明確な設計思想を持つが、**ユーザープロンプト（JSON 例示・指示文言を含む）は各エージェントの Python ソースに f-string リテラルとして埋め込まれている**。該当箇所:
+
+- `services/script_generation/topic_curator.py::_build_curation_user_prompt`
+- `services/script_generation/fact_extractor.py::_build_fact_extractor_user_prompt`
+- `services/script_generation/show_runner.py::_build_show_runner_user_prompt`
+- `services/script_generation/segment_generator.py`（複数箇所）
+- `services/script_generation/metadata_generator.py::_build_prompt`
+
+PR-E ではこの不整合の影響を受けつつ、既存パターンを尊重して「最小限の文字列変更」に留めた。
+
+### 何が問題か
+1. **SSOT 違反**: システムプロンプトと同じ重要度を持つユーザープロンプトが、管理方針の異なる場所に分散
+2. **プロンプトエンジニアリングの効率低下**: プロンプト調整のたびに Python コード側の修正が必要で、YAML 編集で完結する system prompt と非対称
+3. **新エージェント追加時の踏襲リスク**: 新規エージェントも同じパターンで user prompt を Python 埋め込みすると、負債が拡大する
+
+### 推奨対応
+`config/prompts.yaml` に `user_prompts` 階層を新設し、各エージェントの user prompt テンプレートを移動。各エージェントは `PromptManager` 経由で template を取得し、変数を `str.format(**kwargs)` で差し込む。
+
+想定される実装範囲:
+- `config/prompts.yaml` の階層拡張
+- `core/prompt_manager.py` に `get_user_prompt_template(section, key)` 追加
+- 5 エージェント（topic_curator / fact_extractor / show_runner / segment_generator / metadata_generator）の `_build_*_prompt` メソッドをテンプレート展開方式に置換
+- 既存の動的計算部分（`expected_bridges` 等）は引き続き Python 側で計算、template 変数として渡す
+
+### 前提条件・リスク
+- 既存の 125 件テスト全 pass を維持
+- プロンプト内容を変えずに配置だけ変更する（挙動回帰ゼロが前提）
+- PromptManager のテンプレート変数展開が既存の f-string 機能と等価になることの検証
+
+### 優先度
+低〜中。SSOT 思想に反するが実害は顕在化していない。プロンプトエンジニアリングの頻度が高まった場合、または新エージェント追加の頻度が増えた場合に昇格検討。
