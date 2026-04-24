@@ -7,6 +7,28 @@
 
 ## [Unreleased]
 
+### 追加（2026-04-24: プロンプト明示圧力強化でフィールド省略対策）
+- **TopicCurator と FactExtractor のプロンプトを改善**（Issue B / PR-E / `review/issue-B-prompt-pressure`）
+  - 本運用で発見された共通病理「小型モデル（qwen3:8b）がプロンプトで明示されていないフィールドを省略する」への対処
+  - **TopicCurator 改善** (A+B+C 手法適用):
+    - `title` フィールドに必須化・20〜40文字・数値か固有名詞を最低1つ含む制約を明示
+    - 悪い例（"デンマークの研究" のような短い国名+研究種別）と良い例（"デンマーク研究で70%が関節痛軽減"）を両方掲載
+    - 既存の title 欠落時フォールバック（`topic_curator.py:239-257` の合成ロジック）は保持。今回の改善で発動頻度が下がる想定
+    - `config/prompts.yaml::orchestrator.curation` に選定ルールと禁止事項を追記
+    - `services/script_generation/topic_curator.py::_build_curation_user_prompt` の JSON 例示プレースホルダ を "トピックタイトル" から制約記述に変更
+  - **FactExtractor 改善** (A+B+E 手法適用):
+    - `facts` を最低 5 件抽出する指示を追加（空配列禁止）
+    - 意外性スコア 4〜6（「一般人にとって新情報」）を積極的に含めるハードル緩和指示
+    - ユーザープロンプトの例示を英語圏 AI 文脈（"1200万円"/"OpenAI"）→ 日本語医療系（"亜麻仁油"/"デンマーク"/"70%"）に差し替え
+    - `extractor_reasoning` 空文字禁止（80〜150 文字必須）指示を追加
+    - `config/prompts.yaml::orchestrator.fact_extractor` + `services/script_generation/fact_extractor.py::_build_fact_extractor_user_prompt` で対応
+  - **スコープ外（BACKLOG.md に記録）**:
+    - Ollama Structured Output（`format` パラメータでの JSON schema 強制）: プロンプト改善で効果不十分な場合の次の一手
+    - モデル変更（qwen3:8b → 中型）: 上記いずれも効果不十分だった場合の最終手段
+    - 実運用効果観察: 1 日 1 回の本運用セッションで PR-C の logger 収集経由で追跡
+- **破壊的変更なし**: 既存の JSON 出力フォーマット契約（フィールド名・型・構造）は不変。プロンプト文言が改善されただけ
+- **テスト**: `tests/test_prompt_pressure.py` 新規、10 件追加（プロンプトから明示圧力の重要キーワードが将来リグレッションで消えないことを回帰的に保証）
+
 ### 追加（2026-04-24: max_tokens config 駆動化の横展開 / 全エージェント統一 fail-fast）
 - **LLM を呼ぶ 5 エージェント 6 箇所の `max_tokens` を config 駆動化**（Issue C / PR-D / `review/issue-C-max-tokens-unification`）
   - PR-A で FactExtractor に採用した「`max_tokens` は config 駆動、`finish_reason==length` なら `RuntimeError` を送出」パターンを横展開
