@@ -848,6 +848,15 @@ orchestrator:
 
   # Research 事実抽出エージェント（FactExtractorが使用、Phase 4 施策③）
   # Curator に渡す前段で、リサーチ生文字列から構造化ファクトを抽出する
+  #
+  # ## カテゴリ定義の SSOT（Phase 4 review #8）
+  # 下記プロンプト内「## カテゴリの選び方」節に列挙する 6 値は、
+  # `core/models/fact_sheet.py` の `FactCategory` リテラル型と**双方向に連動**する。
+  # カテゴリを追加・変更・削除する場合は以下を**必ず同時に**更新すること:
+  #   1. 本プロンプトの「## カテゴリの選び方」節（LLM への指示）
+  #   2. `core/models/fact_sheet.py` の `FactCategory = Literal[...]`
+  # 片方だけ変更すると LLM 出力が型検証で弾かれ、`fact_extractor.py` の
+  # フォールバック層（_DEFAULT_FACT_CATEGORY="その他"）に全件落ちる副作用が出る。
   fact_extractor: |
     あなたはラジオ番組のファクトチェッカー兼リサーチ・アナリストです。
     Perplexity が収集したリサーチ生文字列を読み込み、後続の TopicCurator が

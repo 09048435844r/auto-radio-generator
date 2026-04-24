@@ -553,3 +553,100 @@ def test_execute_fact_extraction_only_runs_normally_when_no_prior_file(
     assert result.theme_summary == "stub summary"
     # No backup files should be produced on a clean run
     assert not list(sm.session_dir.glob("fact_sheet.bak.*.json"))
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 review #8: FactCategory Literal enforcement and fallback behavior
+# ---------------------------------------------------------------------------
+
+def test_fact_category_ssot_exposes_exactly_six_values():
+    """`FactCategory` の値は prompts.yaml の指示と同一の 6 値でなければならない。"""
+    from typing import get_args
+    from core.models.fact_sheet import FactCategory
+
+    expected = {"数値", "人物", "事件", "比較", "引用", "その他"}
+    assert set(get_args(FactCategory)) == expected
+
+
+def test_extracted_fact_default_category_is_その他():
+    """Phase 4 review #8: 既定値は "general" ではなく "その他"（プロンプト指示との言語整合）。"""
+    fact = ExtractedFact(statement="デフォルト値確認")
+    assert fact.category == "その他"
+
+
+@pytest.mark.parametrize("valid_cat", ["数値", "人物", "事件", "比較", "引用", "その他"])
+def test_extracted_fact_accepts_all_six_ssot_categories(valid_cat):
+    """SSOT に列挙された 6 カテゴリはすべて ExtractedFact で受け入れられる。"""
+    fact = ExtractedFact(statement="テスト", category=valid_cat)
+    assert fact.category == valid_cat
+
+
+def test_parse_fallbacks_unknown_category_to_その他(mock_app_config, caplog):
+    """LLM が SSOT 外の値を返した場合、警告ログ付きで "その他" にフォールバック。"""
+    import logging
+
+    extractor = _make_fact_extractor_for_parse(mock_app_config)
+    raw = json.dumps({
+        "facts": [
+            {"statement": "英語カテゴリ", "category": "general", "surprise_score": 5},
+            {"statement": "別の未知値", "category": "ミーム", "surprise_score": 4},
+        ],
+        "theme_summary": "",
+    })
+
+    with caplog.at_level(logging.WARNING, logger="services.script_generation.fact_extractor"):
+        sheet = extractor._parse_fact_sheet_response(raw)
+
+    # Both facts must be present and normalized to the default category
+    assert len(sheet.facts) == 2
+    assert all(f.category == "その他" for f in sheet.facts)
+
+    # A warning must have been emitted mentioning each unknown value
+    warning_messages = [rec.getMessage() for rec in caplog.records if rec.levelno == logging.WARNING]
+    joined = "\n".join(warning_messages)
+    assert "general" in joined
+    assert "ミーム" in joined
+    # The warning wording ties back to SSOT normalization
+    assert "Unknown category" in joined or "未知" in joined
+
+
+def test_parse_missing_category_defaults_without_warning(mock_app_config, caplog):
+    """category キー自体が欠けている場合は警告を出さず静かに "その他" にする。"""
+    import logging
+
+    extractor = _make_fact_extractor_for_parse(mock_app_config)
+    raw = json.dumps({
+        "facts": [{"statement": "カテゴリなし", "surprise_score": 5}],
+        "theme_summary": "",
+    })
+
+    with caplog.at_level(logging.WARNING, logger="services.script_generation.fact_extractor"):
+        sheet = extractor._parse_fact_sheet_response(raw)
+
+    assert sheet.facts[0].category == "その他"
+    # No "Unknown category" warning should be emitted for missing / empty category
+    warnings = [r for r in caplog.records if "Unknown category" in r.getMessage()]
+    assert warnings == []
+
+
+def test_parse_preserves_valid_category(mock_app_config):
+    """SSOT 内の値が与えられた場合は正規化されずそのまま保持される。"""
+    extractor = _make_fact_extractor_for_parse(mock_app_config)
+    raw = json.dumps({
+        "facts": [
+            {"statement": "数字ネタ", "category": "数値", "surprise_score": 9},
+            {"statement": "人物ネタ", "category": "人物", "surprise_score": 7},
+        ],
+        "theme_summary": "",
+    })
+    sheet = extractor._parse_fact_sheet_response(raw)
+    categories = {f.category for f in sheet.facts}
+    assert categories == {"数値", "人物"}
+
+
+def test_extracted_fact_rejects_invalid_category_on_direct_construction():
+    """直接構築時も Literal 型により SSOT 外の値は弾かれる（型安全化の核）。"""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        ExtractedFact(statement="不正", category="general")  # 英語値は SSOT 外

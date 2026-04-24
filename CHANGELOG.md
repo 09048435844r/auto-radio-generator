@@ -7,6 +7,31 @@
 
 ## [Unreleased]
 
+### 追加（2026-04-24: Python logger 出力の processing_log.txt への統合 / 運用観測性の向上）
+- **`workflow.py::LogFileWriter` に FileHandler ライフサイクルを追加**（Issue A / PR-C / `review/issue-A-logger-capture`）
+  - セッション開始時に root logger へ `FileHandler(processing_log.txt, level=WARNING)` をアタッチし、`finalize()` でデタッチ
+  - 従来 stderr にしか出ていなかった `logger.warning/error` 系が `processing_log.txt` に自動記録されるように（具体例: FactExtractor の "Unknown category" 警告、TopicCurator の title 欠落警告、MetadataGenerator の truncation 警告、Ollama adapter の空レスポンス例外メッセージ等）
+  - 既存の `.write(msg)` 呼び出し・rich markup 出力は挙動不変（純追加、破壊的変更なし）
+  - Formatter: `>>> [%(levelname)s] [%(name)s] %(message)s` — 既存の `[cyan]...` 等の rich markup 行と視覚的に区別
+  - ログレベルは **WARNING 固定**（DEBUG/INFO は意図的に除外、ノイズ抑止）。config 駆動化は将来 PR で検討
+- **残留ハンドラ汚染防止**: 専用サブクラス `_SessionLogFileHandler` を定義し、`LogFileWriter.__init__` で `isinstance` ベースで前回 session の残留ハンドラのみを安全に掃除（他目的の `logging.FileHandler` には干渉しない）。Gradio 長命プロセスで `finalize()` 漏れが起きた場合の「新 session の warning が前回ファイルへ書き込まれる」汚染バグを防止
+- **テスト**: `tests/test_logger_capture.py` 新規、9 件追加（basic capture / ERROR 捕捉 / INFO 非捕捉 / finalize 後隔離 / 複数 session 非汚染 / `.write()` 後方互換 / logger と `.write()` 共存 / 残留ハンドラ掃除 / 非 `_SessionLogFileHandler` の誤検知ゼロ）
+
+### 破壊的変更（2026-04-23: CurationResult.topics 非空契約の強制）
+- **`core.models.curation.CurationResult.topics` を非空必須に**（Phase 4 review #4 / `review/phase4-fact-extractor-b`）
+  - Pydantic `@field_validator` で `len(topics) == 0` の場合 `ValidationError` を送出
+  - 旧実装では Orchestrator 層で `preset_curation is not None and preset_curation.topics` と暗黙に非空を前提としていたが、条件違反時は silent に Curator 実行へフォールスルーしていたため、壊れた preset が検知されず debug を困難にしていた
+  - **影響**: 既存セッションの `curation_result.json` で `topics: []` の壊れたデータがあれば、load 時（`SessionManager.load_curation_result`）に ValidationError が出る
+  - **移行手順**: 該当セッションは (a) 当該 JSON を手動で修復、(b) `curation_result.json` を削除して再実行、のいずれかで対応。通常の利用では CurationResult が空であること自体が異常系のため影響を受けない想定
+
+### 追加（2026-04-23: ExtractedFact.category の型固定 / SSOT 双方向参照）
+- **`core.models.fact_sheet.FactCategory` リテラル型新設**（Phase 4 review #8）
+  - `FactCategory = Literal["数値", "人物", "事件", "比較", "引用", "その他"]`
+  - `ExtractedFact.category` を `str` から `FactCategory` に型固定、既定値を `"general"` → `"その他"` に統一（プロンプト指示との言語整合）
+  - `fact_extractor.py::_parse_fact_sheet_response` のフォールバック処理を「未知値は `logger.warning` を出しつつ `"その他"` に正規化」に置換。旧 `str(f.get("category", "general") or "general").strip() or "general"` は撤去
+  - SSOT の所在を `FactCategory` docstring と `config/prompts.yaml` の両方に明記し、双方向参照コメントを挿入（片方だけ変更すると LLM 出力がフォールバック層に全件落ちる旨を明文化）
+  - `typing.get_args(FactCategory)` で runtime 集合を派生させ、Literal 定義を唯一の情報源に統一
+
 ### リファクタリング（2026-04-23: 台本生成の単一情報源化 / SSOT）
 - **`workflow.py::execute_scripting_phase` 削除 → `_execute_gradio_scripting_phase` へ改名**: Gradio 自動モードの台本生成フェーズと HITL/CLI 向けの `services.pipeline.execute_scripting_phase` で挙動が乖離していた問題を解消
   - リサーチステップだけを Gradio 層（`workflow.py`）に残し、台本生成ロジックは `services.pipeline.execute_scripting_phase` に完全委譲
