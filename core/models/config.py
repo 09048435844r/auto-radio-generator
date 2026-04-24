@@ -216,11 +216,15 @@ class SegmentGeneratorConfig(BaseModel):
 class MetadataGeneratorConfig(BaseModel):
     """MetadataGenerator（後処理メタデータ生成）設定 - PR-D Issue C 横展開"""
     max_tokens: int = Field(
-        default=2048,
+        default=4096,
         ge=256,
         description=(
-            "LLM への max_tokens。旧ハードコード 2048 を踏襲。"
-            "切り詰め時は RuntimeError 送出 → 呼び出し側がデフォルトメタデータへフォールバック。"
+            "LLM への max_tokens。2026-04-24 の本運用（output/20260424_220840）で"
+            "旧 2048 が truncation を起こした実績に基づき 4096 に引き上げ。"
+            "出力想定: title/thumbnail_title/description/hashtags 合計 ~580 文字 × "
+            "日本語トークン化率 ~2.5 = 実使用 ~1500 トークン + JSON オーバーヘッド。"
+            "4096 は 2x 余裕を持たせた運用値。切り詰め時は RuntimeError 送出 → "
+            "呼び出し側がデフォルトメタデータへフォールバック。"
         ),
     )
 

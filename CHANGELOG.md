@@ -7,6 +7,12 @@
 
 ## [Unreleased]
 
+### 修正（2026-04-25: MetadataGenerator.max_tokens を 2048 → 4096 に引き上げ）
+- **本運用セッション `output/20260424_220840` で `finish_reason=length` による truncation が発生**し、メタデータ生成がデフォルト値フォールバックに落ちた実績を受けた運用チューニング
+- `core/models/config.py::MetadataGeneratorConfig.max_tokens` の Pydantic default と `config.yaml::orchestrator.metadata_generator.max_tokens` を**両方 4096 に揃えて SSOT 維持**
+- 出力想定: title/thumbnail_title/description/hashtags 合計 ~580 文字 × 日本語トークン化率 ~2.5 = 実使用 ~1500 トークン + JSON オーバーヘッド。4096 は 2x 余裕を持たせた運用値
+- 破壊的変更なし（上限値のみ変更、API/データ形式不変）。既存 125 件テスト全 pass
+
 ### 追加（2026-04-24: プロンプト明示圧力強化でフィールド省略対策）
 - **TopicCurator と FactExtractor のプロンプトを改善**（Issue B / PR-E / `review/issue-B-prompt-pressure`）
   - 本運用で発見された共通病理「小型モデル（qwen3:8b）がプロンプトで明示されていないフィールドを省略する」への対処
