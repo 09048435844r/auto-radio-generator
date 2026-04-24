@@ -124,6 +124,15 @@ class ShowRunnerConfig(BaseModel):
         default="",
         description="ShowRunner用モデル（空=curator_modelと同じ軽量モデルを使用）"
     )
+    max_tokens: int = Field(
+        default=4096,
+        ge=256,
+        description=(
+            "LLM への max_tokens（出力トークン上限）。ShowPlan は compact な単一 JSON。"
+            "この上限で切り詰められた（finish_reason=length）場合、RuntimeError を送出し"
+            "orchestrator 側のフェイルオープンで show_plan=None に落とす（PR-D Issue C）。"
+        ),
+    )
 
 
 class FactExtractorConfig(BaseModel):
@@ -156,6 +165,63 @@ class FactExtractorConfig(BaseModel):
             "この上限で切り詰められた（finish_reason=length）場合、"
             "FactExtractor は部分 JSON を返さず例外を投げる（フェイルファスト）。"
         )
+    )
+
+
+# ---------------------------------------------------------------------------
+# PR-D (Issue C): 他エージェントの max_tokens config 駆動化
+# ---------------------------------------------------------------------------
+# PR-A で FactExtractor に採用した「max_tokens を config 駆動化 + finish_reason=length
+# で RuntimeError 送出」パターンを、他の 5 エージェント（TopicCurator / ShowRunner /
+# SegmentGenerator 3 phase / MetadataGenerator）に横展開する。
+#
+# 既定値は各エージェントの旧ハードコード値をそのまま踏襲（後方互換優先）。
+# 数値の引き上げ調整は運用判断として config.yaml で変更する。
+
+class TopicCuratorConfig(BaseModel):
+    """TopicCurator（トピック選定）設定 - PR-D Issue C 横展開"""
+    max_tokens: int = Field(
+        default=8192,
+        ge=256,
+        description=(
+            "LLM への max_tokens。旧ハードコード 8192 を踏襲。"
+            "切り詰め時は RuntimeError 送出 → orchestrator がフェイルオープン。"
+        ),
+    )
+
+
+class SegmentGeneratorConfig(BaseModel):
+    """SegmentGenerator（セグメント生成）設定 - PR-D Issue C 横展開
+
+    1-phase JSON 生成と 2-phase 生成（Markdown → JSON）で異なる max_tokens を必要とするため、
+    フェーズ別に 3 フィールドを持つ。
+    """
+    max_tokens_single: int = Field(
+        default=8192,
+        ge=256,
+        description="1-phase JSON 生成時の max_tokens（旧ハードコード 8192）",
+    )
+    max_tokens_phase1: int = Field(
+        default=4096,
+        ge=256,
+        description="2-phase 生成の Phase 1（Markdown creative）の max_tokens（旧ハードコード 4096）",
+    )
+    max_tokens_phase2: int = Field(
+        default=2048,
+        ge=256,
+        description="2-phase 生成の Phase 2（JSON 構造化）の max_tokens（旧ハードコード 2048）",
+    )
+
+
+class MetadataGeneratorConfig(BaseModel):
+    """MetadataGenerator（後処理メタデータ生成）設定 - PR-D Issue C 横展開"""
+    max_tokens: int = Field(
+        default=2048,
+        ge=256,
+        description=(
+            "LLM への max_tokens。旧ハードコード 2048 を踏襲。"
+            "切り詰め時は RuntimeError 送出 → 呼び出し側がデフォルトメタデータへフォールバック。"
+        ),
     )
 
 
@@ -200,6 +266,10 @@ class OrchestratorConfig(BaseModel):
     show_runner: ShowRunnerConfig = Field(default_factory=ShowRunnerConfig)
     # Phase 4 施策③: Research 事実抽出エージェント（後方互換: 既定は disabled）
     fact_extractor: FactExtractorConfig = Field(default_factory=FactExtractorConfig)
+    # PR-D Issue C: max_tokens 横展開
+    topic_curator: TopicCuratorConfig = Field(default_factory=TopicCuratorConfig)
+    segment_generator: SegmentGeneratorConfig = Field(default_factory=SegmentGeneratorConfig)
+    metadata_generator: MetadataGeneratorConfig = Field(default_factory=MetadataGeneratorConfig)
 
 
 class ScriptGeneratorConfig(BaseModel):

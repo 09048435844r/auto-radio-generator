@@ -50,6 +50,8 @@ class ShowRunner:
         # ShowRunner config (backward compatible: falls back to curator_model if not set)
         sr_cfg = getattr(orch_cfg, "show_runner", None)
         self.show_runner_model = (getattr(sr_cfg, "model", "") or "").strip() or orch_cfg.curator_model
+        # PR-D Issue C: max_tokens config 駆動化。旧ハードコード 4096 を既定値として踏襲
+        self.max_tokens = int(getattr(sr_cfg, "max_tokens", 4096) or 4096)
 
         self.last_usage: Optional[LLMUsage] = None
         # Expose the last successfully-produced ShowPlan so the pipeline layer
@@ -193,17 +195,22 @@ class ShowRunner:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             model=model_to_use,
-            max_tokens=4096,  # ShowPlan is compact (single JSON object)
+            max_tokens=self.max_tokens,  # PR-D: config 駆動（旧ハードコード 4096）
             temperature=0.4,   # Slightly higher than curator to encourage creative arc design
             response_format="json",
         )
 
         response = await self._llm.generate(request)
 
+        # PR-D Issue C: fail-fast on truncation. Orchestrator catches the raise and
+        # falls back to show_plan=None, so downstream segment generation continues
+        # without ShowPlan hints (backward-compatible behavior).
         if response.finish_reason == "length":
-            logger.warning(
+            raise RuntimeError(
                 "ShowRunner output was truncated (finish_reason=length). "
-                "Consider increasing max_output_tokens."
+                f"Current max_tokens={self.max_tokens}. "
+                "Increase orchestrator.show_runner.max_tokens in config.yaml. "
+                "Aborting rather than returning a partial ShowPlan."
             )
 
         logger.debug(

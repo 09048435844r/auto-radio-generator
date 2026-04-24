@@ -7,6 +7,25 @@
 
 ## [Unreleased]
 
+### 追加（2026-04-24: max_tokens config 駆動化の横展開 / 全エージェント統一 fail-fast）
+- **LLM を呼ぶ 5 エージェント 6 箇所の `max_tokens` を config 駆動化**（Issue C / PR-D / `review/issue-C-max-tokens-unification`）
+  - PR-A で FactExtractor に採用した「`max_tokens` は config 駆動、`finish_reason==length` なら `RuntimeError` を送出」パターンを横展開
+  - 対象: `TopicCurator` / `ShowRunner` / `SegmentGenerator` (3 箇所: 1-phase JSON / Phase 1 creative / Phase 2 JSON) / `MetadataGenerator`
+  - 既定値は各エージェントの**旧ハードコード値をそのまま踏襲**（数値の引き上げは運用判断として `config.yaml` で変更）
+    - `topic_curator.max_tokens = 8192`
+    - `show_runner.max_tokens = 4096`
+    - `segment_generator.max_tokens_single = 8192`
+    - `segment_generator.max_tokens_phase1 = 4096`
+    - `segment_generator.max_tokens_phase2 = 2048`
+    - `metadata_generator.max_tokens = 2048`
+  - **`finish_reason==length` 時の挙動統一**: 全 6 箇所で `RuntimeError` を送出し、呼び出し側（`orchestrator` / `scripting_phase` の `try/except`）がフォールバック処理でハンドリング
+    - 本運用で発生した MetadataGenerator の truncation は、従来 `logger.warning` + 部分 JSON parse 試行で silent に対処されていたが、PR-D では fail-fast 化により早期検知・デフォルトメタデータへのフォールバックが明示的になる
+    - SegmentGenerator Phase 1（creative markdown）は従来 `finish_reason` チェックすら存在せず、truncated markdown が Phase 2 JSON 変換に渡って parse 失敗していた問題も同時解消
+- **`core/models/config.py` に Config クラス新設**: `TopicCuratorConfig` / `SegmentGeneratorConfig` / `MetadataGeneratorConfig`。`ShowRunnerConfig` には `max_tokens` フィールド追加
+- **`config.yaml`**: `orchestrator.{topic_curator, show_runner, segment_generator, metadata_generator}.max_tokens*` を追加（旧ハードコード値と同値）
+- **破壊的変更なし**: API シグネチャ不変、既定値は旧ハードコードと同値のため既存セッションに影響なし。finish_reason==length 時の挙動変化（warning → RuntimeError）は発動条件が truncation 発生時のみで、かつ呼び出し側 `try/except` で既にフォールバック処理済み
+- **テスト**: `tests/test_max_tokens_unification.py` 新規、12 件追加（各エージェント × (config 伝播 / length 時 RuntimeError) の 2 軸 × 6 箇所）
+
 ### 追加（2026-04-24: Python logger 出力の processing_log.txt への統合 / 運用観測性の向上）
 - **`workflow.py::LogFileWriter` に FileHandler ライフサイクルを追加**（Issue A / PR-C / `review/issue-A-logger-capture`）
   - セッション開始時に root logger へ `FileHandler(processing_log.txt, level=WARNING)` をアタッチし、`finalize()` でデタッチ

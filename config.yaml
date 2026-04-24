@@ -413,6 +413,7 @@ script_generator:
     show_runner:
       enabled: true      # true: ShowRunnerを実行 / false: 無効（従来フロー）
       model: ""          # 空=curator_model と同じ軽量モデルを使用
+      max_tokens: 4096   # PR-D: LLMの出力上限。length 切り詰め時はフェイルファストで例外
     # Phase 4 施策③: Research 事実抽出エージェント（FactExtractor）
     # リサーチ生文字列から構造化された FactSheet を抽出し、Curator の判断精度を上げる
     # SSOT: 既定 enabled=true（FactExtractorConfig.enabled のデフォルトと一致）
@@ -422,6 +423,18 @@ script_generator:
       model: ""          # 空=curator_model と同じ軽量モデルを使用
       max_facts: 30      # 抽出するファクトの最大数（LLM への指示値）
       max_tokens: 8192   # LLMの出力上限。length 切り詰め時はフェイルファストで例外
+    # PR-D Issue C: 他エージェントの max_tokens config 駆動化（旧ハードコード値を踏襲）
+    # いずれも finish_reason=length 時は RuntimeError を送出し、呼び出し側が
+    # フォールバック処理（orchestrator の try/except 等）でハンドリングする。
+    topic_curator:
+      max_tokens: 8192   # 旧ハードコード値。JSON 途中切断を防ぐため大きめ
+    segment_generator:
+      max_tokens_single: 8192  # 1-phase JSON 生成用
+      max_tokens_phase1: 4096  # 2-phase 生成の Phase 1（Markdown creative）
+      max_tokens_phase2: 2048  # 2-phase 生成の Phase 2（JSON 構造化）
+    metadata_generator:
+      max_tokens: 2048   # タイトル/概要/ハッシュタグ用。本運用で 2048 不足の事例あり、
+                         # 運用で不足が頻発する場合は引き上げ（例: 4096）を検討
 
 # -----------------------------------------------------------------------------
 # 音声合成設定（VOICEVOX）
