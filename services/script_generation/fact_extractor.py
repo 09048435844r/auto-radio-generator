@@ -18,6 +18,7 @@ TopicCurator / ShowRunner と同型のアーキテクチャ:
 """
 import json
 import logging
+import re
 from typing import Optional, TYPE_CHECKING, get_args as _typing_get_args
 
 from rich.console import Console
@@ -39,6 +40,12 @@ console = Console()
 # typing.get_args を経由することで FactCategory の値を一点管理にできる（SSOT 同期の代償ゼロ）。
 _VALID_FACT_CATEGORIES: frozenset[str] = frozenset(_typing_get_args(FactCategory))
 _DEFAULT_FACT_CATEGORY: FactCategory = "その他"
+
+# PR-G: extractor_reasoning に件数言及（"N 件"/"N個"/"N つ"）があるかを検出する正規表現。
+# qwen3:8b が「N 件抽出した」と reasoning に書きながら facts 配列を空のまま返す
+# 自己矛盾型出力（PR-E のプロンプト改善でも残存している既知症状）を検出するために使う。
+# 半角・全角スペースのいずれにもマッチ。
+_REASONING_COUNT_PATTERN = re.compile(r"\d+\s*[件個つ]")
 
 
 class FactExtractor:
@@ -316,8 +323,34 @@ class FactExtractor:
         # Preserve LLM ordering but ensure surprise_score descending for downstream consumers
         facts.sort(key=lambda x: x.surprise_score, reverse=True)
 
+        theme_summary = str(data.get("theme_summary", "") or "").strip()
+        extractor_reasoning = str(data.get("extractor_reasoning", "") or "").strip()
+
+        # PR-G: 自己矛盾検出。本運用 (output/20260424_220840) で qwen3:8b が
+        # extractor_reasoning に「数値系ファクト 5 件を抽出」と書きながら
+        # facts 配列を空のまま返す症状が観測された。PR-E のプロンプト改善でも
+        # 残存している小型モデルの構造化出力能力限界。
+        #
+        # ここで RuntimeError を送出することで:
+        #   1. PR-C/F の logger.error 経由で processing_log.txt に症状が可視化される
+        #   2. orchestrator の except Exception で fact_sheet=None にフォールスルー
+        #   3. 次回本運用で発生頻度を観察して PR-G の効果測定が可能になる
+        #
+        # 偽陽性回避: facts に 1 件以上ある場合、または extractor_reasoning が空 or
+        # 件数言及が無い場合（例: "判断材料となるファクトが見当たらず" 等）はスキップ。
+        if not facts and extractor_reasoning and _REASONING_COUNT_PATTERN.search(extractor_reasoning):
+            msg = (
+                "FactExtractor self-inconsistency detected: facts=[] but extractor_reasoning "
+                f"claims extraction. reasoning={extractor_reasoning!r}. "
+                "This is a known qwen3:8b structured-output limitation symptom "
+                "(reasoning written but JSON array not populated). "
+                "See BACKLOG: Ollama Structured Output / model upgrade as long-term fix."
+            )
+            logger.error(msg)
+            raise RuntimeError(msg)
+
         return FactSheet(
             facts=facts,
-            theme_summary=str(data.get("theme_summary", "") or "").strip(),
-            extractor_reasoning=str(data.get("extractor_reasoning", "") or "").strip(),
+            theme_summary=theme_summary,
+            extractor_reasoning=extractor_reasoning,
         )

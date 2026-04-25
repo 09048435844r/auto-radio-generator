@@ -7,6 +7,23 @@
 
 ## [Unreleased]
 
+### 追加（2026-04-25: FactExtractor 自己矛盾検出 + プロンプト整合性制約 / PR-G）
+- **問題**（PR-G / `review/pr-g-self-inconsistency-detection`）: PR-E のプロンプト改善後も、本運用セッション `output/20260424_220840` で qwen3:8b が **「`extractor_reasoning` に『数値系ファクト 5 件を抽出』と書きながら `facts: []` を返す」自己矛盾型出力**を生成。reasoning も theme_summary も内容は正確（"95% 精度 / 26B vs 27B" 等を正しく特定）にもかかわらず、構造化配列の各要素を埋めるタスクを完遂できない症状で、PR-E のプロンプト圧力強化では未解決
+- **案 A: パーサ層での自己矛盾検出 + RuntimeError エスカレーション**
+  - `services/script_generation/fact_extractor.py::_parse_fact_sheet_response` の `return` 直前に検出ロジックを追加
+  - 正規表現 `_REASONING_COUNT_PATTERN = re.compile(r"\d+\s*[件個つ]")` で reasoning 内の件数言及（"5 件" / "3 個" / "5 つ" 等、半角・全角スペース許容）を検知
+  - 「`facts=[]` かつ件数言及あり」を**自己矛盾**として `RuntimeError` 送出 + `logger.error`（PR-F パターン踏襲、PR-C の `processing_log.txt` 収集に乗せる）
+  - 偽陽性回避: reasoning が空 / 件数言及なし / `facts` が 1 件以上ある場合は通常 return
+  - `orchestrator` の `try/except Exception` が catch して `fact_sheet=None` でフォールスルー（後続処理は破綻しない）
+- **案 B: prompts.yaml への整合性制約追加**
+  - `config/prompts.yaml::orchestrator.fact_extractor` の禁止事項セクションに「`extractor_reasoning` に『N 件抽出した』と書きながら facts 配列を空のまま返すこと」を追加
+  - 「reasoning に書いた件数と facts 配列の長さは**必ず一致**させる」と明示
+  - 「PR-G で本パーサ層に検出ロジックが入っており、矛盾は RuntimeError として検知される」と LLM に通知（守らないと拒否される旨を明示）
+- **次回本運用での効果確認**: PR-C/F の logger 収集により `>>> [ERROR] [services.script_generation.fact_extractor] FactExtractor self-inconsistency detected: ...` が `processing_log.txt` に残る。BACKLOG #3 の「PR-E 効果観察」と並行して本症状の発生頻度を測定可能
+- **長期対策（BACKLOG 既存）**: 案 A/B はあくまで症状の検知と LLM への明示圧力。根治は **Ollama Structured Output**（BACKLOG #4）または **モデル変更**（BACKLOG #5）に委ねる
+- **破壊的変更なし**: API 不変、`facts` が 1 件以上ある正常系の挙動・既存パーサの skip ロジック・PR-D の fail-fast 設計すべて完全保持
+- **テスト**: `tests/test_fact_extractor_self_inconsistency.py` 新規、13 件追加（陽性ケース 7: 様々な件数表現パターン / 陰性ケース 4: 偽陽性回避 / プロンプト回帰 1 / 統合 1）
+
 ### 修正（2026-04-25: PR-C / PR-D 連携漏れの解消、`logger.error` 併用で processing_log.txt 収集を回復）
 - **問題**（Issue B-PR-F / PR-F / `review/pr-f-logger-fail-fast-pair`）: PR-D で 6 エージェントの `finish_reason=length` 時の挙動を「`logger.warning` 削除 + `RuntimeError` raise のみ」に変更した結果、PR-C の `processing_log.txt` 収集機構（root logger に attach した `_SessionLogFileHandler`）が捕捉対象を失っていた。本運用セッション `output/20260424_220840` で MetadataGenerator truncation が発生したが、processing_log.txt には rich console 経由の `⚠` 行のみが残り、`>>> [ERROR]` プレフィックス付きの logger 行が **0 件**だった
 - **PR-D の fail-fast 設計は完全保持**しつつ、6 箇所の `finish_reason == "length"` 検知に `logger.error(msg)` を `raise RuntimeError(msg)` の直前に追加（同一の `msg` 変数を両者で参照、SSOT 維持）
