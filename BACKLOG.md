@@ -167,3 +167,48 @@ PR-E ではこの不整合の影響を受けつつ、既存パターンを尊重
 
 ### 優先度
 低〜中。SSOT 思想に反するが実害は顕在化していない。プロンプトエンジニアリングの頻度が高まった場合、または新エージェント追加の頻度が増えた場合に昇格検討。
+
+---
+
+## [BACKLOG] FactExtractor の logger.error 同期（PR-F の横展開）
+
+**記録日**: 2026-04-25
+**発見経緯**: PR-F（`review/pr-f-logger-fail-fast-pair`）作業中の「想定外の発見」として判明
+
+### 問題
+PR-F で 6 エージェント（topic_curator / show_runner / segment_generator × 3 / metadata_generator）の `finish_reason == "length"` 検知箇所に `logger.error(msg)` を `raise RuntimeError(msg)` の直前に追加し、PR-C の processing_log.txt 収集機構（`_SessionLogFileHandler`）に乗せる対応を行った。
+
+しかし、`services/script_generation/fact_extractor.py:224` の同等な fail-fast 路（PR-A 由来）は **PR-F のスコープ外**として除外していた。理由はタスクスコープが「PR-D の 6 箇所」と明示されていたため。
+
+結果として:
+- 7 エージェント中 6 エージェントは `logger.error + RuntimeError` のセット
+- FactExtractor のみ `RuntimeError` 単独（logger.error なし）
+- **SSOT 思想・運用観察の一貫性の観点で不整合**
+
+### 推奨対応
+`fact_extractor.py:224-230` の `if response.finish_reason == "length":` ブロックを、PR-F と同パターンに変更:
+
+```python
+if response.finish_reason == "length":
+    msg = (
+        "FactExtractor output was truncated (finish_reason=length). "
+        f"Current max_tokens={self.max_tokens}. "
+        "Increase fact_extractor.max_tokens in config.yaml or lower max_facts. "
+        "Aborting rather than returning a partial FactSheet."
+    )
+    logger.error(msg)
+    raise RuntimeError(msg)
+```
+
+加えて回帰テストを `tests/test_logger_error_on_truncation.py` または既存の `tests/test_fact_extractor.py` に 1 件追加（FactExtractor truncation 時に `logger.error` が呼ばれることを caplog で assert）。
+
+### 想定影響範囲
+- 1 ファイル（`services/script_generation/fact_extractor.py`）の数行変更
+- テスト 1 件追加
+- 破壊的変更なし、API・例外文言・呼び出し側挙動すべて不変
+
+### 優先度
+低。PR-F がカバーしなかった残り 1 箇所の SSOT 同期で、運用観察の盲点を完全に埋める。FactExtractor が実運用で truncation を起こす頻度は max_tokens=8192 で低いため緊急性は低いが、揃えると保守時の認知負荷が下がる。
+
+### 工数
+XS（30 分以内、機械的な PR-F パターン横展開）
