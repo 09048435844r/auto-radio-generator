@@ -194,13 +194,16 @@ class TopicCurator:
         # PR-D Issue C: fail-fast on truncation (same pattern as FactExtractor in PR-A).
         # Partial JSON would later fail `CurationResult.topics` min_length validator (PR-B)
         # anyway; raising here gives a clearer error path with the current max_tokens value.
+        # PR-F: logger.error も併用して PR-C の processing_log.txt 収集に乗せる。
         if response.finish_reason == "length":
-            raise RuntimeError(
+            msg = (
                 "TopicCurator output was truncated (finish_reason=length). "
                 f"Current max_tokens={self.max_tokens}. "
                 "Increase orchestrator.topic_curator.max_tokens in config.yaml. "
                 "Aborting rather than returning partial topics."
             )
+            logger.error(msg)
+            raise RuntimeError(msg)
         
         logger.debug(
             f"TopicCurator API: provider={response.usage.provider}, model={response.usage.model_name}, "

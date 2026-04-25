@@ -7,6 +7,21 @@
 
 ## [Unreleased]
 
+### 修正（2026-04-25: PR-C / PR-D 連携漏れの解消、`logger.error` 併用で processing_log.txt 収集を回復）
+- **問題**（Issue B-PR-F / PR-F / `review/pr-f-logger-fail-fast-pair`）: PR-D で 6 エージェントの `finish_reason=length` 時の挙動を「`logger.warning` 削除 + `RuntimeError` raise のみ」に変更した結果、PR-C の `processing_log.txt` 収集機構（root logger に attach した `_SessionLogFileHandler`）が捕捉対象を失っていた。本運用セッション `output/20260424_220840` で MetadataGenerator truncation が発生したが、processing_log.txt には rich console 経由の `⚠` 行のみが残り、`>>> [ERROR]` プレフィックス付きの logger 行が **0 件**だった
+- **PR-D の fail-fast 設計は完全保持**しつつ、6 箇所の `finish_reason == "length"` 検知に `logger.error(msg)` を `raise RuntimeError(msg)` の直前に追加（同一の `msg` 変数を両者で参照、SSOT 維持）
+  - `services/script_generation/topic_curator.py`
+  - `services/script_generation/show_runner.py`
+  - `services/script_generation/segment_generator.py`（1-phase JSON / Phase 1 creative / Phase 2 JSON の 3 箇所）
+  - `services/script_generation/metadata_generator.py`
+- **scripting_phase.py 上位 catch にも logger.error 併用を追加**: MetadataGenerator catch / Visual identity catch で `logger.error(..., exc_info=True)` を `cb.log` の併用ログとして発火。スタックトレースが processing_log.txt に残るため、本運用での原因究明が大幅に容易に
+  - `services/pipeline/scripting_phase.py` 先頭に `import logging` + module-level `logger` 追加
+- **対象外（スコープ判断）**:
+  - `fact_extractor.py` の同パターン（PR-A 由来）: タスクスコープが「PR-D の 6 箇所」と明示されていたため対象外。整合性観点で別 PR で同期する価値あり（BACKLOG 候補）
+  - `ollama_client.py:162` の旧式 `logger.warning("max_tokens limit reached...")`: 古い実装で fail-fast 化されておらず、現行フローでは ollama_adapter が利用されているため対象外
+- **破壊的変更なし**: API 不変、RuntimeError raise の挙動・例外文言・呼び出し側 try/except のフォールバックすべて完全保持
+- **テスト**: `tests/test_logger_error_on_truncation.py` 新規、7 件追加（6 エージェント × `logger.error` 発火 + 1 件で「logger.error と RuntimeError の文言が完全一致すること」を SSOT として保証）
+
 ### 修正（2026-04-25: MetadataGenerator.max_tokens を 2048 → 4096 に引き上げ）
 - **本運用セッション `output/20260424_220840` で `finish_reason=length` による truncation が発生**し、メタデータ生成がデフォルト値フォールバックに落ちた実績を受けた運用チューニング
 - `core/models/config.py::MetadataGeneratorConfig.max_tokens` の Pydantic default と `config.yaml::orchestrator.metadata_generator.max_tokens` を**両方 4096 に揃えて SSOT 維持**

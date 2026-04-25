@@ -205,13 +205,16 @@ class ShowRunner:
         # PR-D Issue C: fail-fast on truncation. Orchestrator catches the raise and
         # falls back to show_plan=None, so downstream segment generation continues
         # without ShowPlan hints (backward-compatible behavior).
+        # PR-F: logger.error も併用して PR-C の processing_log.txt 収集に乗せる。
         if response.finish_reason == "length":
-            raise RuntimeError(
+            msg = (
                 "ShowRunner output was truncated (finish_reason=length). "
                 f"Current max_tokens={self.max_tokens}. "
                 "Increase orchestrator.show_runner.max_tokens in config.yaml. "
                 "Aborting rather than returning a partial ShowPlan."
             )
+            logger.error(msg)
+            raise RuntimeError(msg)
 
         logger.debug(
             f"ShowRunner API: provider={response.usage.provider}, model={response.usage.model_name}, "

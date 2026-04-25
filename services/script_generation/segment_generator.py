@@ -423,12 +423,15 @@ class SegmentGenerator:
         # PR-D Issue C: fail-fast on truncation. Partial segment JSON would break the
         # downstream integration step; raising lets `_generate_with_retry` in orchestrator
         # retry, and repeat failure surfaces the real config problem (max_tokens too low).
+        # PR-F: logger.error も併用して PR-C の processing_log.txt 収集に乗せる。
         if response.finish_reason == "length":
-            raise RuntimeError(
+            msg = (
                 "SegmentGenerator (1-phase JSON) output was truncated (finish_reason=length). "
                 f"Current max_tokens={self.max_tokens_single}, model={model_to_use or 'default'}. "
                 "Increase orchestrator.segment_generator.max_tokens_single in config.yaml."
             )
+            logger.error(msg)
+            raise RuntimeError(msg)
         
         logger.debug(
             f"SegmentGenerator API: provider={response.usage.provider}, model={response.usage.model_name}, "
@@ -549,12 +552,15 @@ class SegmentGenerator:
         # 無かった（warning も出さず silent に切り詰め markdown が Phase 2 に渡っていた）。
         # Phase 2 で JSON 変換失敗するケースが多く、原因究明を困難にしていたため
         # fail-fast 化して早期検知する。
+        # PR-F: logger.error も併用して PR-C の processing_log.txt 収集に乗せる。
         if response.finish_reason == "length":
-            raise RuntimeError(
+            msg = (
                 "SegmentGenerator Phase 1 (Markdown creative) output was truncated (finish_reason=length). "
                 f"Current max_tokens={self.max_tokens_phase1}, model={phase1_model or 'default'}. "
                 "Increase orchestrator.segment_generator.max_tokens_phase1 in config.yaml."
             )
+            logger.error(msg)
+            raise RuntimeError(msg)
 
         logger.debug(
             f"Phase 1 (Creative): provider={response.usage.provider}, model={response.usage.model_name}, "
@@ -616,12 +622,15 @@ class SegmentGenerator:
         # PR-D Issue C: fail-fast on truncation. Truncated JSON would fail the parser
         # or yield partial segments with missing turns; raising lets `_generate_with_retry`
         # handle the retry and surface persistent config issues.
+        # PR-F: logger.error も併用して PR-C の processing_log.txt 収集に乗せる。
         if response.finish_reason == "length":
-            raise RuntimeError(
+            msg = (
                 "SegmentGenerator Phase 2 (JSON conversion) output was truncated (finish_reason=length). "
                 f"Current max_tokens={self.max_tokens_phase2}, model={phase2_model or 'default'}. "
                 "Increase orchestrator.segment_generator.max_tokens_phase2 in config.yaml."
             )
+            logger.error(msg)
+            raise RuntimeError(msg)
 
         logger.debug(
             f"Phase 2 (JSON): provider={response.usage.provider}, model={response.usage.model_name}, "

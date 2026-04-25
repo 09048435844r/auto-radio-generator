@@ -185,13 +185,16 @@ class MetadataGenerator:
         # already wraps this with try/except and falls back to default metadata, so the
         # user-visible behavior is identical ("using defaults") but we avoid attempting to
         # parse a truncated JSON (which could silently return a half-formed title).
+        # PR-F: logger.error も併用して PR-C の processing_log.txt 収集に乗せる。
         if response.finish_reason == "length":
-            raise RuntimeError(
+            msg = (
                 "MetadataGenerator output was truncated (finish_reason=length). "
                 f"Current max_tokens={self.max_tokens}. "
                 "Increase orchestrator.metadata_generator.max_tokens in config.yaml. "
                 "Caller will fall back to default metadata."
             )
+            logger.error(msg)
+            raise RuntimeError(msg)
         
         logger.debug(
             f"MetadataGenerator API: provider={response.usage.provider}, model={response.usage.model_name}, "
