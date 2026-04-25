@@ -3,6 +3,7 @@
 ResearchBriefを入力として台本を生成し、RadioScriptArtifactを生成する。
 """
 import asyncio
+import logging
 import time
 from typing import Optional
 from dataclasses import asdict
@@ -20,6 +21,11 @@ from workflow import (
     _swap_script_speakers,
     _to_json_safe
 )
+
+# PR-F: モジュールレベル logger を新設し、上位 catch から logger.error を呼べるように。
+# PR-C の LogFileWriter が root logger に attach した FileHandler 経由で、
+# `>>> [ERROR] [services.pipeline.scripting_phase] ...` が processing_log.txt に残る。
+logger = logging.getLogger(__name__)
 
 
 async def execute_fact_extraction_only(
@@ -469,6 +475,8 @@ async def execute_scripting_phase(
                 cb.progress(0.80, "✅ Visual identity generated")
                 await asyncio.sleep(0)  # Yield to event loop for Gradio progress flush
             except Exception as e:
+                # PR-F: logger.error も併用して PR-C の processing_log.txt 収集に乗せる。
+                logger.error("Visual identity generation failed: %s", e, exc_info=True)
                 cb.log(f"⚠ Visual identity generation failed: {e}")
                 cb.log("[INFO] Using default visual identity")
                 from core.models.visual import (
@@ -518,6 +526,10 @@ async def execute_scripting_phase(
         cb.log(f"✓ Metadata generated: {script.title}")
         cb.progress(0.90, "✅ Metadata generation completed")
     except Exception as e:
+        # PR-F: logger.error も併用して PR-C の processing_log.txt 収集に乗せる。
+        # cb.log は rich console 経由で「⚠ ...」が出るが、stack trace は消える。
+        # logger.error(..., exc_info=True) で stack trace も processing_log.txt に残す。
+        logger.error("MetadataGenerator failed; using defaults: %s", e, exc_info=True)
         cb.log(f"⚠ Metadata generation failed (using defaults): {e}")
         cb.progress(0.90, "⚠️ Using default metadata")
     
