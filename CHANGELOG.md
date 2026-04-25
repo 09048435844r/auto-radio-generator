@@ -7,6 +7,20 @@
 
 ## [Unreleased]
 
+### 修正（2026-04-26: TopicCurator 失敗時のパイプラインクラッシュ修正 / PR-H 緊急修正）
+- **問題**（PR-H / `review/pr-h-curation-validation-error-handling`）: PR-B で導入した `CurationResult.topics` 非空 Pydantic validator が、qwen3:8b 等の小型モデルが空 topics を返した際に `ValidationError` を `_parse_curation_response` 内で raise → orchestrator まで未 catch で伝播 → **本運用パイプライン全体がクラッシュ**する致命バグが発生していた
+- **PR-B の validator は維持**（壊れた preset_curation を早期検知する設計は正しい）。PR-H では orchestrator 側で `try/except Exception` を Curator 呼び出しにラップし、ValidationError / RuntimeError / その他例外を catch して**フォールバックトピック 1 件で番組生成を完走**させる
+- **新メソッド `ScriptOrchestrator._build_fallback_curation_for_failure`**: フォールバック CurationResult 構築ロジックを helper に切り出し、unit test 容易化。例外種別を `error_type` として記録、PR-C/F の logger.error 経路で processing_log.txt に `>>> [ERROR] [services.script_generation.orchestrator] TopicCurator failed; falling back to a single placeholder topic ...` が残る
+- **フォールバック topic の構造**:
+  - `title="（自動生成失敗:詳細は processing_log.txt 参照）"` — 視聴者から見ても透明
+  - `content="TopicCurator がトピック選定に失敗したため、フォールバックトピックで番組を継続しています..."` — 番組内で経緯を説明
+  - `priority=1, estimated_turns=10, tone="解説", key_facts=[]`
+  - `selection_reason="Curator 失敗時のフォールバック (error_type=...)"` — 下流 SegmentGenerator が読む
+  - `curator_reasoning` に元例外の `error_type` と message を埋め込み（後追い debug 用）
+- **影響範囲**: `services/script_generation/orchestrator.py` のみ修正（CuratedTopic を import 追加 + try/except + helper メソッド追加）。PR-B の validator・PR-D の fail-fast・PR-E のプロンプト改善・PR-F の logger 連携いずれも完全保持
+- **破壊的変更なし**: API 不変。Curator 成功時の挙動は完全に変わらない（try ブロック内で従来通り `curate_topics` を呼ぶ）。失敗時のみフェイルオープンが発動
+- **テスト**: `tests/test_orchestrator_curator_fallback.py` 新規、9 件追加（PR-B validator 前提確認 / 例外種別 3 種 (ValidationError/RuntimeError/ValueError) のフォールバック / fallback topic の最小妥当性 / 失敗が viewer に透明 / curator_reasoning に error info / JSON round-trip / 静的構造回帰）
+
 ### 修正（2026-04-25: PR-C / PR-D 連携漏れの解消、`logger.error` 併用で processing_log.txt 収集を回復）
 - **問題**（Issue B-PR-F / PR-F / `review/pr-f-logger-fail-fast-pair`）: PR-D で 6 エージェントの `finish_reason=length` 時の挙動を「`logger.warning` 削除 + `RuntimeError` raise のみ」に変更した結果、PR-C の `processing_log.txt` 収集機構（root logger に attach した `_SessionLogFileHandler`）が捕捉対象を失っていた。本運用セッション `output/20260424_220840` で MetadataGenerator truncation が発生したが、processing_log.txt には rich console 経由の `⚠` 行のみが残り、`>>> [ERROR]` プレフィックス付きの logger 行が **0 件**だった
 - **PR-D の fail-fast 設計は完全保持**しつつ、6 箇所の `finish_reason == "length"` 検知に `logger.error(msg)` を `raise RuntimeError(msg)` の直前に追加（同一の `msg` 変数を両者で参照、SSOT 維持）
