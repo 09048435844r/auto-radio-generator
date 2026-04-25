@@ -16,7 +16,7 @@ from rich.console import Console
 
 from core.interfaces.script_orchestrator import IScriptOrchestrator
 from core.models import AppConfig, Script, LLMUsage
-from core.models.curation import CurationResult, ScriptSegment
+from core.models.curation import CuratedTopic, CurationResult, ScriptSegment
 from core.models.script import DialogueTurn, TurnType
 from core.models.execution_context import ExecutionContext
 from core.models.show_plan import ShowPlan
@@ -214,13 +214,28 @@ class ScriptOrchestrator(IScriptOrchestrator):
             if progress_callback:
                 progress_callback.progress(0.50, "🔍 面白いトピックを選定中...")
 
-            curation_result = await self.curate_topics(
-                research_data,
-                target_count=self.orch_cfg.max_topics,
-                progress_log=log,
-                fact_sheet=fact_sheet,
-            )
-            self._accumulate_usage(self.curator.last_usage)
+            # PR-H: TopicCurator 失敗時のフェイルオープン。
+            # 想定される失敗:
+            #   - pydantic.ValidationError: CurationResult.topics 非空契約違反 (PR-B)。
+            #     qwen3:8b 等の小型モデルが空 topics を返した場合に発生
+            #   - RuntimeError: finish_reason=length (PR-D) など
+            #   - その他 LLM 呼び出しエラー / JSON parse 失敗
+            # PR-B の validator 自体は正しい（壊れた preset_curation を早期検知する用途）が、
+            # Curator 実行失敗での raise は orchestrator まで伝播し、PR-H 以前は
+            # パイプライン全体がクラッシュしていた。PR-H ではフォールバックトピック 1 件で
+            # 番組生成を完走させ、運用者が processing_log.txt から失敗を後追いできるようにする。
+            try:
+                curation_result = await self.curate_topics(
+                    research_data,
+                    target_count=self.orch_cfg.max_topics,
+                    progress_log=log,
+                    fact_sheet=fact_sheet,
+                )
+                self._accumulate_usage(self.curator.last_usage)
+            except Exception as e:
+                # last_usage は失敗時 None or 部分的な値の可能性。安全のため accumulate スキップ。
+                # 詳細は _build_fallback_curation_for_failure の docstring 参照。
+                curation_result = self._build_fallback_curation_for_failure(e, log)
 
         topic_titles = [t.title for t in curation_result.topics]
         log(f"  選定トピック: {', '.join(topic_titles)}")
@@ -430,6 +445,67 @@ class ScriptOrchestrator(IScriptOrchestrator):
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _build_fallback_curation_for_failure(
+        self, e: Exception, log: Callable
+    ) -> CurationResult:
+        """PR-H: TopicCurator 失敗時のフォールバック CurationResult 構築。
+
+        想定される失敗:
+          - `pydantic.ValidationError`: `CurationResult.topics` 非空契約違反 (PR-B)。
+            qwen3:8b 等の小型モデルが空 topics を返した場合に発生。
+          - `RuntimeError`: `finish_reason=length` (PR-D) など。
+          - その他 LLM 呼び出しエラー / JSON parse 失敗。
+
+        PR-B の validator 自体は正しい（壊れた preset_curation を早期検知する用途）が、
+        Curator 実行失敗での raise は orchestrator まで伝播し、PR-H 以前は
+        パイプライン全体がクラッシュしていた。本メソッドは番組完走のためのプレースホルダ
+        topic 1 件を持つ `CurationResult` を返し、運用者が processing_log.txt から失敗を
+        後追いできるよう logger.error と rich console 出力（cb.log 経由）の両方に記録する。
+
+        Args:
+            e: Curator が raise した例外
+            log: rich console 出力用 callback（PR-C の LogFileWriter.write 経由で
+                 processing_log.txt に届く）
+
+        Returns:
+            CurationResult: フォールバックトピック 1 件を持つ valid な CurationResult。
+                            PR-B の topics 非空 validator を通過する。
+        """
+        error_type = type(e).__name__
+        msg = (
+            f"TopicCurator failed; falling back to a single placeholder topic so the "
+            f"pipeline completes. error_type={error_type}, error={e}"
+        )
+        # PR-C/F 連携: logger.error は _SessionLogFileHandler 経由で processing_log.txt に
+        # `>>> [ERROR] [services.script_generation.orchestrator] ...` として残る
+        logger.error(msg, exc_info=True)
+        log(f"[red]✗ TopicCurator 失敗（フォールバックトピックで継続）: {error_type}: {e}[/red]")
+
+        # フォールバック topic: 番組完走のためのプレースホルダ。
+        # 視聴者から見ても「失敗時のフォールバック」と分かる文言にする。
+        # 下流の SegmentGenerator は通常通りこの topic で 1 つの deep_dive を生成する。
+        fallback_topic = CuratedTopic(
+            title="（自動生成失敗:詳細は processing_log.txt 参照）",
+            content=(
+                "TopicCurator がトピック選定に失敗したため、フォールバックトピックで"
+                "番組を継続しています。リサーチ内容そのものを概観する形で進行します。"
+            ),
+            priority=1,
+            estimated_turns=10,
+            tone="解説",
+            key_facts=[],
+            selection_reason=(
+                f"Curator 失敗時のフォールバック (error_type={error_type})"
+            ),
+        )
+        return CurationResult(
+            topics=[fallback_topic],
+            curator_reasoning=(
+                f"TopicCurator failed and a fallback topic was used. "
+                f"error_type={error_type}, error={e}"
+            ),
+        )
 
     def _build_intro_hint(self, show_plan: Optional[ShowPlan]) -> Optional[str]:
         """ShowPlan から導入セグメント用のヒント文字列を生成
