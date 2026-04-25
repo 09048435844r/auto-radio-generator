@@ -13,7 +13,8 @@
       "Bash(git pull *)",
       "Bash(git rev-list *)",
       "Bash(git merge *)",
-      "Bash(git log *)"
+      "Bash(git log *)",
+      "Bash(echo \"exit=$?\")"
     ]
   }
 }
