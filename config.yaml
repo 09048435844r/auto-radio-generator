@@ -420,11 +420,10 @@ script_generator:
     # 無効化したい場合のみ enabled: false を明示（Curator は fact_sheet=None で従来動作）
     fact_extractor:
       enabled: true      # true: FactExtractorを実行（既定） / false: 無効（従来フロー）
-      model: "gemma4:26b"   # 2026-04-27: qwen3:8b は構造化出力能力の限界で
-                            # 自己矛盾出力（reasoning="N件抽出" / facts=[]）が頻発したため、
-                            # 既に segment_model として本番稼働中の gemma4:26b に切替。
-                            # 同一モデルのウォームキャッシュ利用で VRAM 追加消費ゼロ、
-                            # かつ強い指示遵守能力が期待できる。
+      model: "qwen2.5-coder:14b"   # 2026-04-27: qwen3:8b → gemma4:26b → qwen2.5-coder:14b へ再切替。
+                            # qwen3:8b は構造化出力能力の限界で自己矛盾出力（reasoning="N件抽出" /
+                            # facts=[]）が頻発。gemma4:26b でも改善せず、構造化 JSON タスクに
+                            # 適性のある qwen2.5-coder:14b に変更。
                             # 空にすると curator_model にフォールバックする。
       max_facts: 30      # 抽出するファクトの最大数（LLM への指示値）
       max_tokens: 8192   # LLMの出力上限。length 切り詰め時はフェイルファストで例外
