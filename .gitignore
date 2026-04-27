@@ -90,6 +90,9 @@ logs/*.jsonl
 # Windsurf specific
 .windsurf/plans/
 
+# VSCode workspace file
+auto_radio_generator.code-workspace
+
 # =============================================================================
 # OS generated files
 # =============================================================================
