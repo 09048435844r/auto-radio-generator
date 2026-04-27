@@ -7,6 +7,20 @@
 
 ## [Unreleased]
 
+### 修正（2026-04-28: ResearchBrief.theme が連結クエリ全文に上書きされるバグの修正 / PR-I）
+- **問題**（PR-I / `review/pr-i-theme-overwrite-fix`）: `workflow.py::_save_research_results` および `generate_video_workflow` 内のインライン ResearchBrief 構築箇所で、`theme=research_data.topic` / `queries=[research_data.topic]` という記述が使われていた。`research_data.topic` は `services/research/perplexity_client.py:355` の `", ".join(normalized_queries)` で「検索クエリ全文を連結した文字列」として作られるため、ResearchBrief.theme として下流に流すと **MetadataGenerator 等が長大な連結文字列を「テーマ」と誤認し、タイトル / 説明文 / タグ生成の整合性が壊れる**運用バグとなっていた。本運用セッション `output/20260424_220840` の MetadataGenerator truncation の真因として PR-D/F 観測経由で特定済み
+- **修正方針（SSOT: `services/pipeline/research_phase.py:98-111` のパイプライン版に合わせる）**:
+  - `_save_research_results` のシグネチャに **keyword-only** の `theme: str` / `plan_queries: list[str]` / `plan_angle: str = "自動生成"` を追加。位置引数化を防ぎ、将来の引数追加耐性を確保
+  - 関数本体の ResearchBrief 構築を `theme=theme` / `queries=plan_queries` / `angle=plan_angle` に切り替え、`research_data.topic` への依存を解消
+  - 呼び出し元 `_execute_gradio_scripting_phase` (workflow.py:810) で関数引数の `theme` と `queries` を明示渡し（`plan_queries=list(queries) if queries else [theme]` でフォールバック付き）
+  - `generate_video_workflow` 内のインライン ResearchBrief 構築（workflow.py:1369-1381 → 修正後 1389-1403 付近）も同様に `theme=theme` / `queries=list(plan.queries)` / `angle=plan.angle` に変更。`plan` は同じ try ブロック内で先に作成されるため、`research_data` が truthy な経路では必ず参照可能
+  - `research_report.md` の **テーマ** 表示も `research_data.topic` から呼び出し元 `theme` に修正（人間可読 Markdown も連結クエリ全文ではなく元テーマを表示）
+- **対象外（スコープ判断）**:
+  - `services/research/perplexity_client.py:355-356` の `topic=", ".join(normalized_queries)`: ResearchResult スキーマ自体は変更せず、消費側で「テーマ ≠ topic」を区別する方針（`ResearchResult.topic` は「複数クエリで取得した一連のリサーチデータの識別子」として残す）
+  - `services/script_generation/ollama_client.py:214` の `theme=research_data.topic if research_data else ""`: 旧 ollama_client（gemini_client / openai_adapter / anthropic_adapter 等の現行アダプタ経由では到達しない経路）。本 PR のスコープ外、別途 BACKLOG 検討
+- **破壊的変更なし**: API 不変。新規キーワード引数は keyword-only かつ呼び出し元 2 箇所すべてを同 PR 内で更新。ResearchBrief モデル自体（`core/models/artifacts.py`）は変更なし。インポート機能 (`SessionManager.load_research_brief`) や 2-Story Mode の挙動も変わらない
+- **テスト**: `tests/test_research_brief_theme_overwrite.py` 新規、7 件追加（シグネチャ契約 / brief.theme が呼び出し元 theme を保持 / brief.queries が plan_queries を保持 / plan_angle 既定値 / Markdown report のテーマ表示 / 静的構造回帰 2 件）。既存 154 件テスト + 新規 7 件 = **161 件全 pass**
+
 ### 修正（2026-04-26: TopicCurator 失敗時のパイプラインクラッシュ修正 / PR-H 緊急修正）
 - **問題**（PR-H / `review/pr-h-curation-validation-error-handling`）: PR-B で導入した `CurationResult.topics` 非空 Pydantic validator が、qwen3:8b 等の小型モデルが空 topics を返した際に `ValidationError` を `_parse_curation_response` 内で raise → orchestrator まで未 catch で伝播 → **本運用パイプライン全体がクラッシュ**する致命バグが発生していた
 - **PR-B の validator は維持**（壊れた preset_curation を早期検知する設計は正しい）。PR-H では orchestrator 側で `try/except Exception` を Curator 呼び出しにラップし、ValidationError / RuntimeError / その他例外を catch して**フォールバックトピック 1 件で番組生成を完走**させる

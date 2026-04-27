@@ -807,7 +807,16 @@ async def _execute_gradio_scripting_phase(
 
             # Legacy side effect: write research.json / research_brief.json /
             # research_report.md into `output_dir`. Kept intact for UI / import flows.
-            _save_research_results(research_data, output_dir, cb)
+            # PR-I: theme/queries を呼び出し元から明示渡し（research_data.topic は連結
+            # クエリ全文になるため ResearchBrief に書くと下流フェーズが破綻する）。
+            _save_research_results(
+                research_data,
+                output_dir,
+                cb,
+                theme=theme,
+                plan_queries=list(queries) if queries else [theme],
+                plan_angle="自動生成",
+            )
 
         except Exception as e:
             cb.log(f"❌ リサーチエラー（処理中断）: {e}")
@@ -1089,46 +1098,53 @@ async def execute_production_phase(
 def _save_research_results(
     research_data,
     output_dir: Path,
-    callbacks: ProgressCallback
+    callbacks: ProgressCallback,
+    *,
+    theme: str,
+    plan_queries: list[str],
+    plan_angle: str = "自動生成",
 ) -> None:
     """リサーチ結果をファイルに保存
-    
+
     Args:
         research_data: リサーチ結果
         output_dir: 出力ディレクトリ
         callbacks: 進捗コールバック
+        theme: ResearchBrief.theme に書き込む元テーマ（連結クエリ全文ではなく）
+        plan_queries: ResearchBrief.queries に書き込む実検索クエリリスト
+        plan_angle: ResearchBrief.angle に書き込む切り口（plan が無い経路では既定値）
     """
     try:
         from dataclasses import asdict
         import json
-        
+
         callbacks.log(f"[DEBUG] research.json保存処理開始")
-        
+
         research_path = output_dir / "research.json"
         research_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         research_dict = _to_json_safe(asdict(research_data))
         json_str = json.dumps(research_dict, ensure_ascii=False, indent=2)
         research_path.write_text(json_str, encoding="utf-8")
-        
+
         callbacks.log(f"✓ リサーチ結果保存: {research_path}")
-        
+
         # ResearchBrief も保存（インポート機能用）
         # 案1実装: 自動モードで生成したリサーチデータを再利用可能にする
         from core.models.artifacts import ResearchBrief
-        
+
         # セッションIDを取得（output_dirのディレクトリ名から）
         session_id = output_dir.name
-        
+
         research_brief = ResearchBrief(
             session_id=session_id,
-            theme=research_data.topic,
+            theme=theme,
             research_mode=research_data.mode,
             created_at=datetime.now().isoformat(),
             research_content=research_data.content,
             research_sources=[s.model_dump() for s in (research_data.sources or [])],
-            queries=[research_data.topic],  # topicをクエリとして使用
-            angle="自動生成",
+            queries=plan_queries,
+            angle=plan_angle,
             curated_topics=None,
             perplexity_usage=asdict(research_data.usage) if research_data.usage else None,
             gemini_usage_planning=None
@@ -1143,7 +1159,7 @@ def _save_research_results(
         report_path = output_dir / "research_report.md"
         report_content = f"""# リサーチレポート
 
-**テーマ**: {research_data.topic}
+**テーマ**: {theme}
 **モード**: {research_data.mode}
 **生成日時**: {datetime.now().strftime('%Y年%m月%d日 %H:%M:%S')}
 
@@ -1366,15 +1382,21 @@ async def generate_video_workflow(
                 from core.models.artifacts import ResearchBrief
                 
                 session_id = output_base.name
+                # PR-I: theme は引数の元テーマを使う（research_data.topic は
+                # PerplexityClient が ", ".join(queries) で連結した全文になるため、
+                # ResearchBrief.theme として下流に流すと MetadataGenerator 等が
+                # クエリ全文をテーマと誤認して破綻する）。
+                # plan が成功して research_data が取れている経路なので、
+                # plan.queries / plan.angle が必ず参照可能。
                 research_brief = ResearchBrief(
                     session_id=session_id,
-                    theme=research_data.topic,
+                    theme=theme,
                     research_mode=research_data.mode,
                     created_at=datetime.now().isoformat(),
                     research_content=research_data.content,
                     research_sources=[s.model_dump() for s in (research_data.sources or [])],
-                    queries=[research_data.topic],
-                    angle="自動生成",
+                    queries=list(plan.queries),
+                    angle=plan.angle,
                     curated_topics=None,
                     perplexity_usage=asdict(research_data.usage) if research_data.usage else None,
                     gemini_usage_planning=None
@@ -1390,7 +1412,7 @@ async def generate_video_workflow(
                 report_path = output_base / "research_report.md"
                 report_content = f"""# リサーチレポート
 
-**テーマ**: {research_data.topic}
+**テーマ**: {theme}
 **モード**: {research_data.mode}
 **生成日時**: {datetime.now().strftime('%Y年%m月%d日 %H:%M:%S')}
 
