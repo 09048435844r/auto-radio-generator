@@ -433,9 +433,9 @@ script_generator:
       max_tokens_phase1: 4096  # 2-phase 生成の Phase 1（Markdown creative）
       max_tokens_phase2: 2048  # 2-phase 生成の Phase 2（JSON 構造化）
     metadata_generator:
-      max_tokens: 4096   # タイトル/概要/ハッシュタグ用。2026-04-24 の本運用
-                         # （output/20260424_220840）で 2048 が truncation を起こしたため
-                         # 4096 に引き上げ（2x の余裕、実使用 ~1500 トークン想定）
+      max_tokens: 8192   # タイトル/概要/ハッシュタグ用。2026-04-24 に 2048→4096 に
+                         # 引き上げた後も本運用で 2 セッション連続 truncation が
+                         # 発生したため、2026-04-27 に 4096→8192 へ再引き上げ
 
 # -----------------------------------------------------------------------------
 # 音声合成設定（VOICEVOX）

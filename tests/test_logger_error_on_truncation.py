@@ -61,7 +61,7 @@ def _inject_orchestrator_cfg(mock_app_config) -> None:
     orch.segment_generator = MagicMock(
         max_tokens_single=8192, max_tokens_phase1=4096, max_tokens_phase2=2048,
     )
-    orch.metadata_generator = MagicMock(max_tokens=4096)
+    orch.metadata_generator = MagicMock(max_tokens=8192)
 
 
 def _make_curation_result_for_sr():
