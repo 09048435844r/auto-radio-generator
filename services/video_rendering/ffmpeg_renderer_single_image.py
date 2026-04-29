@@ -1,7 +1,8 @@
-"""Legacy rendering methods for backward compatibility
+"""Single-image FFmpeg rendering path.
 
-These methods implement the original monolithic FFmpeg approach
-and are used when segments are not provided.
+セグメント単位の動的背景を使わず、1 枚の背景画像で動画全体を合成する
+モノリシック FFmpeg レンダリング経路。`segments` 引数なしで FFmpegRenderer
+が呼び出された際に backward-compatible なフォールバックとして稼働する。
 """
 import asyncio
 from pathlib import Path
@@ -13,7 +14,7 @@ from core.interfaces import ChapterMarker, RenderResult, SynthesisResult
 console = Console()
 
 
-async def render_legacy(
+async def render_single_image(
     renderer,
     synthesis_result: SynthesisResult,
     background_image: Path,
@@ -22,12 +23,12 @@ async def render_legacy(
     subtitle_path: Path,
     chapters: list[ChapterMarker],
 ) -> RenderResult:
-    """Legacy rendering method (single background image)
-    
-    This is the original monolithic FFmpeg approach.
-    Used for backward compatibility when segments are not provided.
+    """Render a video using a single background image for the whole duration.
+
+    モノリシック FFmpeg コマンドで 1 枚の背景画像と音声/BGM/字幕を合成する。
+    `segments` が指定されていない呼び出し（後方互換パス）で使用される。
     """
-    console.print("[cyan]動画を生成中（レガシーモード）...[/cyan]")
+    console.print("[cyan]動画を生成中（単一背景画像モード）...[/cyan]")
     
     # 設定値
     resolution = renderer.video_config.output_resolution

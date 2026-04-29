@@ -21,7 +21,7 @@ from services.media_processing import ImageProvider, JingleProvider
 from .timeline_calculator import TimelineCalculator
 from .audio_track_renderer import AudioTrackRenderer
 from .video_track_renderer import VideoTrackRenderer
-from .ffmpeg_renderer_legacy import render_legacy
+from .ffmpeg_renderer_single_image import render_single_image
 from .ffmpeg_renderer_mux import mux_tracks
 
 console = Console()
@@ -198,8 +198,8 @@ class FfmpegRenderer(IVideoRenderer):
         
         # セグメント情報がない場合は従来の単一背景画像モードで動作（後方互換性）
         if not segments:
-            console.print("[yellow]⚠ No segments provided, using legacy single-image mode[/yellow]")
-            return await self._render_legacy(
+            console.print("[yellow]⚠ No segments provided, using single-image fallback mode[/yellow]")
+            return await self._render_single_image(
                 synthesis_result=synthesis_result,
                 background_image=background_image,
                 bgm_file=bgm_file,
@@ -308,7 +308,7 @@ class FfmpegRenderer(IVideoRenderer):
         """
         await mux_tracks(self.ffmpeg_path, video_track, audio_track, output_path)
     
-    async def _render_legacy(
+    async def _render_single_image(
         self,
         synthesis_result: SynthesisResult,
         background_image: Path,
@@ -317,8 +317,8 @@ class FfmpegRenderer(IVideoRenderer):
         subtitle_path: Path,
         chapters: list[ChapterMarker],
     ) -> RenderResult:
-        """Legacy rendering method (backward compatibility)
-        
+        """Single-image fallback rendering (used when no segments are provided).
+
         Args:
             synthesis_result: Audio synthesis result
             background_image: Background image path
@@ -326,11 +326,11 @@ class FfmpegRenderer(IVideoRenderer):
             output_path: Output video path
             subtitle_path: Subtitle file path
             chapters: Chapter markers
-        
+
         Returns:
             RenderResult: Rendering result
         """
-        return await render_legacy(
+        return await render_single_image(
             self,
             synthesis_result,
             background_image,
