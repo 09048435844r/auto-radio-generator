@@ -114,11 +114,14 @@ class OrchestratorSegmentConfig(BaseModel):
 class ShowRunnerConfig(BaseModel):
     """ShowRunner（番組構成プランナー）設定 - Phase 3 施策④
 
-    後方互換: 既定は enabled=False で、有効化しない限り従来通りの動作。
+    SSOT: 既定値・docstring・shipped config.yaml はいずれも enabled=True で統一する。
+    Phase 3 施策④のロールアウト完了に伴い、ラジオ番組生成のデフォルトパイプラインの
+    一部として ShowRunner が自動実行される。意図的に無効化したい場合のみ
+    config.yaml 側で enabled: false を明示する（従来フローと完全互換）。
     """
     enabled: bool = Field(
-        default=False,
-        description="Trueにするとショーランナー（番組構成プランナー）をCurator後に実行する"
+        default=True,
+        description="Trueにするとショーランナー（番組構成プランナー）をCurator後に実行する（既定: True）"
     )
     model: str = Field(
         default="",
