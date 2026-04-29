@@ -8,13 +8,35 @@ Gradio 4.0へのアップデートに備え、
 """
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch, MagicMock, AsyncMock
 from dataclasses import dataclass
 from typing import Tuple, Optional
+
+from core.interfaces.llm_port import LLMRequest, LLMResponse
+from core.models.usage import LLMUsage
 
 # Auto Radio Generator imports
 from workflow import ThumbnailRegenerationState
 from app import generate_video_mock
+
+
+def _make_port_mock(response_text: str) -> Mock:
+    """LLMAdapterFactory.create が返す ILLMPort 互換のモックを構築する。"""
+    port = Mock()
+    port.generate = AsyncMock(
+        return_value=LLMResponse(
+            content=response_text,
+            usage=LLMUsage(
+                provider="gemini",
+                model_name="gemini-2.5-flash",
+                input_tokens=10,
+                output_tokens=20,
+                request_count=1,
+            ),
+            finish_reason="stop",
+        )
+    )
+    return port
 
 
 class TestThumbnailRegenerationState:
@@ -133,7 +155,7 @@ class TestGenerateVideoMock:
 class TestThumbnailRegeneration:
     """ThumbnailGenerator.regenerate_with_new_title のテスト"""
 
-    @patch('services.script_generation.gemini_client.GeminiClient')
+    @patch('services.script_generation.adapters.factory.LLMAdapterFactory.create')
     @patch('core.models.config.load_config')
     @patch('core.prompt_manager.PromptManager')
     @patch('services.media_processing.thumbnail_generator.ThumbnailGenerator._apply_effects')
@@ -145,9 +167,9 @@ class TestThumbnailRegeneration:
     @patch('os.makedirs')
     @patch('services.media_processing.thumbnail_generator.console')
     def test_regenerate_with_new_title_success(
-        self, 
-        mock_console, 
-        mock_os, 
+        self,
+        mock_console,
+        mock_os,
         mock_makedirs,
         mock_image,
         mock_stat,
@@ -156,27 +178,26 @@ class TestThumbnailRegeneration:
         mock_apply_effects,
         mock_prompt_manager_class,
         mock_load_config,
-        mock_gemini_client_class
+        mock_factory_create,
     ):
         """サムネイル再作成が成功することを確認"""
         from services.media_processing.thumbnail_generator import ThumbnailGenerator
-        
+
         # モックの設定
         mock_config = Mock()
         mock_config.yaml.script_generator.gemini.flash_model = "gemini-2.5-flash"
         mock_load_config.return_value = mock_config
-        
+
         mock_prompt_manager = Mock()
         mock_prompt = "テーマ: {theme}\n要約: {script_summary}"
         mock_prompt_manager.get_prompt.return_value = mock_prompt
         mock_prompt_manager_class.return_value = mock_prompt_manager
-        
-        mock_gemini_client = Mock()
-        # ダミーのJSONレスポンス
+
+        # LLMAdapterFactory.create が返すポートをモック
         dummy_response = '''{"thumbnail_title": "新サムネイル", "video_title": "新動画タイトル"}'''
-        mock_gemini_client._call_api.return_value = (dummy_response, {"usage": 10})
-        mock_gemini_client_class.return_value = mock_gemini_client
-        
+        mock_port = _make_port_mock(dummy_response)
+        mock_factory_create.return_value = mock_port
+
         # Image モック
         mock_img = Mock()
         mock_img.width = 1920
@@ -188,30 +209,30 @@ class TestThumbnailRegeneration:
         mock_img.getbands.return_value = ["R", "G", "B"]
         mock_image.new.return_value = mock_img
         mock_image.open.return_value = mock_img
-        
+
         # _apply_effects モック
         mock_apply_effects.return_value = mock_img
-        
+
         # _draw_title_text モック
         mock_draw_title_text.return_value = mock_img
-        
+
         # _draw_date_badge モック
         mock_draw_date_badge.return_value = mock_img
-        
+
         # Path.stat モック
         mock_stat_result = Mock()
         mock_stat_result.st_size = 1024  # 1KB
         mock_stat_result.st_mode = 16877  # ディレクトリのモード (0o40755)
         mock_stat.return_value = mock_stat_result
-        
+
         # os モック
         mock_os.path.join.return_value = "test/output/new_thumbnail.png"
         mock_os.path.exists.return_value = False
         mock_makedirs.return_value = None
-        
+
         # ThumbnailGenerator をテスト
         generator = ThumbnailGenerator()
-        
+
         result = generator.regenerate_with_new_title(
             theme="テストテーマ",
             script_summary="テスト要約",
@@ -220,32 +241,33 @@ class TestThumbnailRegeneration:
             base_title="元タイトル",
             generation_count=1
         )
-        
+
         # 戻り値の検証
         assert isinstance(result, tuple)
         assert len(result) == 3
-        
+
         thumbnail_path, video_title, thumbnail_title = result
-        
+
         assert thumbnail_path.endswith(".png")
         assert video_title == "元タイトル"  # base_titleがそのまま返される
         assert thumbnail_title == "新サムネイル"
-        
-        # API呼び出しの検証
-        mock_gemini_client._call_api.assert_called_once()
-        call_args = mock_gemini_client._call_api.call_args
-        
-        # _call_api の引数を検証
-        assert call_args.kwargs['model_override'] == "gemini-2.5-flash"
-        assert call_args.kwargs['use_schema'] is False
-        assert call_args.kwargs['phase'] == "thumbnail_regeneration"
-        
-        # プロンプトのフォーマット検証
-        # call_args.args は空なので、kwargs から取得
-        formatted_prompt = call_args.kwargs['user_prompt']
-        assert "テーマ: テストテーマ" in formatted_prompt
-        assert "要約: テスト要約" in formatted_prompt
-        
+
+        # LLMAdapterFactory.create の呼び出し検証
+        mock_factory_create.assert_called_once()
+        factory_args = mock_factory_create.call_args
+        # provider は位置引数 or kwargs どちらでも許容
+        assert factory_args.args[1] == "gemini" or factory_args.kwargs.get("provider") == "gemini"
+        assert factory_args.kwargs.get("model_override") == "gemini-2.5-flash"
+
+        # ポートの generate 呼び出し検証
+        mock_port.generate.assert_called_once()
+        request = mock_port.generate.call_args.args[0]
+        assert isinstance(request, LLMRequest)
+        assert request.model == "gemini-2.5-flash"
+        assert request.response_format == "json"
+        assert "テーマ: テストテーマ" in request.user_prompt
+        assert "要約: テスト要約" in request.user_prompt
+
         # 画像保存の検証
         mock_img.save.assert_called_once()
         # 呼び出された引数を確認
@@ -254,33 +276,33 @@ class TestThumbnailRegeneration:
         assert save_call.args[1] == 'PNG'  # フォーマット
         assert save_call.kwargs['quality'] == 95  # 品質
 
-    @patch('services.script_generation.gemini_client.GeminiClient')
+    @patch('services.script_generation.adapters.factory.LLMAdapterFactory.create')
     @patch('core.models.config.load_config')
     @patch('core.prompt_manager.PromptManager')
     def test_regenerate_with_new_title_api_error(
-        self, 
+        self,
         mock_prompt_manager_class,
         mock_load_config,
-        mock_gemini_client_class
+        mock_factory_create,
     ):
         """APIエラー時に例外が発生することを確認"""
         from services.media_processing.thumbnail_generator import ThumbnailGenerator
-        
+
         # モックの設定
         mock_config = Mock()
         mock_config.yaml.script_generator.gemini.flash_model = "gemini-2.5-flash"
         mock_load_config.return_value = mock_config
-        
+
         mock_prompt_manager = Mock()
         mock_prompt_manager.get_prompt.return_value = "dummy prompt"
         mock_prompt_manager_class.return_value = mock_prompt_manager
-        
-        mock_gemini_client = Mock()
-        mock_gemini_client._call_api.side_effect = Exception("API Error")
-        mock_gemini_client_class.return_value = mock_gemini_client
-        
+
+        mock_port = Mock()
+        mock_port.generate = AsyncMock(side_effect=Exception("API Error"))
+        mock_factory_create.return_value = mock_port
+
         generator = ThumbnailGenerator()
-        
+
         # 例外が発生することを確認
         with pytest.raises(Exception, match="API Error"):
             generator.regenerate_with_new_title(
@@ -291,6 +313,93 @@ class TestThumbnailRegeneration:
                 base_title="元タイトル",
                 generation_count=0
             )
+
+    @patch('services.script_generation.adapters.factory.LLMAdapterFactory.create')
+    @patch('core.models.config.load_config')
+    @patch('core.prompt_manager.PromptManager')
+    @patch('services.media_processing.thumbnail_generator.ThumbnailGenerator._apply_effects')
+    @patch('services.media_processing.thumbnail_generator.ThumbnailGenerator._draw_title_text')
+    @patch('services.media_processing.thumbnail_generator.ThumbnailGenerator._draw_date_badge')
+    @patch('pathlib.Path.stat')
+    @patch('services.media_processing.thumbnail_generator.Image')
+    @patch('os.path')
+    @patch('os.makedirs')
+    @patch('services.media_processing.thumbnail_generator.console')
+    def test_regenerate_uses_llm_adapter_with_expected_request_params(
+        self,
+        mock_console,
+        mock_os,
+        mock_makedirs,
+        mock_image,
+        mock_stat,
+        mock_draw_date_badge,
+        mock_draw_title_text,
+        mock_apply_effects,
+        mock_prompt_manager_class,
+        mock_load_config,
+        mock_factory_create,
+    ):
+        """LLMAdapterFactory 経由で LLMRequest が GeminiClient._call_api 相当の
+        パラメータ (max_tokens=16384, temperature=0.85, response_format=json)
+        で呼ばれることを確認する回帰テスト。
+        """
+        from services.media_processing.thumbnail_generator import ThumbnailGenerator
+
+        mock_config = Mock()
+        mock_config.yaml.script_generator.gemini.flash_model = "gemini-2.5-flash"
+        mock_load_config.return_value = mock_config
+
+        mock_prompt_manager = Mock()
+        mock_prompt_manager.get_prompt.return_value = "{theme} {script_summary}"
+        mock_prompt_manager_class.return_value = mock_prompt_manager
+
+        dummy_response = '{"thumbnail_title": "T", "title": "V"}'
+        mock_port = _make_port_mock(dummy_response)
+        mock_factory_create.return_value = mock_port
+
+        # Image / disk 系を最小モック
+        mock_img = Mock()
+        mock_img.width = 1920
+        mock_img.height = 1080
+        mock_img.size = (1920, 1080)
+        mock_img.mode = "RGB"
+        mock_img.resize.return_value = mock_img
+        mock_img.crop.return_value = mock_img
+        mock_img.getbands.return_value = ["R", "G", "B"]
+        mock_image.new.return_value = mock_img
+        mock_image.open.return_value = mock_img
+        mock_apply_effects.return_value = mock_img
+        mock_draw_title_text.return_value = mock_img
+        mock_draw_date_badge.return_value = mock_img
+        mock_stat_result = Mock()
+        mock_stat_result.st_size = 1024
+        mock_stat_result.st_mode = 16877
+        mock_stat.return_value = mock_stat_result
+        mock_os.path.join.return_value = "test/output/x.png"
+        mock_os.path.exists.return_value = False
+        mock_makedirs.return_value = None
+
+        ThumbnailGenerator().regenerate_with_new_title(
+            theme="t",
+            script_summary="s",
+            output_dir="test/output",
+            background_path="test/bg.png",
+            base_title="title",
+            generation_count=0,
+        )
+
+        # LLMRequest の中身を直接検証
+        request = mock_port.generate.call_args.args[0]
+        assert isinstance(request, LLMRequest)
+        assert request.system_prompt == ""
+        assert request.model == "gemini-2.5-flash"
+        assert request.max_tokens == 16384
+        assert request.temperature == pytest.approx(0.85)
+        assert request.response_format == "json"
+
+        # gemini_client への直接 import が消えていることを確認 (構造的回帰防止)
+        import services.media_processing.thumbnail_generator as tg_module
+        assert not hasattr(tg_module, "GeminiClient")
 
 
 if __name__ == "__main__":

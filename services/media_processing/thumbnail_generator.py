@@ -573,34 +573,51 @@ class ThumbnailGenerator:
         Returns:
             Tuple[str, str, str]: (thumbnail_path, video_title, thumbnail_title)
         """
-        from services.script_generation.gemini_client import GeminiClient
+        import asyncio
+        import concurrent.futures
+
+        from core.interfaces.llm_port import LLMRequest
         from core.models.config import load_config
         from core.prompt_manager import PromptManager
-        
+        from services.script_generation.adapters.factory import LLMAdapterFactory
+
         try:
             console.print(f"[cyan]🔄 新しいサムネイルタイトルを生成中...[/cyan]")
-            
+
             # 1. Geminiで新しいタイトル生成（軽量モデル）
             app_config = load_config()
-            gemini_client = GeminiClient(app_config)
             prompt_manager = PromptManager()
-            
+
             # 軽量プロンプトでタイトル生成
             regeneration_prompt = prompt_manager.get_prompt("thumbnail_regeneration", "default")
             formatted_prompt = regeneration_prompt.format(
                 theme=theme,
                 script_summary=script_summary
             )
-            
-            # 軽量モデルでAPI呼び出し（temperature低めで安定性重視）
+
+            # 軽量モデルで API 呼び出し（LLMAdapterFactory 経由）。
+            # GeminiClient._call_api の挙動と揃えるため max_tokens=16384, temperature=0.85,
+            # response_format=json を指定する。
             flash_model = app_config.yaml.script_generator.gemini.flash_model
-            response_text, _ = gemini_client._call_api(
+            llm_port = LLMAdapterFactory.create(
+                app_config,
+                "gemini",
+                model_override=flash_model,
+            )
+            llm_request = LLMRequest(
                 system_prompt="",
                 user_prompt=formatted_prompt,
-                use_schema=False,
-                phase="thumbnail_regeneration",
-                model_override=flash_model  # 軽量モデルを指定
+                model=flash_model,
+                max_tokens=16384,
+                temperature=0.85,
+                response_format="json",
             )
+            # regenerate_with_new_title は同期 API として呼ばれる（Gradio の sync /
+            # async 双方のハンドラから呼び出される）。呼び出し元のループ状態に依存
+            # しない確実なブリッジとして、別スレッドで asyncio.run する。
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _ex:
+                llm_response = _ex.submit(asyncio.run, llm_port.generate(llm_request)).result()
+            response_text = llm_response.content
             
             # レスポンスをパース
             metadata = json.loads(response_text.strip())
