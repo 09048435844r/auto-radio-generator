@@ -228,13 +228,16 @@ class FactExtractor:
         # strings re-accepted post-sanitize). The orchestrator has a fail-open around us
         # and will proceed with fact_sheet=None, so raising here keeps the contract that
         # a successful return means a syntactically complete LLM response.
+        # PR-F: logger.error も併用して PR-C の processing_log.txt 収集に乗せる。
         if response.finish_reason == "length":
-            raise RuntimeError(
+            msg = (
                 "FactExtractor output was truncated (finish_reason=length). "
                 f"Current max_tokens={self.max_tokens}. "
                 "Increase fact_extractor.max_tokens in config.yaml or lower max_facts. "
                 "Aborting rather than returning a partial FactSheet."
             )
+            logger.error(msg)
+            raise RuntimeError(msg)
 
         logger.debug(
             f"FactExtractor API: provider={response.usage.provider}, model={response.usage.model_name}, "
