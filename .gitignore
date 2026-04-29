@@ -115,9 +115,6 @@ user_settings.json
 client_secret.json
 token.json
 
-# API test files
-test_anthropic_api.py
-
 # =============================================================================
 # Media files (generated content)
 # =============================================================================

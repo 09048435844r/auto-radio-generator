@@ -2,7 +2,8 @@
 import yaml
 from pathlib import Path
 
-config_path = Path(__file__).parent / "config.yaml"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+config_path = PROJECT_ROOT / "config.yaml"
 config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
 
 orch = config["script_generator"]["orchestrator"]

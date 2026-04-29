@@ -13,7 +13,7 @@ async def test_two_phase_generation():
     print("=" * 80)
     
     # Config読み込み
-    project_root = Path(__file__).parent
+    project_root = Path(__file__).resolve().parents[2]
     config = load_config(project_root)
     
     # 2段階生成が有効か確認
