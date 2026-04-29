@@ -480,9 +480,7 @@ class ResearchBrief(BaseModel):
 
 ## 関連ドキュメント
 
-- [プロジェクト全体の仕様書](./PROJECT_STATUS_REPORT.md)
 - [マルチLLMガイド](./MULTI_LLM_GUIDE.md)
-- [オーケストレーター実装ガイド](./ORCHESTRATOR_MULTI_PROVIDER_IMPLEMENTATION.md)
 
 ---
 
