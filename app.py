@@ -154,11 +154,16 @@ async def check_api_health() -> tuple[str, str, str]:
     
     try:
         # Ollama health check
+        # Orchestrator が実行時に使う curator_model を ping して表示する。
+        # Factory に model_override を渡さないと script_generator.ollama.model
+        # （旧デフォルト）にフォールバックし、UI に古いモデル名が出てしまう。
         from services.script_generation.adapters.factory import LLMAdapterFactory
         try:
+            curator_model = app_config.yaml.script_generator.orchestrator.curator_model
             ollama_adapter = LLMAdapterFactory.create(
                 config=app_config,
-                provider="ollama"
+                provider="ollama",
+                model_override=curator_model or None,
             )
             # Use health_check method from adapter
             is_healthy = await ollama_adapter.health_check()
