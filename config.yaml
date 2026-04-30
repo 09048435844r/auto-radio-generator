@@ -354,7 +354,10 @@ script_generator:
   
   # Ollama設定（ローカルLLM）
   ollama:
-    model: "gemma4:26b" # ← Macに入っているモデル名
+    # 2026-05-01: GX10 (128GB) 移行に伴い qwen3:32b へ切替（gemma4:26b は未インストール）。
+    # この値は LLMAdapterFactory が model_override 無しで呼ばれた際のフォールバック先 +
+    # OllamaClient.__init__（_generate_youtube_metadata 経路）のモデル名として消費される。
+    model: "qwen3:32b"  # 旧: gemma4:26b
     base_url: "http://192.168.0.3:11435/v1"  # ← MacのIPアドレス + OpenAI互換API　ポート番号11434（ollama本体）→11435（キューシステムMac Studio側での設定）
     max_tokens: 32768                      # 最大トークン数（Gemma4用に増量）
     temperature: 0.7                       # 創造性パラメータ（JSON生成のため低めに）

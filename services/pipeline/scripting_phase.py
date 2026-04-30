@@ -509,10 +509,19 @@ async def execute_scripting_phase(
         from services.script_generation.metadata_generator import MetadataGenerator
         from services.script_generation.adapters.factory import LLMAdapterFactory
 
-        # Create LLM port for metadata generation (uses default model for provider)
+        # Create LLM port for metadata generation.
+        # 2026-05-01: model_override に curator_model を渡す。これが無いと
+        # Ollama provider のとき script_generator.ollama.model（運用上は
+        # 大型モデル名）にフォールバックしてしまい、orchestrator が既に
+        # curator_model で実行済みの MetadataGenerator 結果を別モデルで
+        # 上書きする（冗長 API 呼び出し + モデル不一致の原因）。
+        # Orchestrator 内部の _metadata_port と同じモデルを使うことで
+        # SSOT を保つ。
+        curator_model = config.yaml.script_generator.orchestrator.curator_model
         llm_port = LLMAdapterFactory.create(
             config,
             context.provider,
+            model_override=curator_model or None,
         )
 
         metadata_generator = MetadataGenerator(llm_port, config)

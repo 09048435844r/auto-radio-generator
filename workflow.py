@@ -1696,6 +1696,9 @@ def run_workflow_sync(
         WorkflowResult: 実行結果（Usage/Cost情報含む）
     """
     async def _run_phases():
+        # インポート経路で brief.theme を SSOT として再代入するため nonlocal 宣言。
+        # 詳細は ResearchBrief ロード箇所のコメント参照（PR-I 同系統の修正）。
+        nonlocal theme
         workflow_start = time.time()
         overrides_obj = overrides or UIOverrides()
         callbacks = ProgressCallback(log_callback, progress_callback)
@@ -1798,10 +1801,24 @@ def run_workflow_sync(
                         sources=imported_sources,
                         usage=None,
                     )
-                    
+
+                    # PR-I 同系統: インポートされた ResearchBrief を SSOT として
+                    # workflow の theme を上書きする。app.py 側で theme 未入力時に
+                    # "Imported Research" 等の placeholder が入っていた場合、
+                    # それが ScriptOrchestrator / MetadataGenerator に流れて LLM が
+                    # 「輸入された研究」と誤解釈するハルシネーション要因となる。
+                    # brief.theme が非空ならインポート時は常にそちらを採用する。
+                    if brief.theme and brief.theme.strip():
+                        if theme != brief.theme:
+                            callbacks.log(
+                                f"   [INFO] テーマを ResearchBrief から復元: "
+                                f"{theme!r} → {brief.theme!r}"
+                            )
+                        theme = brief.theme
+
                     # リサーチ（API課金）フェーズを無効化
                     overrides_obj.enable_research = False
-                    
+
                     callbacks.log(f"✅ リサーチデータのインポート完了（APIコスト: ¥0）")
                     callbacks.log(f"   テーマ: {brief.theme}")
                     callbacks.log(f"   モード: {brief.research_mode}")
