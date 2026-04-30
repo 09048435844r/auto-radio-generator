@@ -382,9 +382,11 @@ script_generator:
   orchestrator:
     enabled: true               # true: 新アーキテクチャ（推奨） / false: 旧アーキテクチャ
     two_phase_generation: true  # true: 2段階生成（Markdown→JSON） / false: 1段階生成（直接JSON）
-    curator_model: "qwen3:8b"  # キュレーション・要約用軽量モデル（空=選択されたプロバイダーのデフォルトモデルを使用）
-    segment_model: "gemma4:26b"            # Phase 1（クリエイティブ生成）用モデル（空=選択されたプロバイダーのデフォルトモデルを使用）
-    json_model: "qwen2.5:14b"               # Phase 2（JSON構造化）専用モデル（空=segment_modelと同じ）。推奨: qwen2.5-coder:14b
+    # 2026-05-01: GX10 (128GB) 移行に伴い qwen3:32b へ統一（Mac Studio 32GB 制約を解消）
+    # MetadataGenerator もこの curator_model を LLMAdapterFactory 経由で使用する
+    curator_model: "qwen3:32b"  # 旧: qwen3:8b。キュレーション・要約用（MetadataGeneratorも兼用）
+    segment_model: "qwen3:32b"  # 旧: gemma4:26b。Phase 1（クリエイティブ生成）用モデル
+    json_model: "qwen3:32b"     # 旧: qwen2.5:14b。Phase 2（JSON構造化）専用モデル
     # 以下は使用可能なモデル名
     # - qwen2.5-coder:14b        9.0 GB
     # - qwen2.5:14b              9.0 GB
@@ -412,7 +414,7 @@ script_generator:
     # 後方互換: enabled=false（既定）なら従来動作と完全同一
     show_runner:
       enabled: true      # true: ShowRunnerを実行 / false: 無効（従来フロー）
-      model: ""          # 空=curator_model と同じ軽量モデルを使用
+      model: "qwen3:32b"  # 旧: ""（curator_model にフォールバック）。GX10 移行で明示指定
       max_tokens: 4096   # PR-D: LLMの出力上限。length 切り詰め時はフェイルファストで例外
     # Phase 4 施策③: Research 事実抽出エージェント（FactExtractor）
     # リサーチ生文字列から構造化された FactSheet を抽出し、Curator の判断精度を上げる
@@ -420,10 +422,11 @@ script_generator:
     # 無効化したい場合のみ enabled: false を明示（Curator は fact_sheet=None で従来動作）
     fact_extractor:
       enabled: true      # true: FactExtractorを実行（既定） / false: 無効（従来フロー）
-      model: "qwen2.5-coder:14b"   # 2026-04-27: qwen3:8b → gemma4:26b → qwen2.5-coder:14b へ再切替。
+      model: "qwen2.5-coder:32b"   # 2026-05-01: GX10 (128GB) 移行に伴い qwen2.5-coder:14b → 32b へ。
+                            # 旧履歴: qwen3:8b → gemma4:26b → qwen2.5-coder:14b → 32b。
                             # qwen3:8b は構造化出力能力の限界で自己矛盾出力（reasoning="N件抽出" /
                             # facts=[]）が頻発。gemma4:26b でも改善せず、構造化 JSON タスクに
-                            # 適性のある qwen2.5-coder:14b に変更。
+                            # 適性のある qwen2.5-coder 系を採用、GX10 移行で 32b 版に拡大。
                             # 空にすると curator_model にフォールバックする。
       max_facts: 30      # 抽出するファクトの最大数（LLM への指示値）
       max_tokens: 8192   # LLMの出力上限。length 切り詰め時はフェイルファストで例外
@@ -437,6 +440,11 @@ script_generator:
       max_tokens_phase1: 4096  # 2-phase 生成の Phase 1（Markdown creative）
       max_tokens_phase2: 2048  # 2-phase 生成の Phase 2（JSON 構造化）
     metadata_generator:
+      # 2026-05-01: GX10 移行に伴い意図モデルを明示。現状は orchestrator.py が
+      # curator_model を LLMAdapterFactory に渡して metadata_port を作るため、
+      # ここの model フィールドは今のところ未消費（MetadataGeneratorConfig に未定義）。
+      # 将来 MetadataGeneratorConfig.model が追加された際の移行先として記載。
+      model: "qwen3:32b"
       max_tokens: 8192   # タイトル/概要/ハッシュタグ用。2026-04-24 に 2048→4096 に
                          # 引き上げた後も本運用で 2 セッション連続 truncation が
                          # 発生したため、2026-04-27 に 4096→8192 へ再引き上げ
