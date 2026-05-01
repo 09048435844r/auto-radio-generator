@@ -1,4 +1,5 @@
 """Ollama Provider Adapter - Infrastructure layer implementation"""
+import logging
 from typing import Optional
 from openai import AsyncOpenAI
 
@@ -6,6 +7,13 @@ from core.interfaces.llm_port import (
     ILLMPort, LLMRequest, LLMResponse, LLMUsage,
     LLMConnectionError, LLMRateLimitError, LLMResponseError
 )
+
+logger = logging.getLogger(__name__)
+
+# 2026-05-02: thinking mode のローカルモデル（qwen3:32b 等）は content=None を返し、
+# 本文を message.reasoning_content または OpenAI SDK の model_extra に格納するケースがある。
+# 探索順序: 公式フィールド reasoning_content → 追加プロパティ群（thinking / thought）。
+_THINKING_FALLBACK_KEYS = ("reasoning_content", "thinking", "thought")
 
 
 class OllamaAdapter(ILLMPort):
@@ -56,13 +64,50 @@ class OllamaAdapter(ILLMPort):
                 )
                 
                 # Extract response
-                content = response.choices[0].message.content
+                message = response.choices[0].message
+                content = message.content
                 finish_reason = response.choices[0].finish_reason
-                
+
+                # 2026-05-02: thinking mode の qwen3:32b 等は content=None を返し、本文を
+                # reasoning_content / model_extra に格納するケースがある（本運用で
+                # MetadataGenerator が下流で 'NoneType is not subscriptable' で落ちた
+                # 実績あり）。content が None のときに限り、これらのフィールドから
+                # フォールバックで取り出す。フォールバックが発動したことは warning で記録。
+                if content is None:
+                    fallback_source: Optional[str] = None
+                    fallback_value: Optional[str] = None
+
+                    # 公式フィールド reasoning_content を最優先（Pydantic モデルの属性）
+                    direct = getattr(message, "reasoning_content", None)
+                    if isinstance(direct, str) and direct.strip():
+                        fallback_source = "message.reasoning_content"
+                        fallback_value = direct
+
+                    # 次に OpenAI SDK の model_extra（未マップ追加プロパティ）を順に探索
+                    if fallback_value is None:
+                        extra = getattr(message, "model_extra", None)
+                        if isinstance(extra, dict):
+                            for key in _THINKING_FALLBACK_KEYS:
+                                value = extra.get(key)
+                                if isinstance(value, str) and value.strip():
+                                    fallback_source = f"message.model_extra[{key!r}]"
+                                    fallback_value = value
+                                    break
+
+                    if fallback_value is not None:
+                        logger.warning(
+                            "Ollama content=None; falling back to %s (%d chars). "
+                            "model=%s, finish_reason=%s. "
+                            "thinking-mode model 等で content が空になる既知症状。",
+                            fallback_source,
+                            len(fallback_value),
+                            request.model or self._default_model,
+                            finish_reason,
+                        )
+                        content = fallback_value
+
                 # Validate response content (critical: prevent downstream JSON parse errors)
                 if not content or not content.strip():
-                    import logging
-                    logger = logging.getLogger(__name__)
                     logger.error(
                         f"Ollama returned empty response. "
                         f"finish_reason={finish_reason}, "
