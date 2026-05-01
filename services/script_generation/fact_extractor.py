@@ -296,7 +296,7 @@ class FactExtractor:
                     return s
 
                 # Phase 4 review #8: category を FactCategory リテラルに正規化する。
-                # LLM が SSOT（prompts.yaml の 6 カテゴリ）以外を返した場合、
+                # LLM が SSOT（prompts.yaml の 9 カテゴリ）以外を返した場合、
                 # ValidationError を避けるため _DEFAULT_FACT_CATEGORY にフォールバック。
                 # 未知値の出現頻度は logger.warning で追跡可能（BACKLOG の将来分布調査用）。
                 raw_category = str(f.get("category", "") or "").strip()

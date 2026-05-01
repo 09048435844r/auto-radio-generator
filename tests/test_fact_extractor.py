@@ -559,12 +559,20 @@ def test_execute_fact_extraction_only_runs_normally_when_no_prior_file(
 # Phase 4 review #8: FactCategory Literal enforcement and fallback behavior
 # ---------------------------------------------------------------------------
 
-def test_fact_category_ssot_exposes_exactly_six_values():
-    """`FactCategory` の値は prompts.yaml の指示と同一の 6 値でなければならない。"""
+def test_fact_category_ssot_exposes_exactly_nine_values():
+    """`FactCategory` の値は prompts.yaml の指示と同一の 9 値でなければならない。
+
+    2026-05-02: 「イベント」「技術」「定義」を追加（旧 6 値→9 値）。
+    qwen2.5-coder:32b 等が技術解説で自然に使うカテゴリを SSOT に取り込んだ。
+    """
     from typing import get_args
     from core.models.fact_sheet import FactCategory
 
-    expected = {"数値", "人物", "事件", "比較", "引用", "その他"}
+    expected = {
+        "数値", "人物", "事件", "比較", "引用",
+        "イベント", "技術", "定義",
+        "その他",
+    }
     assert set(get_args(FactCategory)) == expected
 
 
@@ -574,9 +582,13 @@ def test_extracted_fact_default_category_is_その他():
     assert fact.category == "その他"
 
 
-@pytest.mark.parametrize("valid_cat", ["数値", "人物", "事件", "比較", "引用", "その他"])
-def test_extracted_fact_accepts_all_six_ssot_categories(valid_cat):
-    """SSOT に列挙された 6 カテゴリはすべて ExtractedFact で受け入れられる。"""
+@pytest.mark.parametrize("valid_cat", [
+    "数値", "人物", "事件", "比較", "引用",
+    "イベント", "技術", "定義",
+    "その他",
+])
+def test_extracted_fact_accepts_all_nine_ssot_categories(valid_cat):
+    """SSOT に列挙された 9 カテゴリはすべて ExtractedFact で受け入れられる。"""
     fact = ExtractedFact(statement="テスト", category=valid_cat)
     assert fact.category == valid_cat
 
