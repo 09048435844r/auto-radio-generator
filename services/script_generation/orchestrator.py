@@ -163,18 +163,62 @@ class ScriptOrchestrator(IScriptOrchestrator):
 
         # --------------------------------------------------------
         # Step 0.5: Research 事実抽出（FactExtractor、Phase 4 施策③）
-        # 有効化条件:
-        #   - preset_fact_sheet が渡されていれば即採用
-        #   - それ以外で fact_extractor.enabled=True かつ Curator を実際に走らせる場合のみ実行
-        #   - preset_curation が提供される（Curator スキップ）場合は FactExtractor も不要
+        # 優先順位:
+        #   1. preset_fact_sheet（HITL で人間が編集済み） → 即採用
+        #   2. research_data.structured_facts（Phase 3 / interface_spec.md v1.0、
+        #      リサーチ側で事前抽出済み） → FactSheet.from_structured_facts で変換、
+        #      FactExtractor は実行しない（LLM 抽出能力に依存しないため facts=[] 防止）
+        #   3. fact_extractor.enabled=True かつ Curator を実際に走らせる場合のみ FactExtractor 実行
+        #   4. preset_curation 提供（Curator スキップ）→ FactExtractor も不要
         # 失敗時は警告ログのみ出して fact_sheet=None で継続（後方互換）
         # --------------------------------------------------------
         fact_sheet: Optional[FactSheet] = None
         curator_will_run = not (preset_curation is not None and preset_curation.topics)
+        structured_facts = getattr(research_data, "structured_facts", None)
         if preset_fact_sheet is not None:
             log("\n[cyan]--- Step 0.5/3: 事実抽出（プリセット使用、FactExtractor スキップ） ---[/cyan]")
             fact_sheet = preset_fact_sheet
             log(f"  [green]✓ プリセット FactSheet を使用 (facts={len(fact_sheet.facts)})[/green]")
+        elif curator_will_run and structured_facts:
+            # Phase 3: リサーチ側が事前抽出した structured_facts を FactSheet に変換し、
+            # FactExtractor をスキップする。LLM の構造化出力能力に依存しないため
+            # facts=[] の発生原因を根治できる（interface_spec.md 3.2 節）。
+            log("\n[cyan]--- Step 0.5/3: 事実抽出（structured_facts から変換、FactExtractor スキップ） ---[/cyan]")
+            if progress_callback:
+                progress_callback.progress(0.49, "📋 リサーチ側の structured_facts を変換中...")
+            try:
+                fact_sheet = FactSheet.from_structured_facts(structured_facts)
+                log(
+                    f"  [green]✓ research_brief.structured_facts から FactSheet 構築 "
+                    f"(facts={len(fact_sheet.facts)})[/green]"
+                )
+            except Exception as e:
+                # Defensive: 変換失敗時は FactExtractor にフォールバック（後方互換維持）
+                log(
+                    f"[yellow]⚠ structured_facts 変換失敗、FactExtractor に "
+                    f"フォールバックします: {e}[/yellow]"
+                )
+                logger.warning(
+                    "FactSheet.from_structured_facts failed; falling back to FactExtractor: %s",
+                    e,
+                )
+                if self._fact_extractor_enabled:
+                    try:
+                        fact_sheet = await self.fact_extractor.extract_facts(
+                            theme=theme,
+                            research_data=research_data,
+                            progress_log=log,
+                        )
+                        self._accumulate_usage(self.fact_extractor.last_usage)
+                    except Exception as e2:
+                        log(f"[yellow]⚠ FactExtractor もエラー（fact_sheet=None で継続）: {e2}[/yellow]")
+                        logger.warning(
+                            "FactExtractor fallback after structured_facts conversion error also failed: %s",
+                            e2,
+                        )
+                        fact_sheet = None
+                else:
+                    fact_sheet = None
         elif self._fact_extractor_enabled and curator_will_run:
             log("\n[cyan]--- Step 0.5/3: 事実抽出（FactExtractor） ---[/cyan]")
             if progress_callback:

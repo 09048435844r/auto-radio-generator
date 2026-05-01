@@ -289,9 +289,13 @@ async def execute_scripting_phase(
         mode=research_brief.research_mode,
         content=research_brief.research_content,
         sources=research_sources,
-        usage=None  # Usage already tracked in ResearchBrief
+        usage=None,  # Usage already tracked in ResearchBrief
+        # Phase 3 (interface_spec.md v1.0): research_brief.structured_facts を
+        # ResearchResult に乗せ、ScriptOrchestrator Step 0.5 で FactExtractor を
+        # スキップする際の入力として伝播させる。None / 不在なら従来動作。
+        structured_facts=getattr(research_brief, "structured_facts", None),
     )
-    
+
     # Step 1: Script generation
     cb.log(f"\n== Scripting Phase: Script Generation ==")
     cb.log(f"Theme: {research_brief.theme}")
