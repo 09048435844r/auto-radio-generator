@@ -125,11 +125,15 @@ python app.py
 以下のログが表示されれば成功：
 
 ```
-SegmentGenerator initialized: two_phase_enabled=True, model=gemma4:26b
-  Phase 1 API: provider=ollama, model=gemma4:26b, max_tokens=2048, temperature=0.85
+SegmentGenerator initialized: two_phase_enabled=True, model=qwen3:32b
+  Phase 1 API: provider=ollama, model=qwen3:32b, max_tokens=2048, temperature=0.85
 ⚡ Direct Regex Bypass: Phase 2 LLM呼び出しをスキップ
 ✓ 正規表現パーサーでJSON生成完了
 ```
+
+> 注: 2026-04-30 の GX10 移行で本プロジェクトの segment_model は `gemma4:26b`
+> → `qwen3:32b` に変更されました。旧ログで `gemma4:26b` と表示されていた箇所は
+> 現行設定では `qwen3:32b` になります。
 
 **Phase 2のAPI呼び出しログが表示されない**ことを確認してください。
 
@@ -186,7 +190,7 @@ script_generator:
   orchestrator:
     enabled: true                # 新アーキテクチャを有効化
     two_phase_generation: true   # 2段階生成を有効化
-    segment_model: "gemma4:26b"  # Phase 1用モデル
+    segment_model: "qwen3:32b"   # Phase 1用モデル（GX10 移行後の現行値）
 ```
 
 ### config/prompts.yaml

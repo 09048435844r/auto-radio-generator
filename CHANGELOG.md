@@ -7,6 +7,49 @@
 
 ## [Unreleased]
 
+### 修正（2026-05-02: OllamaAdapter に thinking-mode content=None フォールバックを追加）
+- **問題**: qwen3:32b 等の thinking mode を持つローカルモデルは、本文を `message.content` ではなく `message.reasoning_content` または OpenAI SDK の `model_extra` 経由で返してくるケースがある。本運用で MetadataGenerator が下流で `'NoneType' object is not subscriptable` で失敗した実績あり
+- **修正**: `services/script_generation/adapters/ollama_adapter.py` の `generate()` で `content is None` のときに限り、以下の順でフォールバック取得を試みる:
+  1. `message.reasoning_content`（公式フィールド）
+  2. `message.model_extra['reasoning_content' / 'thinking' / 'thought']`（OpenAI SDK の未マップ追加プロパティ集）
+  - いずれにも有効な文字列がなければ既存の空応答ガード（`LLMResponseError`）にそのまま到達
+  - フォールバック発動時は `logger.warning` でモデル名・採用元キー・文字数を記録
+  - `content=""`（空文字列）は thinking-mode 症状ではない別異常のため、フォールバックを試みず即エラー（既存挙動維持）
+- **テスト**: `tests/test_ollama_adapter_thinking_fallback.py` 新規 8 件（通常 content 回帰防止 / reasoning_content 採用 / model_extra thinking 採用 / 優先順位 / 全空エラー / 空白のみ無効 / 空文字列即エラー）
+
+### 追加（2026-05-02: FactCategory に「イベント」「技術」「定義」を追加 / 6→9 値）
+- **背景**: BACKLOG「ExtractedFact.category の実データ分布調査」の部分着地。GX10 移行後に主力となった qwen2.5-coder:32b は、技術解説コンテンツのファクト抽出時にこれら 3 カテゴリを自然に出力するが、旧 SSOT 6 値では含まれず「Unknown category」WARNING を量産していた
+- **方針**: カテゴリ禁止しても LLM の語彙傾向は変わらないため、運用実態に合わせて SSOT を拡張
+- **カテゴリ分担**:
+  - 既存 `事件`: 「具体的な出来事・時系列上のニュース性事件」に微修正（イベントとの棲み分け）
+  - 新規 `イベント`: 計画・告知された催し（リリース・カンファレンス・発表会・キャンペーン等）
+  - 新規 `技術`: 仕組み・仕様・アルゴリズム・性能特性などの技術的事項
+  - 新規 `定義`: 用語・概念の定義、分類、フォーマルな説明
+- **SSOT 同期**: `core/models/fact_sheet.py::FactCategory` Literal と `config/prompts.yaml > orchestrator.fact_extractor` の「## カテゴリの選び方」節を同時更新。`fact_extractor.py` の `_VALID_FACT_CATEGORIES` は `typing.get_args(FactCategory)` で派生するためコード変更不要
+- **テスト**: 既存 2 件の test 名を `..._six_values` → `..._nine_values` に rename + parametrize リスト拡張（+3 ケース）
+
+### 修正（2026-05-01: リサーチインポート時に theme が "Imported Research" に上書きされるバグの修正 / PR-I 同系統）
+- **問題**: UI でリサーチデータをインポート (`research_import_filepath`) し、theme を空のまま動画生成すると、`app.py:389` が placeholder `"Imported Research"` を入れ、それが ScriptOrchestrator / MetadataGenerator まで流れて LLM が「輸入された研究」と誤解釈してハルシネーション台本を生成する本運用バグ
+- **原因**: `workflow.run_workflow_sync` の import block (`workflow.py:1772-1817`) は `brief.theme` をログ表示と `preloaded_research.topic` にしか使っておらず、クロージャ内の `theme` 変数は app.py が渡した placeholder のままだった
+- **修正**: `_run_phases` クロージャに `nonlocal theme` を宣言し、ResearchBrief のロード成功時に `brief.theme` で `theme` を上書き。ResearchBrief は当該リサーチデータの SSOT であるという PR-I の方針に揃える
+- **副次修正**:
+  - `config.yaml`: GX10 (128GB) 移行に伴い `script_generator.ollama.model` を `gemma4:26b` → `qwen3:32b` に切替（gemma4:26b は GX10 未インストールのため、Factory が default fallback として使う経路で 404 連発の原因になっていた）
+  - `services/pipeline/scripting_phase.py:513`: `LLMAdapterFactory.create()` に `model_override=curator_model` を追加。これが無いと Ollama provider のとき `script_generator.ollama.model` にフォールバックし、orchestrator が既に curator_model で実行済みの MetadataGenerator 結果を別モデルで上書きする冗長動作 + モデル不一致が起きていた
+- **テスト**: `tests/test_import_theme_overwrite.py` 新規 7 件（構造的契約 3 + 動作レベル 3 + 前提 1）
+
+### 改善（2026-04-30: GX10 推論サーバー移行に伴うモデル切替 + UI ヘルスチェック修正）
+- **背景**: Mac Studio (32GB) → GX10 (128GB) への Ollama 推論サーバー移行に伴い、Mac Studio では VRAM 制約で使えなかった大型モデルへ切り替え
+- **`config.yaml` 変更**:
+  - `orchestrator.curator_model`: `qwen3:8b` → `qwen3:32b`
+  - `orchestrator.segment_model`: `gemma4:26b` → `qwen3:32b`
+  - `orchestrator.json_model`: `qwen2.5:14b` → `qwen3:32b`
+  - `orchestrator.show_runner.model`: `""`（curator フォールバック）→ `qwen3:32b`（明示）
+  - `orchestrator.fact_extractor.model`: `qwen2.5-coder:14b` → `qwen2.5-coder:32b`（構造化 JSON タスクへの適性は維持しつつ 32b 版に拡大）
+  - `orchestrator.metadata_generator.model`: `qwen3:32b` を新規記載（現状未消費。将来の `MetadataGeneratorConfig.model` 追加時の移行先）
+  - `base_url` は変更なし（Mac Studio キューシステム経由を維持）
+- **UI ヘルスチェック修正** (`app.py::check_api_health`): Ollama ヘルスチェックが `LLMAdapterFactory.create()` を `model_override` 無しで呼んでいたため、`script_generator.ollama.model`（旧 gemma4:26b）にフォールバックし、UI に古いモデル名が表示されていた。`orchestrator.curator_model` を `model_override` として明示渡しに変更し、実行時に実際使うモデルを ping するようにした
+- **既知のスコープ外**: `BACKLOG`「モデル変更検討（qwen3:8b → 中型モデル）」「ExtractedFact.category 実データ分布調査」は本変更で間接的に解決方向に進んだ（qwen3:32b への切替で title 欠落・facts=[] の発生頻度が低下する想定 / qwen2.5-coder:32b の出力カテゴリは別途 SSOT 拡張で対応）
+
 ### 修正（2026-04-28: ResearchBrief.theme が連結クエリ全文に上書きされるバグの修正 / PR-I）
 - **問題**（PR-I / `review/pr-i-theme-overwrite-fix`）: `workflow.py::_save_research_results` および `generate_video_workflow` 内のインライン ResearchBrief 構築箇所で、`theme=research_data.topic` / `queries=[research_data.topic]` という記述が使われていた。`research_data.topic` は `services/research/perplexity_client.py:355` の `", ".join(normalized_queries)` で「検索クエリ全文を連結した文字列」として作られるため、ResearchBrief.theme として下流に流すと **MetadataGenerator 等が長大な連結文字列を「テーマ」と誤認し、タイトル / 説明文 / タグ生成の整合性が壊れる**運用バグとなっていた。本運用セッション `output/20260424_220840` の MetadataGenerator truncation の真因として PR-D/F 観測経由で特定済み
 - **修正方針（SSOT: `services/pipeline/research_phase.py:98-111` のパイプライン版に合わせる）**:

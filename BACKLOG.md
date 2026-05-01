@@ -212,3 +212,54 @@ if response.finish_reason == "length":
 
 ### 工数
 XS（30 分以内、機械的な PR-F パターン横展開）
+
+---
+
+## [RESOLVED] モデル変更検討（qwen3:8b → 中型モデル）
+
+**記録日**: 2026-04-24（提案） / **解決日**: 2026-04-30（GX10 移行で実施）
+
+GX10 (128GB) 推論サーバーへの移行に伴い、Mac Studio (32GB) の VRAM 制約で
+使えなかった大型モデルへ切り替え可能となり、本 BACKLOG の主旨は実現した。
+
+### 実施内容
+- `orchestrator.curator_model`: qwen3:8b → **qwen3:32b**
+- `orchestrator.segment_model`: gemma4:26b → **qwen3:32b**
+- `orchestrator.json_model`: qwen2.5:14b → **qwen3:32b**
+- `orchestrator.show_runner.model`: 空（curator フォールバック）→ **qwen3:32b** 明示
+- `orchestrator.fact_extractor.model`: qwen2.5-coder:14b → **qwen2.5-coder:32b**
+
+### 詳細
+CHANGELOG.md「2026-04-30: GX10 推論サーバー移行に伴うモデル切替」を参照。
+
+`script_generator.ollama.model`（デフォルトフォールバック）も `gemma4:26b` →
+`qwen3:32b` に切替。UI ヘルスチェック表示も実行時モデル（curator_model）を
+ping する形に修正済み（CHANGELOG 同セクション）。
+
+### 残課題（軽微）
+qwen3:32b の効果（title 欠落・facts=[] の発生頻度低下）は実運用観察待ち。
+本 BACKLOG ではなく「PR-E 効果観察」の枠で追跡する。
+
+---
+
+## [RESOLVED-PARTIAL] ExtractedFact.category の実データ分布調査
+
+**記録日**: 2026-04-23（提案） / **部分着地日**: 2026-05-02
+
+GX10 移行後に主力となった qwen2.5-coder:32b が `イベント / 技術 / 定義` を
+高頻度で出力し、SSOT 6 値外として WARNING を量産していたため、運用実態に
+合わせて SSOT を 6 → 9 値に拡張した（Literal 拡張で対応）。
+
+### 実施内容
+- `core/models/fact_sheet.py::FactCategory` を 9 値に拡張
+- `config/prompts.yaml > orchestrator.fact_extractor` の「## カテゴリの選び方」
+  節に対応する 3 行を追加（既存「事件」も「ニュース性事件」に微修正して棲み分け）
+- テスト 2 件を `..._six_values` → `..._nine_values` に rename + parametrize 拡張
+
+### 詳細
+CHANGELOG.md「2026-05-02: FactCategory に「イベント」「技術」「定義」を追加」を参照。
+
+### 残課題
+本 BACKLOG が掲げた「実データ分布の体系的集計」自体は未着手。fact_sheet.json
+が数十件蓄積した時点で、9 値の使用比率や残存する未知値の頻度を集計する余地は残る。
+ただし主因である「コードモデルが多用するカテゴリの SSOT 不在」は本対応で解消した。
