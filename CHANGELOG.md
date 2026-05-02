@@ -7,6 +7,28 @@
 
 ## [Unreleased]
 
+### 追加（2026-05-02: Phase 3 / interface_spec.md v1.3.0 - structured_facts を ResearchBrief 経由で TopicCurator に伝播）
+- **背景**: リサーチ側パイプライン（`life-update-radio-specs/interface_spec.md` v1.1.0）が Phase 2 で `structured_facts` フィールドを `research_brief.json` に出力するようになったため、台本側がこれを読み取って `FactExtractor` をスキップする経路を実装。本運用で頻発していた `facts=[]`（qwen3:8b 等の構造化出力能力限界による空配列出力 + reasoning 自己矛盾、PR-G で検出済み）の根本原因を構造的に回避する
+- **実装範囲（4 ファイル + 1 テスト）**:
+  - `core/models/artifacts.py`: `ResearchBrief.structured_facts: Optional[Dict[str, Any]] = None` を追加（Pydantic Optional・既定 None で後方互換維持）
+  - `core/models/fact_sheet.py`: `FactSheet.from_structured_facts(structured_facts: dict) -> FactSheet` クラスメソッドを新設。`key_numbers` → `数値` / `key_entities` → type で分岐 / `surprising_claims` → `その他` (surprise_score=9) / `controversies` → `比較`。`source_idx` は `[N]` 形式で `source_citation` に保存（引用追跡用）。不正エントリは `logger.warning` でスキップする防御的パース
+  - `core/interfaces/researcher.py`: `ResearchResult` dataclass に `structured_facts` フィールドを追加（`research_brief → research_data` の搬送経路）
+  - `services/pipeline/scripting_phase.py`: `ResearchResult` 構築点で `structured_facts=research_brief.structured_facts` を伝播
+  - `services/script_generation/orchestrator.py` Step 0.5: 優先順位を以下に整理
+    1. `preset_fact_sheet`（HITL 編集済み） → 即採用
+    2. `research_data.structured_facts`（リサーチ側事前抽出） → `from_structured_facts` で変換、FactExtractor スキップ
+    3. `fact_extractor.enabled` かつ Curator が走る場合 → FactExtractor 実行
+    4. それ以外 → `fact_sheet=None`
+  - 変換失敗時は防御的に FactExtractor へフォールバック
+- **実機検証**（2026-05-02 / Ollama qwen3:32b、合成 structured_facts 13 件 fixture / `scripts/manual_tests/phase3_*`）:
+  - Step 0.5 で「structured_facts から変換、FactExtractor スキップ」ログ確認、FactSheet 13 件構築
+  - TopicCurator が選定した 3 トピックすべてに数値含有（`20%` / `18% vs 25%` / `5%・1.5倍`）
+  - 台本本文 43 ターン中: 数値 41 個 / `BMI` 4 回 / `HIIT` 4 回 / `アディポ` 3 回 等、固有名詞多数
+  - `facts=[]` 系エラー発生ゼロ、所要 884 秒で完走
+- **対象外（仕様書 v1.3.0 で明示）**: `interface_spec.md` Phase 3 のうち「angle 伝播」「snippet 有効化」は本タスクでは未実装。引き続きチェックボックスは `[ ]` のまま
+- **ドキュメント連携**: `life-update-radio-specs/interface_spec.md` v1.3.0 (commit 69d0a45) と双方向参照。§3.4 に台本側実装の詳細・変換マッピング・実機検証結果を集約
+- **テスト**: `tests/test_structured_facts_phase3.py` 新規 15 件（フィールド契約 / from_structured_facts マッピング / Orchestrator 優先順位 / scripting_phase 伝播）。既存 180 + 新規 15 = 195 件全 pass
+
 ### 修正（2026-05-02: OllamaAdapter に thinking-mode content=None フォールバックを追加）
 - **問題**: qwen3:32b 等の thinking mode を持つローカルモデルは、本文を `message.content` ではなく `message.reasoning_content` または OpenAI SDK の `model_extra` 経由で返してくるケースがある。本運用で MetadataGenerator が下流で `'NoneType' object is not subscriptable` で失敗した実績あり
 - **修正**: `services/script_generation/adapters/ollama_adapter.py` の `generate()` で `content is None` のときに限り、以下の順でフォールバック取得を試みる:
