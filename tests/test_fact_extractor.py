@@ -662,3 +662,100 @@ def test_extracted_fact_rejects_invalid_category_on_direct_construction():
 
     with pytest.raises(ValidationError):
         ExtractedFact(statement="不正", category="general")  # 英語値は SSOT 外
+
+
+# ---------------------------------------------------------------------------
+# 2026-05-03: facts エントリが string 形式で返ってきた場合の正規化（提案 C）
+# ---------------------------------------------------------------------------
+
+def test_parse_normalizes_string_facts_to_dict(mock_app_config, caplog):
+    """LLM が `facts: ["fact1", "fact2"]` と string list で返した場合、
+    各エントリを `{"statement": raw}` として正規化して取り込めること。
+    旧コードでは AttributeError → silent skip で facts=[] になっていた。
+    """
+    import logging
+
+    extractor = _make_fact_extractor_for_parse(mock_app_config)
+    raw = json.dumps({
+        "facts": [
+            "睡眠不足者の感染率は2.94倍",
+            "BMI正常でも内臓脂肪過剰の日本人20%",
+        ],
+        "theme_summary": "テーマ要約",
+    })
+
+    with caplog.at_level(logging.WARNING, logger="services.script_generation.fact_extractor"):
+        sheet = extractor._parse_fact_sheet_response(raw)
+
+    # 両方の string が ExtractedFact として保持される（silent skip しない）
+    assert len(sheet.facts) == 2, f"string facts は正規化されるべき。実際: {sheet.facts}"
+    statements = {f.statement for f in sheet.facts}
+    assert statements == {
+        "睡眠不足者の感染率は2.94倍",
+        "BMI正常でも内臓脂肪過剰の日本人20%",
+    }
+    # 正規化発動の warning が記録される
+    msgs = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert sum("normalizing to dict" in m for m in msgs) == 2, (
+        f"string entry 正規化の warning が 2 件記録されるべき。実際: {msgs}"
+    )
+
+
+def test_parse_mixed_string_and_dict_facts(mock_app_config):
+    """string と dict が混在しても両方処理できる（dict 側の category 等は維持）。"""
+    extractor = _make_fact_extractor_for_parse(mock_app_config)
+    raw = json.dumps({
+        "facts": [
+            "string 形式のファクト",
+            {"statement": "dict 形式のファクト", "category": "数値", "surprise_score": 8},
+        ],
+        "theme_summary": "",
+    })
+    sheet = extractor._parse_fact_sheet_response(raw)
+    assert len(sheet.facts) == 2
+    by_statement = {f.statement: f for f in sheet.facts}
+    # string 経由は category="その他" 既定
+    assert by_statement["string 形式のファクト"].category == "その他"
+    # dict 経由は元の category="数値"
+    assert by_statement["dict 形式のファクト"].category == "数値"
+
+
+def test_parse_skips_unsupported_facts_entry_types(mock_app_config, caplog):
+    """list / int 等の予期しない型はスキップする（dict / str 以外）。"""
+    import logging
+
+    extractor = _make_fact_extractor_for_parse(mock_app_config)
+    raw = json.dumps({
+        "facts": [
+            "正常な string ファクト",
+            ["list は不正"],
+            123,
+            {"statement": "正常な dict ファクト"},
+        ],
+        "theme_summary": "",
+    })
+
+    with caplog.at_level(logging.WARNING, logger="services.script_generation.fact_extractor"):
+        sheet = extractor._parse_fact_sheet_response(raw)
+
+    # 正常な string と dict のみ通る
+    assert len(sheet.facts) == 2
+    statements = {f.statement for f in sheet.facts}
+    assert statements == {"正常な string ファクト", "正常な dict ファクト"}
+
+    # 型不正の警告が出ている（list / int の 2 件）
+    msgs = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    type_warnings = [m for m in msgs if "Skipping unexpected facts entry type" in m]
+    assert len(type_warnings) == 2, f"list と int の 2 件で型不正警告が必要。実際: {msgs}"
+
+
+def test_parse_empty_string_fact_is_skipped(mock_app_config):
+    """空文字列の string 要素は statement が空になるため通常の skip 経路で除外。"""
+    extractor = _make_fact_extractor_for_parse(mock_app_config)
+    raw = json.dumps({
+        "facts": ["", "  ", "実体のあるファクト"],
+        "theme_summary": "",
+    })
+    sheet = extractor._parse_fact_sheet_response(raw)
+    assert len(sheet.facts) == 1
+    assert sheet.facts[0].statement == "実体のあるファクト"

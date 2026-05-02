@@ -271,7 +271,26 @@ class FactExtractor:
 
         # Parse facts defensively: skip malformed entries, never crash the whole extraction
         facts: list[ExtractedFact] = []
-        for f in data.get("facts", []) or []:
+        for raw_f in data.get("facts", []) or []:
+            # 2026-05-03: LLM が `facts: [{...}, ...]` ではなく `facts: ["fact1 string", ...]`
+            # と string list 形式で返すケースに対応。dict.get() を呼ぶ前に正規化する。
+            # 旧コードでは raw_f が str の場合に AttributeError が発生し、try/except 全体で
+            # silent skip されて facts=[] になる症状があった（Qwen3-Next-80B 等で観測）。
+            if isinstance(raw_f, str):
+                logger.warning(
+                    "[FactExtractor] facts entry was string, normalizing to "
+                    "dict({statement: raw}): %r",
+                    raw_f[:80],
+                )
+                f = {"statement": raw_f}
+            elif isinstance(raw_f, dict):
+                f = raw_f
+            else:
+                logger.warning(
+                    "[FactExtractor] Skipping unexpected facts entry type %s: %r",
+                    type(raw_f).__name__, raw_f,
+                )
+                continue
             try:
                 statement = str(f.get("statement", "") or "").strip()
                 if not statement:
