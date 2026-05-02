@@ -85,26 +85,37 @@ PR-E を含む一連の変更を push/merge して本運用に投入した後、
 
 ---
 
-## [BACKLOG] Ollama Structured Output（JSON schema 強制）導入検討
+## [BACKLOG] Structured Output (Ollama / vLLM 共通) - JSON schema 強制 導入検討
 
-**記録日**: 2026-04-24
+**記録日**: 2026-04-24（初版「Ollama Structured Output」） / **更新日**: 2026-05-03（vLLM 移行を反映）
 **発見経緯**: PR-E のプロンプト改善で効果不十分だった場合の次の一手として、調査報告で挙がった
 
 ### 内容
-Ollama は `format` パラメータに JSON schema を渡すことで、LLM の出力を schema に物理的に制約できる機能を提供している（2026-04 時点）。プロンプトでの明示圧力（PR-E）はモデル依存で効果が不安定だが、Structured Output は **schema 層で省略を不可能にする** ため、title 欠落や facts=[] を構造的に防げる。
+Ollama は `format` パラメータに JSON schema を渡すことで LLM 出力を schema に物理的に制約できる機能を提供している（2026-04 時点）。
+**2026-05-03 追記**: GX10 移行 + プロキシ経由で実体は **vLLM (Qwen3-Next-80B)** にルーティングされる構成になった。vLLM は OpenAI 互換 API で `response_format={"type": "json_schema", "json_schema": {...}}` および `extra_body={"guided_json": ...}` をサポートしており、Ollama より安定した schema 強制が期待できる。本 BACKLOG は両バックエンドを対象に拡張。
+
+プロンプトでの明示圧力（PR-E）はモデル依存で効果が不安定だが、Structured Output は **schema 層で省略を不可能にする** ため、title 欠落や facts=[] を構造的に防げる。
+直近の関連修正: `fix(fact_extractor): facts エントリ string 形式の dict 正規化`（2026-05-03、提案 C）は短期防御層として実装済みだが、根治には schema 強制が必要。
 
 ### 実装想定
 - `core/interfaces/llm_port.py` の `LLMRequest` に `response_schema: Optional[dict]` フィールド追加
-- `services/script_generation/adapters/ollama_adapter.py` で `response_schema` を `format` パラメータに渡す
+- `services/script_generation/adapters/ollama_adapter.py` で `response_schema` を以下のいずれかで渡す:
+  - **Ollama 経由（旧構成）**: `format` パラメータに schema dict を渡す
+  - **vLLM 経由（現構成）**: OpenAI SDK の `response_format={"type": "json_schema", "json_schema": ...}` か、vLLM 固有の `extra_body={"guided_json": ...}` を使う
+  - どちらも OpenAI 互換 API レイヤなので分岐は最小限で済む見込み
 - 他プロバイダ（Gemini / OpenAI / Anthropic）対応は別フェーズ（JSON mode / response_format の差異吸収）
 - 各エージェントの Pydantic モデル（`CuratedTopic` / `ExtractedFact`）から schema を自動生成（`model_json_schema()`）
 
 ### 前提条件
-- 利用している Ollama バージョン（現状: 不明）での schema サポート確認が必要
-- qwen3:8b が `format` 指定下で安定動作するかの実検証が必要
+- 現行 vLLM サーバー（プロキシ越しの GX10）で `guided_json` または `response_format=json_schema` がサポートされていることの確認
+- Qwen3-Next-80B が schema 指定下で安定動作するかの実検証
+- 旧来の Ollama 直接構成で動かす場合のフォールバック分岐の要否
 
 ### 優先度
-低〜中（PR-E の効果観察結果次第。効果十分なら見送り、不十分なら昇格）
+**中〜高に昇格**（2026-05-03 評価）。理由:
+- vLLM 移行で Ollama 時代の「schema サポート不安」問題がクリア
+- malformed facts (str エントリ等) の根治アプローチとして即効性
+- 短期防御層（提案 C）が複数入ったが、schema 強制で一掃可能
 
 ---
 
