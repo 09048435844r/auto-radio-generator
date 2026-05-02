@@ -52,13 +52,14 @@ def create_script_generator(config: AppConfig, provider: str = "gemini") -> IScr
 
 def get_provider_from_model_name(model_name: str) -> str:
     """Infer provider name from model name
-    
+
     Args:
-        model_name: Model name (e.g., "gpt-5.4", "gemini-3.1-pro", "claude-sonnet-4.6", "gpt-oss:20b-long")
-    
+        model_name: Model name (e.g., "gpt-5.4", "gemini-3.1-pro", "claude-sonnet-4.6",
+                    "gpt-oss:20b-long", "qwen3-next-80b")
+
     Returns:
         str: Provider name ("gemini" | "openai" | "anthropic" | "ollama")
-    
+
     Raises:
         ValueError: If unknown model name
     """
@@ -68,7 +69,10 @@ def get_provider_from_model_name(model_name: str) -> str:
         return "openai"
     elif model_name.startswith("claude-"):
         return "anthropic"
-    elif model_name.startswith(("gpt-oss:", "llama3.", "phi3:", "mistral:", "mixtral:")):
+    elif model_name.startswith(("gpt-oss:", "llama3.", "phi3:", "mistral:", "mixtral:", "qwen")):
+        # 2026-05-03: vLLM 経由でホストされる qwen 系（qwen3-next-80b / qwen3:32b /
+        # qwen2.5-coder:32b 等）を Ollama provider にマッピング。OllamaAdapter は
+        # OpenAI 互換 API を叩くだけなので vLLM サーバーでも動作する。
         return "ollama"
     else:
         raise ValueError(f"Unknown model name: {model_name}")
