@@ -23,6 +23,54 @@ import logging
 logger = logging.getLogger(__name__)
 console = Console()
 
+# 2026-05-03: thinking mode のローカル/proxied モデル（qwen3-next-80b 等）は
+# `message.content` を None で返し、本文を `message.reasoning_content` または
+# OpenAI SDK の `model_extra` に入れるケースがある。OllamaAdapter (commit 02af3ae)
+# と同等のフォールバックを本 client にも適用する。探索順序は adapter 側と同じ。
+_THINKING_FALLBACK_KEYS = ("reasoning_content", "thinking", "thought")
+
+
+def _extract_content_with_thinking_fallback(message, *, model: str, finish_reason: str) -> Optional[str]:
+    """`message.content` が None のとき reasoning_content / model_extra から取得。
+
+    OllamaAdapter._THINKING_FALLBACK_KEYS と同じ探索順序を使う。
+    フォールバックが発動した場合は logger.warning で記録。
+    返り値は本文文字列、または有効な値が見つからなければ None。
+    """
+    content = message.content
+    if content is not None:
+        return content
+
+    fallback_source: Optional[str] = None
+    fallback_value: Optional[str] = None
+
+    direct = getattr(message, "reasoning_content", None)
+    if isinstance(direct, str) and direct.strip():
+        fallback_source = "message.reasoning_content"
+        fallback_value = direct
+
+    if fallback_value is None:
+        extra = getattr(message, "model_extra", None)
+        if isinstance(extra, dict):
+            for key in _THINKING_FALLBACK_KEYS:
+                value = extra.get(key)
+                if isinstance(value, str) and value.strip():
+                    fallback_source = f"message.model_extra[{key!r}]"
+                    fallback_value = value
+                    break
+
+    if fallback_value is not None:
+        logger.warning(
+            "OllamaClient content=None; falling back to %s (%d chars). "
+            "model=%s, finish_reason=%s. "
+            "thinking-mode model 等で content が空になる既知症状。",
+            fallback_source,
+            len(fallback_value),
+            model,
+            finish_reason,
+        )
+    return fallback_value
+
 
 class OllamaClient(IScriptGenerator):
     """Ollama-based local LLM script generator
@@ -153,10 +201,13 @@ class OllamaClient(IScriptGenerator):
                 else:
                     raise
         
-        # Extract response content
-        response_text = response.choices[0].message.content
+        # Extract response content (with thinking-mode fallback for None content)
+        message = response.choices[0].message
         finish_reason = response.choices[0].finish_reason
-        
+        response_text = _extract_content_with_thinking_fallback(
+            message, model=self.model_name, finish_reason=finish_reason
+        )
+
         # Log finish reason
         logger.debug(f"finish_reason: {finish_reason}")
         if finish_reason == "length":
@@ -391,4 +442,12 @@ class OllamaClient(IScriptGenerator):
             temperature=self.temperature,
             response_format={"type": "json_object"},
         )
-        return response.choices[0].message.content or ""
+        # 2026-05-03: thinking-mode モデルは content=None を返し reasoning_content に
+        # 本文を入れるケースがあるため、helper でフォールバック取得する。
+        # 旧コードの `or ""` だと本文を取りこぼしてメタデータがデフォルト値に落ちていた。
+        message = response.choices[0].message
+        finish_reason = response.choices[0].finish_reason
+        text = _extract_content_with_thinking_fallback(
+            message, model=self.model_name, finish_reason=finish_reason
+        )
+        return text or ""
