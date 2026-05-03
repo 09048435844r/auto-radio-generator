@@ -555,7 +555,51 @@ async def execute_scripting_phase(
             cb.progress(0.90, "⚠️ Using default metadata")
     
     await asyncio.sleep(0)  # Yield to event loop for Gradio progress flush
-    
+
+    # Step 3.5: Fact Check (フェイルオープン)
+    # MetadataGenerator 後、artifact build の前に台本のハルシネーション検出を行う。
+    # config.fact_checker.enabled=True なら実行、エラーは WARNING のみ。
+    # 出力: <session>/factcheck_report.json（UI 側で読み込んで表示）
+    fc_cfg = getattr(config.yaml.script_generator.orchestrator, "fact_checker", None)
+    if fc_cfg is not None and getattr(fc_cfg, "enabled", False):
+        cb.log("\n== Scripting Phase: Fact Check ==")
+        cb.progress(0.92, "🔍 Fact-checking script vs research...")
+        await asyncio.sleep(0)
+        try:
+            from services.script_generation.fact_checker import FactChecker
+            from services.script_generation.adapters.factory import LLMAdapterFactory
+
+            curator_model = config.yaml.script_generator.orchestrator.curator_model
+            fc_llm_port = LLMAdapterFactory.create(
+                config,
+                context.provider,
+                model_override=curator_model or None,
+            )
+            fact_checker = FactChecker(fc_llm_port, config)
+            fc_report = await fact_checker.check(
+                theme=research_brief.theme,
+                script=script,
+                research_data=research_data,
+                progress_log=cb.log,
+            )
+            saved_fc_path = session_manager.save_fact_check_report(fc_report)
+            cb.log(
+                f"✓ Fact check completed: confidence={fc_report.overall_confidence}, "
+                f"issues={len(fc_report.issues)} → {saved_fc_path.name}"
+            )
+            cb.progress(0.94, "✅ Fact check completed")
+        except Exception as e:
+            # フェイルオープン: パイプラインを止めない。
+            # PR-F: logger.error は呼ばず logger.warning に留める（致命的でないため）。
+            logger.warning("FactChecker failed (non-fatal, skipping): %s", e, exc_info=True)
+            cb.log(f"⚠ Fact check failed (skipped, non-fatal): {e}")
+            cb.progress(0.94, "⚠️ Fact check skipped")
+    else:
+        cb.log("[INFO] Fact check disabled (config.fact_checker.enabled=false)")
+        cb.progress(0.94, "⏭️ Fact check skipped (disabled)")
+
+    await asyncio.sleep(0)  # Yield to event loop for Gradio progress flush
+
     # Step 4: Build RadioScriptArtifact
     cb.progress(0.95, "📦 Building script artifact...")
     await asyncio.sleep(0)  # Yield to event loop for Gradio progress flush

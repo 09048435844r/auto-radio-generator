@@ -238,6 +238,54 @@ class MetadataGeneratorConfig(BaseModel):
     )
 
 
+class FactCheckerConfig(BaseModel):
+    """FactChecker（生成台本のハルシネーション検出）設定
+
+    SSOT: 既定値・docstring・shipped config.yaml はいずれも enabled=True で統一する。
+    生成台本（Script）とリサーチデータ（ResearchBrief）を LLM に投げ込み、
+    ハルシネーション・誇張・出典不明な主張を検出する後処理エージェント。
+
+    フェイルオープン契約: FactChecker のエラーはパイプラインを止めない。
+    呼び出し側（scripting_phase）が except Exception で WARNING に落とし、
+    factcheck_report.json は単に生成されないだけで台本生成は完走する。
+    """
+    enabled: bool = Field(
+        default=True,
+        description="True にするとファクトチェックを実行（既定: True、エラーはフェイルオープン）",
+    )
+    model: str = Field(
+        default="",
+        description="FactChecker 用モデル（空=curator_model にフォールバック）",
+    )
+    max_tokens: int = Field(
+        default=8192,
+        ge=256,
+        description=(
+            "LLM への max_tokens。台本全体 + リサーチを評価して JSON を返すため、"
+            "issues が多いと膨らみやすい。length 切り詰め時は WARNING + フォールバック。"
+        ),
+    )
+    min_confidence_warning: int = Field(
+        default=60,
+        ge=0,
+        le=100,
+        description=(
+            "overall_confidence がこの値以下の場合、processing_log.txt に "
+            "WARNING を出力して人間の確認を促す（既定: 60）。"
+        ),
+    )
+    script_char_limit: int = Field(
+        default=8000,
+        ge=500,
+        description="LLM に渡す台本本文の最大文字数（先頭から切り出し）。長すぎるトークン消費を抑制。",
+    )
+    research_char_limit: int = Field(
+        default=8000,
+        ge=500,
+        description="LLM に渡すリサーチデータの最大文字数（先頭から切り出し）。",
+    )
+
+
 class OrchestratorConfig(BaseModel):
     """Hierarchical Agentic Workflow オーケストレーター設定
 
@@ -293,6 +341,8 @@ class OrchestratorConfig(BaseModel):
     topic_curator: TopicCuratorConfig = Field(default_factory=TopicCuratorConfig)
     segment_generator: SegmentGeneratorConfig = Field(default_factory=SegmentGeneratorConfig)
     metadata_generator: MetadataGeneratorConfig = Field(default_factory=MetadataGeneratorConfig)
+    # FactChecker: 生成台本のハルシネーション検出（後処理、フェイルオープン）
+    fact_checker: FactCheckerConfig = Field(default_factory=FactCheckerConfig)
 
 
 class ScriptGeneratorConfig(BaseModel):

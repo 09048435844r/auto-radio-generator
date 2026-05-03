@@ -338,6 +338,86 @@ def load_initial_background(filename: str) -> str | None:
     return get_background_image_path(filename)
 
 
+_FACTCHECK_PLACEHOLDER = "*生成完了後にファクトチェック結果が表示されます*"
+
+
+def _format_factcheck_markdown(output_dir: Optional[str | Path]) -> str:
+    """factcheck_report.json を Gradio Markdown 用の文字列に整形する
+
+    output_dir に factcheck_report.json があれば読み込み、信頼度スコアを
+    色分けバッジで、issues を severity 別アイコン付きカードで表示する。
+    無い場合（FactChecker 無効 or エラー）はその旨を示すメッセージを返す。
+
+    Args:
+        output_dir: セッションディレクトリ（factcheck_report.json を含むパス）
+
+    Returns:
+        Gradio gr.Markdown(value=...) に渡す文字列
+    """
+    if not output_dir:
+        return _FACTCHECK_PLACEHOLDER
+    try:
+        report_path = Path(output_dir) / "factcheck_report.json"
+        if not report_path.exists():
+            return (
+                "### 🔍 ファクトチェック結果\n\n"
+                "_ファクトチェックは実行されていません_\n"
+                "（`config.yaml` の `fact_checker.enabled` を `true` にすると有効化）"
+            )
+
+        from core.models.fact_check_report import FactCheckReport
+        report = FactCheckReport.model_validate_json(
+            report_path.read_text(encoding="utf-8")
+        )
+    except Exception as e:
+        return f"### 🔍 ファクトチェック結果\n\n_読み込みエラー: {e}_"
+
+    band = report.confidence_band()
+    band_emoji = {"green": "🟢", "yellow": "🟡", "red": "🔴"}[band]
+    band_label = {
+        "green": "良好（80以上）",
+        "yellow": "要確認（60-79）",
+        "red": "要修正（59以下）",
+    }[band]
+
+    lines: list[str] = []
+    lines.append("### 🔍 ファクトチェック結果\n")
+    lines.append(
+        f"**全体信頼度**: {band_emoji} **{report.overall_confidence}/100** "
+        f"_({band_label})_\n"
+    )
+    if report.summary:
+        lines.append(f"\n> {report.summary}\n")
+
+    if not report.issues:
+        lines.append("\n✅ **重大な問題は検出されませんでした**\n")
+        return "\n".join(lines)
+
+    sev_icons = {"high": "🔴", "medium": "🟡", "low": "🔵"}
+    sev_labels = {"high": "重大", "medium": "中", "low": "軽微"}
+    counts = {
+        "high": len(report.issues_by_severity("high")),
+        "medium": len(report.issues_by_severity("medium")),
+        "low": len(report.issues_by_severity("low")),
+    }
+    lines.append(
+        f"\n**検出された問題**: 🔴 重大 {counts['high']}件 ／ "
+        f"🟡 中 {counts['medium']}件 ／ 🔵 軽微 {counts['low']}件\n"
+    )
+
+    for i, issue in enumerate(report.issues, 1):
+        icon = sev_icons.get(issue.severity, "⚪")
+        label = sev_labels.get(issue.severity, issue.severity)
+        lines.append(
+            f"\n---\n\n"
+            f"#### {icon} #{i} [{label}]\n"
+            f"**該当箇所**:\n> {issue.script_quote}\n\n"
+            f"**問題点**: {issue.issue}\n\n"
+            f"**修正案**: {issue.suggestion or '_（提案なし）_'}\n"
+        )
+    return "\n".join(lines)
+
+
 def generate_video(
     theme: str,
     research_mode: str,
@@ -357,7 +437,7 @@ def generate_video(
     jingle_custom_path: str = "",
     research_import_filepath: Optional[str] = None,
     progress=gr.Progress()
-) -> tuple[str | None, str, str, str, str, str, Optional[ThumbnailRegenerationState]]:
+) -> tuple[str | None, str, str, str, str, str, Optional[ThumbnailRegenerationState], str]:
     """動画生成を実行し、サムネイル再作成用Stateも返す
     
     Args:
@@ -384,7 +464,7 @@ def generate_video(
     """
     # 入力検証（リサーチインポート時はテーマ不要）
     if (not theme or not theme.strip()) and not use_mock and not research_import_filepath:
-        return None, "エラー: テーマを入力してください。", "", "", "", "YouTube: 未実行", None
+        return None, "エラー: テーマを入力してください。", "", "", "", "YouTube: 未実行", None, _FACTCHECK_PLACEHOLDER
 
     effective_theme = theme.strip() if theme and theme.strip() else ("Mock run" if use_mock else "Imported Research")
     
@@ -510,7 +590,10 @@ def generate_video(
             youtube_status = f"✅ YouTube: [公開リンクを開く]({result.uploaded_video_url})"
         else:
             youtube_status = "YouTube: 未実行"
-        
+
+        # FactCheck 結果を読み込み（result.output_dir 配下の factcheck_report.json）
+        factcheck_md = _format_factcheck_markdown(result.output_dir)
+
         return (
             str(result.video_path),
             get_logs(),
@@ -519,11 +602,14 @@ def generate_video(
             formatted_description,
             youtube_status,
             thumbnail_state,
+            factcheck_md,
         )
     else:
         error_msg = result.error_message if result.error_message else "動画生成に失敗しました"
         append_log(f"\n❌ {error_msg}")
-        return None, get_logs(), "", "", "", "YouTube: 未実行", None
+        # 失敗時でも、途中まで進んでいれば factcheck_report.json が残っている可能性あり
+        factcheck_md = _format_factcheck_markdown(getattr(result, "output_dir", None))
+        return None, get_logs(), "", "", "", "YouTube: 未実行", None, factcheck_md
 
 
 def generate_video_mock(
@@ -543,7 +629,7 @@ def generate_video_mock(
     jingle_choice: str = "なし",
     jingle_custom_path: str = "",
     progress=gr.Progress()
-) -> tuple[str | None, str, str, str, str, str, Optional[ThumbnailRegenerationState]]:
+) -> tuple[str | None, str, str, str, str, str, Optional[ThumbnailRegenerationState], str]:
     return generate_video(
         theme=theme,
         research_mode=research_mode,
@@ -2107,7 +2193,12 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
                     lines=15,
                     interactive=True,
                 )
-                
+
+                # ファクトチェック結果（FactCheckAgent の出力を表示）
+                gr.Markdown("---")
+                with gr.Accordion("🔍 ファクトチェック結果", open=True):
+                    factcheck_output = gr.Markdown(value=_FACTCHECK_PLACEHOLDER)
+
                 # サムネイル再作成機能
                 gr.Markdown("---")
                 gr.Markdown("### 🔄 サムネイルのみ再作成")
@@ -2207,6 +2298,7 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
         "cost_output": cost_output,
         "title_output": title_output,
         "description_output": description_output,
+        "factcheck_output": factcheck_output,
         "regenerate_thumbnail_btn": regenerate_thumbnail_btn,
         "thumbnail_preview": thumbnail_preview,
         "regenerated_title": regenerated_title,
@@ -2451,10 +2543,11 @@ def create_ui() -> gr.Blocks:
                 generator_components["description_output"],
                 generator_components["youtube_url_output"],
                 thumbnail_state,  # Stateを更新
+                generator_components["factcheck_output"],
             ],
             show_progress="full"
         )
-        
+
         # サムネイル再作成
         generator_components["regenerate_thumbnail_btn"].click(
             fn=regenerate_thumbnail_from_state,
@@ -2506,6 +2599,7 @@ def create_ui() -> gr.Blocks:
                 generator_components["description_output"],
                 generator_components["youtube_url_output"],
                 thumbnail_state,  # Stateを更新
+                generator_components["factcheck_output"],
             ],
             show_progress="full",
         )

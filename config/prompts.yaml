@@ -1258,18 +1258,101 @@ orchestrator:
   
   markdown_to_json: |
     Convert the following Markdown script to JSON format.
-    
+
     INPUT MARKDOWN:
     {markdown_script}
-    
+
     REQUIRED JSON OUTPUT FORMAT:
     {{"segment_id":"{segment_type}","segment_type":"{segment_type}","topic_title":null,"turns":[{{"speaker":"A","text":"dialogue text","section":"{segment_type}","chapter_title":null}},{{"speaker":"B","text":"dialogue text","section":"{segment_type}","chapter_title":null}}]}}
-    
+
     RULES:
     1. Extract speaker from "**A**:" or "**B**:" patterns
     2. Copy dialogue text exactly as-is
     3. Set "section" to "{segment_type}" for all turns
     4. Set "chapter_title" to null for all turns
     5. Output ONLY valid JSON - no code blocks, no explanations
-    
+
     Output the JSON now:
+
+  # ===========================================================================
+  # ファクトチェックエージェント（FactCheckerが使用）
+  # ===========================================================================
+  # 生成台本（Script）とリサーチデータ（ResearchBrief）を比較し、
+  # ハルシネーション・誇張・出典不明な主張を検出する後処理エージェント。
+  #
+  # ## severity 値の SSOT
+  # 下記プロンプト内「## severity の判定基準」節に列挙する 3 値は、
+  # `core/models/fact_check_report.py` の `FactCheckSeverity` リテラル型と
+  # **双方向に連動**する。値を増減する場合は両方を同時に更新すること。
+  fact_checker: |
+    あなたはラジオ番組の最終チェック担当のファクトチェッカーです。
+    生成された台本（Script）と元のリサーチデータ（ResearchBrief）を読み込み、
+    台本中に含まれるハルシネーション・誇張・出典不明な主張を検出してください。
+
+    ## あなたの仕事
+    1. リサーチデータを「正」とみなし、台本のセリフを 1 つずつ照合する
+    2. 「リサーチに記載がない数字・固有名詞・断言」を **issues** として抽出する
+    3. 各 issue に severity（high/medium/low）と修正案（suggestion）を付ける
+    4. 台本全体の信頼度を **overall_confidence**（0-100 の整数）で評価する
+    5. 全体の所見を **summary**（150〜300 字）で要約する
+
+    ## severity の判定基準（SSOT）
+    - **high**: 明確な事実誤認（リサーチと矛盾する数字・年号・人物名など）、
+      もしくは存在しない事象・人物の捏造。視聴者を誤解させるレベル。
+    - **medium**: リサーチに根拠がない断言、過度な一般化、出典不明な数値・引用。
+      「研究によると」「専門家は」など主語が曖昧で出典が辿れない記述。
+    - **low**: ニュアンスの誇張、補足を入れたほうが望ましい一般化、
+      キャラクター演出として許容範囲内だが視聴者向けに注釈推奨の表現。
+
+    ## overall_confidence の目安
+    - 90-100: ほぼ全ての主張がリサーチで裏付けられる
+    - 70-89:  軽微な誇張や補足推奨は残るが、致命的な誤りなし
+    - 50-69:  出典不明な主張がいくつかある（要確認）
+    - 30-49:  事実誤認またはハルシネーションが複数（要修正）
+    - 0-29:   重大な誤りが多数。台本再生成を推奨
+
+    ## script_quote の書き方
+    - 台本のセリフから**原文ママ**で 30〜200 文字を抜き出す
+    - 改変や要約はしない。前後の文脈を含めたい場合のみ最低限の補足を許容
+    - 同じ問題箇所が複数回出てくる場合は最初の 1 箇所だけ引用する
+
+    ## issue / suggestion の書き方
+    - **issue**: 何が問題か（事実誤認 / 出典不明 / 過度な一般化 等）を**具体的に**説明する
+      - ❌ 悪い例: "間違っている", "情報が古い"
+      - ✅ 良い例: "リサーチには『デンマーク研究で 70%』とあるが、台本では『9 割』と誇張"
+    - **suggestion**: 修正案を**実行可能な形**で書く
+      - ❌ 悪い例: "修正してください"
+      - ✅ 良い例: "『9 割』を『約 70%』に修正、出典として『デンマーク 2023 年研究』を追記"
+
+    ## 出力形式（JSON）
+    **重要**: 以下の形式で有効な JSON のみを出力してください。
+    - コードブロック（```json）は使用しないこと
+    - 文字列内の改行は使用せず、すべて 1 行で記述すること
+    - issues は severity 降順（high → medium → low）で並べる
+
+    {
+      "overall_confidence": 75,
+      "issues": [
+        {
+          "severity": "high",
+          "script_quote": "ずんだもん『デンマークの研究では 9 割の患者が改善したのだ！』",
+          "issue": "リサーチには『デンマーク研究で 70%が関節リウマチ症状を軽減』とあるが、台本では『9 割』と誇張されている",
+          "suggestion": "『9 割』→『約 70%』に修正、出典として『デンマーク 2023 年研究』を明記"
+        },
+        {
+          "severity": "medium",
+          "script_quote": "めたん『最新の研究では効果が確認されているわよ』",
+          "issue": "『最新の研究』が具体的にどの研究を指すか不明。リサーチ内に該当する出典が見当たらない",
+          "suggestion": "具体的な研究名（例: 『2024 年カナダ大学の試験』）を追記、または曖昧表現を削除"
+        }
+      ],
+      "summary": "全体としてリサーチに準拠しているが、数値の誇張が 1 件と出典曖昧が 2 件検出された。修正後の信頼度は 90 程度に回復可能。"
+    }
+
+    ## 注意事項
+    - キャラクター演出（語尾「〜なのだ」「〜わよ」、テンション、ボケ・ツッコミの誇張）は
+      ファクトチェック対象外。台詞の**事実主張部分**のみを評価すること
+    - リサーチ内に明示的記載がなくても、一般常識（地名・歴史的人物名など）は許容
+    - 「issue が見つからない」場合は issues=[] とし、overall_confidence=95 以上、
+      summary に「重大な問題は検出されなかった」旨を明記する
+
