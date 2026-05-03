@@ -459,6 +459,17 @@ script_generator:
       max_tokens: 8192   # タイトル/概要/ハッシュタグ用。2026-04-24 に 2048→4096 に
                          # 引き上げた後も本運用で 2 セッション連続 truncation が
                          # 発生したため、2026-04-27 に 4096→8192 へ再引き上げ
+    # FactChecker: 生成台本のハルシネーション・誇張検出（後処理、フェイルオープン）
+    # 台本生成完了後に Script + ResearchBrief を LLM に投げ込み、出典不明な
+    # 主張や数値誇張を issues として抽出する。エラーは WARNING のみで
+    # パイプラインを止めない（fail-open）。
+    fact_checker:
+      enabled: true                 # false にすると本エージェントは一切呼ばれない
+      model: "qwen3-next-80b"       # 空=curator_model にフォールバック
+      max_tokens: 8192              # 台本全体 + リサーチ評価で issues が膨らむ余裕
+      min_confidence_warning: 60    # overall_confidence ≤ この値で WARNING ログ
+      script_char_limit: 8000       # LLM に渡す台本本文の上限（先頭切り出し）
+      research_char_limit: 8000     # LLM に渡すリサーチの上限（先頭切り出し）
 
 # -----------------------------------------------------------------------------
 # 音声合成設定（VOICEVOX）

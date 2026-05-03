@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from core.models.curation import CurationResult
     from core.models.show_plan import ShowPlan
     from core.models.fact_sheet import FactSheet
+    from core.models.fact_check_report import FactCheckReport
 
 
 class SessionManager:
@@ -293,6 +294,50 @@ class SessionManager:
     def has_fact_sheet(self) -> bool:
         """Check if FactSheet exists in this session."""
         return self.get_fact_sheet_path().exists()
+
+    # ------------------------------------------------------------------
+    # FactCheckReport persistence (FactChecker 後処理エージェント)
+    # ------------------------------------------------------------------
+
+    def get_fact_check_report_path(self) -> Path:
+        """Get path to FactCheckReport file (生成台本のハルシネーション検出結果)."""
+        return self.session_dir / "factcheck_report.json"
+
+    def save_fact_check_report(self, report: "FactCheckReport") -> Path:
+        """Save FactCheckReport to file.
+
+        Args:
+            report: FactCheckReport instance
+
+        Returns:
+            Path to saved file
+        """
+        path = self.get_fact_check_report_path()
+        path.write_text(report.model_dump_json(indent=2), encoding="utf-8")
+        return path
+
+    def load_fact_check_report(self) -> "FactCheckReport":
+        """Load FactCheckReport from file.
+
+        Returns:
+            FactCheckReport instance
+
+        Raises:
+            FileNotFoundError: If factcheck_report.json does not exist
+        """
+        from core.models.fact_check_report import FactCheckReport
+
+        path = self.get_fact_check_report_path()
+        if not path.exists():
+            raise FileNotFoundError(
+                f"FactCheckReport not found: {path}\n"
+                f"FactChecker may have been disabled or skipped due to an error."
+            )
+        return FactCheckReport.model_validate_json(path.read_text(encoding="utf-8"))
+
+    def has_fact_check_report(self) -> bool:
+        """Check if FactCheckReport exists in this session."""
+        return self.get_fact_check_report_path().exists()
 
     def get_session_status(self) -> dict:
         """Get current session status
