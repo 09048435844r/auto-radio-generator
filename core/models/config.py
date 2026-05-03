@@ -85,11 +85,16 @@ class AnthropicConfig(BaseModel):
 
 
 class OllamaConfig(BaseModel):
-    """Ollama（ローカルLLM）設定"""
-    model: str = "gpt-oss:20b-long"
+    """Ollama（ローカルLLM）設定
+
+    既定値は shipped config.yaml の現行運用値（GX10 + プロキシ越しの
+    Qwen3-Next-80B / temperature=0.7）に揃える。YAML 欠損時に旧 model
+    （gpt-oss:20b-long）でアクセスしないよう SSOT 整合を取る。
+    """
+    model: str = "qwen3-next-80b"
     base_url: str = "http://192.168.0.3:11435/v1"  # Production: Mac server IP (via queue proxy on 11435)
     max_tokens: int = 16384  # Increased for long-form content
-    temperature: float = 0.85
+    temperature: float = 0.7
     costs: Dict[str, ModelCost] = Field(default_factory=dict)
 
 
