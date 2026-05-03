@@ -609,25 +609,6 @@ personalities:
     description: "語尾は『〜わよ』『〜かしら』。冷静沈着なお嬢様。ずんだもんのボケに対して鋭くツッコミを入れる。博識。"
 
 # -----------------------------------------------------------------------------
-# 開発用設定（Mock Mode） [v3.3.2系で継続]
-# -----------------------------------------------------------------------------
-# APIを使用せずにローカルの固定データで動作するモード。
-# 開発効率向上のため、API課金を避けながらテストが可能。
-# 通常運用では、UIの Settings タブにある
-# 「🧪 モックで動画を作成」ボタンから実行する想定です。
-# 重要: Mockモード実行時は、upload設定がONでも実行時に強制OFFになります。
-dev:
-  # true: Perplexity/Gemini APIを呼び出さず、ローカルのテストデータを使用
-  # false: 通常動作（APIを使用）
-  mock_mode: false
-  # モックデータの格納ディレクトリ（script.json, research.json, audio等）
-  mock_data_path: "tests/mock_data"
-  # true: Mockモード時にmetadata.txt生成をスキップ（高速化）
-  mock_skip_metadata: true
-  # true: Mockモード時にthumbnail.png生成をスキップ（高速化）
-  mock_skip_thumbnail: true
-
-# -----------------------------------------------------------------------------
 # 公開・配信設定（YouTubeアップロード）
 # -----------------------------------------------------------------------------
 # 本セクションはUIのSettingsタブで明示的に保存（Save Settings）された値で上書きされます。
@@ -662,9 +643,28 @@ publishing:
     -----------------------------------
 
 # -----------------------------------------------------------------------------
-# 開発・デバッグ設定
+# 開発用設定（Mock Mode / Debug）
 # -----------------------------------------------------------------------------
+# APIを使用せずにローカルの固定データで動作するモード。
+# 開発効率向上のため、API課金を避けながらテストが可能。
+# 通常運用では、UIの Settings タブにある
+# 「🧪 モックで動画を作成」ボタンから実行する想定です。
+# 重要: Mockモード実行時は、upload設定がONでも実行時に強制OFFになります。
+#
+# 履歴: 旧版では本ファイルに dev: ブロックが2つ定義されており、
+# YAML 重複キーで後勝ちとなった結果、Mock Mode 用の mock_skip_metadata /
+# mock_skip_thumbnail が silently 上書きされていた。両ブロックの有効設定を
+# 本ブロックに統合した。
 dev:
-  mock_mode: false           # true: テストデータを使用（API呼び出しなし）
-  mock_data_path: "tests/mock_data"  # モックデータのパス
-  keep_temp_files: false     # true: 中間ファイルを削除しない（デバッグ用）
+  # true: Perplexity/Gemini APIを呼び出さず、ローカルのテストデータを使用
+  # false: 通常動作（APIを使用）
+  mock_mode: false
+  # モックデータの格納ディレクトリ（script.json, research.json, audio等）
+  mock_data_path: "tests/mock_data"
+  # true: Mockモード時にmetadata.txt生成をスキップ（高速化）
+  mock_skip_metadata: true
+  # true: Mockモード時にthumbnail.png生成をスキップ（高速化）
+  mock_skip_thumbnail: true
+  # true: 中間ファイルを削除しない（デバッグ用）
+  # 注: DevConfig には未定義のため Pydantic 上は ignore される（旧 YAML から踏襲）
+  keep_temp_files: false
