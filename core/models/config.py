@@ -234,13 +234,23 @@ class MetadataGeneratorConfig(BaseModel):
 
 
 class OrchestratorConfig(BaseModel):
-    """Hierarchical Agentic Workflow オーケストレーター設定"""
-    
+    """Hierarchical Agentic Workflow オーケストレーター設定
+
+    SSOT: 既定値・docstring・shipped config.yaml はいずれも enabled=True で統一する。
+    新アーキテクチャ（TopicCuration → ShowRunner → SegmentGeneration → MetadataGenerator）
+    がデフォルトパイプラインとなったため、意図的に旧経路（単一 API 呼び出し）に
+    落としたい場合のみ config.yaml 側で enabled: false を明示する。
+    ShowRunnerConfig / FactExtractorConfig と同型の SSOT 整合対応。
+    """
+
     # Direct Regex Bypass: Phase 2 JSON変換をスキップするプロバイダー
     # ローカルLLMはJSON構造化が不安定なため、正規表現パーサーを優先
     LOCAL_LLM_PROVIDERS: set[str] = {"ollama", "lmstudio", "localai"}
-    
-    enabled: bool = Field(default=False, description="Trueにすると新アーキテクチャを使用")
+
+    enabled: bool = Field(
+        default=True,
+        description="Trueにすると新アーキテクチャ（推奨）を使用（既定: True）"
+    )
     two_phase_generation: bool = Field(
         default=False,
         description="Trueにすると2段階生成（Markdown→JSON）を使用"
