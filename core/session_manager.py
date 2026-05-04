@@ -339,6 +339,52 @@ class SessionManager:
         """Check if FactCheckReport exists in this session."""
         return self.get_fact_check_report_path().exists()
 
+    # ------------------------------------------------------------------
+    # Phase 3A: 自動修正後の Script (script_fixed.json)
+    # ------------------------------------------------------------------
+    # FactFixAgent が high/medium issue を修正した後の Script を別ファイルとして
+    # 保存する。元の script.json は手付かずで残し、音声合成は script_fixed.json
+    # を優先（存在する場合のみ）。
+
+    def get_script_fixed_path(self) -> Path:
+        """Get path to auto-fixed Script file (FactFixAgent 出力)."""
+        return self.session_dir / "script_fixed.json"
+
+    def save_script_fixed(self, script) -> Path:
+        """Save auto-fixed Script to script_fixed.json.
+
+        Args:
+            script: Script instance (core.models.script.Script)
+
+        Returns:
+            Path to saved file
+        """
+        path = self.get_script_fixed_path()
+        path.write_text(script.model_dump_json(indent=2), encoding="utf-8")
+        return path
+
+    def has_script_fixed(self) -> bool:
+        """Check if script_fixed.json exists in this session."""
+        return self.get_script_fixed_path().exists()
+
+    def load_script_fixed(self):
+        """Load auto-fixed Script from script_fixed.json.
+
+        Returns:
+            Script: 修正後の Script インスタンス
+
+        Raises:
+            FileNotFoundError: 未生成（FactFixAgent が無効 or エラー）の場合
+        """
+        from core.models.script import Script
+        path = self.get_script_fixed_path()
+        if not path.exists():
+            raise FileNotFoundError(
+                f"script_fixed.json not found: {path}\n"
+                f"FactFixAgent may be disabled or no high/medium issues were detected."
+            )
+        return Script.model_validate_json(path.read_text(encoding="utf-8"))
+
     def get_session_status(self) -> dict:
         """Get current session status
 

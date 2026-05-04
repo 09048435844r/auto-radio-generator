@@ -470,6 +470,9 @@ script_generator:
       min_confidence_warning: 60    # overall_confidence ≤ この値で WARNING ログ
       script_char_limit: 8000       # LLM に渡す台本本文の上限（先頭切り出し）
       research_char_limit: 8000     # LLM に渡すリサーチの上限（先頭切り出し）
+      # Phase 3A: 自動修正エンジン（FactFixAgent）
+      auto_fix: true                # true で high/medium issue を LLM で自動修正
+      auto_fix_max_tokens: 1024     # 1 件あたりの修正 max_tokens（短い書き換えのみ）
 
 # -----------------------------------------------------------------------------
 # 音声合成設定（VOICEVOX）

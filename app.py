@@ -405,16 +405,35 @@ def _format_factcheck_markdown(output_dir: Optional[str | Path]) -> str:
         f"🟡 中 {counts['medium']}件 ／ 🔵 軽微 {counts['low']}件\n"
     )
 
+    # Phase 3B: 自動修正件数を集計表示
+    auto_fixed_count = sum(1 for i in report.issues if getattr(i, "auto_fixed", False))
+    if auto_fixed_count > 0:
+        lines.append(f"\n**自動修正**: ✅ {auto_fixed_count}件 適用済み\n")
+
     for i, issue in enumerate(report.issues, 1):
         icon = sev_icons.get(issue.severity, "⚪")
         label = sev_labels.get(issue.severity, issue.severity)
-        lines.append(
-            f"\n---\n\n"
-            f"#### {icon} #{i} [{label}]\n"
-            f"**該当箇所**:\n> {issue.script_quote}\n\n"
-            f"**問題点**: {issue.issue}\n\n"
-            f"**修正案**: {issue.suggestion or '_（提案なし）_'}\n"
-        )
+        is_fixed = bool(getattr(issue, "auto_fixed", False))
+        fixed_text = getattr(issue, "fixed_text", None)
+
+        if is_fixed and fixed_text:
+            # Phase 3B: 修正済みカードは「修正前 → 修正後」表示
+            lines.append(
+                f"\n---\n\n"
+                f"#### {icon} #{i} [{label}] ✅ 修正済み\n"
+                f"**問題点**: {issue.issue}\n\n"
+                f"**修正前**:\n> {issue.script_quote}\n\n"
+                f"**修正後**:\n> {fixed_text}\n"
+            )
+        else:
+            # 未修正カードは従来通り「問題点 + 修正案」表示
+            lines.append(
+                f"\n---\n\n"
+                f"#### {icon} #{i} [{label}]\n"
+                f"**該当箇所**:\n> {issue.script_quote}\n\n"
+                f"**問題点**: {issue.issue}\n\n"
+                f"**修正案**: {issue.suggestion or '_（提案なし）_'}\n"
+            )
     return "\n".join(lines)
 
 

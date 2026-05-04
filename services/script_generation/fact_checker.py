@@ -385,3 +385,253 @@ class FactChecker:
                     issue.script_quote[:120],
                 )
             # low は WARNING にしない（ログ汚染回避、UI 表示にのみ含まれる）
+
+
+# =====================================================================
+# Phase 3A: 自動修正エンジン (FactFixAgent)
+# =====================================================================
+#
+# FactChecker が検出した high/medium severity の issues を 1 件ずつ LLM に投げ、
+# script_quote を suggestion に従って最小限の書き換えで修正する。
+# low severity は対象外（軽微な脚色は手動レビュー前提）。
+#
+# 設計方針:
+#   - 1 issue = 1 LLM 呼び出し（並列度は呼び出し側で制御）
+#   - 完全フェイルオープン: 1 件失敗しても他の issues は処理する。すべて失敗
+#     しても呼び出し側（scripting_phase）は WARNING のみで台本生成は完走する。
+#   - script_quote → fixed_text のマッピングを Script に適用する責務までを
+#     本クラスが持つ（apply_fixes_to_script メソッド）。
+class FactFixAgent:
+    """FactCheckIssue.script_quote を suggestion に従って最小修正するエージェント
+
+    Pipeline 上は FactChecker → FactFixAgent → save script_fixed.json の順。
+    high/medium のみ修正対象、low は素通し。
+    """
+
+    def __init__(self, llm_port: ILLMPort, config: AppConfig):
+        """Initialize FactFixAgent
+
+        Args:
+            llm_port: LLM port interface (FactChecker と同じプロバイダーを推奨)
+            config: Application configuration
+        """
+        self._llm = llm_port
+        self.config = config
+        self.prompt_manager = PromptManager()
+
+        orch_cfg = config.yaml.script_generator.orchestrator
+        fc_cfg = getattr(orch_cfg, "fact_checker", None)
+        # FactFixAgent はデフォルトで FactChecker と同じモデルを使う
+        self.fact_fixer_model = (
+            (getattr(fc_cfg, "model", "") or "").strip() or orch_cfg.curator_model
+        )
+        self.max_tokens = int(getattr(fc_cfg, "auto_fix_max_tokens", 1024) or 1024)
+
+        # 進捗集計用（呼び出し側でログ出力したい場合に参照）
+        self.last_fixed_count: int = 0
+        self.last_skipped_count: int = 0
+        self.last_failed_count: int = 0
+
+    async def fix_report(
+        self,
+        report: FactCheckReport,
+        progress_log=None,
+    ) -> FactCheckReport:
+        """FactCheckReport の high/medium issues を順次修正し、in-place で更新する
+
+        Args:
+            report: FactChecker が出力した FactCheckReport（in-place で更新される）
+            progress_log: 進捗ログ関数（省略時は console.print）
+
+        Returns:
+            FactCheckReport: fixed_text / auto_fixed が埋まった同一インスタンス
+        """
+        log = progress_log or (lambda msg: console.print(msg))
+
+        targets = [i for i in report.issues if i.severity in ("high", "medium")]
+        skipped = len(report.issues) - len(targets)
+        self.last_fixed_count = 0
+        self.last_skipped_count = skipped
+        self.last_failed_count = 0
+
+        if not targets:
+            log("[cyan]🛠 自動修正: 対象 issue なし（high/medium が 0 件）[/cyan]")
+            return report
+
+        log(
+            f"[cyan]🛠 自動修正開始: {len(targets)}件 "
+            f"(プロバイダー: {self._llm.provider_name}, モデル: {self.fact_fixer_model})[/cyan]"
+        )
+
+        for idx, issue in enumerate(targets, 1):
+            try:
+                fixed = await self._fix_issue(issue)
+                if fixed and fixed != issue.script_quote:
+                    issue.fixed_text = fixed
+                    issue.auto_fixed = True
+                    self.last_fixed_count += 1
+                    log(f"  [{idx}/{len(targets)}] [green]✓ 修正完了[/green] severity={issue.severity}")
+                else:
+                    self.last_failed_count += 1
+                    log(
+                        f"  [{idx}/{len(targets)}] [yellow]⚠ 修正スキップ[/yellow] "
+                        f"severity={issue.severity} (LLM が原文と同じ or 空を返却)"
+                    )
+            except Exception as e:
+                self.last_failed_count += 1
+                logger.warning(
+                    "[FactFixAgent] Fix failed for issue (severity=%s, quote=%r): %s",
+                    issue.severity,
+                    issue.script_quote[:80],
+                    e,
+                )
+                log(
+                    f"  [{idx}/{len(targets)}] [red]✗ 修正失敗[/red] severity={issue.severity}: {e}"
+                )
+
+        log(
+            f"[green]🛠 自動修正完了: 修正={self.last_fixed_count}件 / "
+            f"失敗={self.last_failed_count}件 / 対象外={skipped}件[/green]"
+        )
+        return report
+
+    async def _fix_issue(self, issue: FactCheckIssue) -> Optional[str]:
+        """1 件の FactCheckIssue を LLM に投げて fixed_text を得る"""
+        system_prompt = self.prompt_manager.get_prompt("orchestrator", "fact_fixer")
+        user_prompt = self._build_user_prompt(issue)
+
+        # Defensive: provider/model mismatch の検出（FactChecker と同じ pattern）
+        model_to_use = self.fact_fixer_model
+        if model_to_use and self._llm.provider_name != "ollama":
+            if ":" in model_to_use or model_to_use.startswith("ollama/"):
+                logger.warning(
+                    f"fact_fixer.model '{model_to_use}' appears to be Ollama-specific "
+                    f"but provider is '{self._llm.provider_name}'. Using provider default."
+                )
+                model_to_use = None
+
+        request = LLMRequest(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            model=model_to_use,
+            max_tokens=self.max_tokens,
+            temperature=0.2,  # 安定した最小書き換え
+            response_format="json",
+        )
+        response = await self._llm.generate(request)
+
+        if response.finish_reason == "length":
+            # 修正系は短い出力が前提なので length 切り詰めは即失敗扱い
+            raise RuntimeError(
+                f"FactFixAgent output truncated (finish_reason=length, max_tokens={self.max_tokens})"
+            )
+
+        return self._parse_fix_response(response.content)
+
+    @staticmethod
+    def _build_user_prompt(issue: FactCheckIssue) -> str:
+        """FactFixAgent 用ユーザープロンプトを構築"""
+        return (
+            "## 修正対象（原文）\n"
+            f"{issue.script_quote}\n\n"
+            "## 検出された問題\n"
+            f"{issue.issue}\n\n"
+            "## 修正方針\n"
+            f"{issue.suggestion or '（提案なし。issue を解消する最小の書き換えを行う）'}\n\n"
+            "## 指示\n"
+            "上記の原文を修正方針に従って最小限の書き換えで直し、"
+            "JSON {\"fixed_text\": \"...\"} のみを出力してください。"
+        )
+
+    @staticmethod
+    def _parse_fix_response(response_text: str) -> Optional[str]:
+        """LLM レスポンスから fixed_text を抽出。失敗時は sanitize を試行。"""
+        try:
+            data = json.loads(response_text.strip(), strict=False)
+        except json.JSONDecodeError:
+            cleaned = sanitize_json_response(response_text, "FactFixAgent")
+            try:
+                data = json.loads(cleaned, strict=False)
+            except json.JSONDecodeError as e:
+                logger.warning(
+                    "[FactFixAgent] JSON parse failed even after sanitization: %s | raw=%r",
+                    e,
+                    response_text[:200],
+                )
+                return None
+
+        if not isinstance(data, dict):
+            return None
+        fixed = data.get("fixed_text", "")
+        if not isinstance(fixed, str):
+            return None
+        fixed = fixed.strip()
+        return fixed or None
+
+
+def apply_fixes_to_script(script: Script, report: FactCheckReport) -> tuple[Script, int]:
+    """FactCheckReport の auto_fixed 済み issues を Script に適用する
+
+    DialogueTurn.text に対して script_quote の部分文字列マッチを試行し、
+    最初の出現箇所を fixed_text で置換する。マッチしない場合はスキップ
+    （ログ警告のみ）。Script の他のフィールド（title 等）は変更しない。
+
+    Args:
+        script: 元の Script
+        report: FactFixAgent 後の FactCheckReport（fixed_text が埋まっている前提）
+
+    Returns:
+        (Script, applied_count): 修正が適用された新しい Script と適用件数
+    """
+    fixed_script = script.model_copy(deep=True)
+    applied = 0
+
+    for issue in report.issues:
+        if not issue.auto_fixed or not issue.fixed_text:
+            continue
+
+        # script_quote は通常 "話者: text" or "話者「text」" 等の形式が含まれ得るため、
+        # text フィールド全体だけでなく「先頭の "<話者>:" / "<話者>「" を取り除いた本文」
+        # に対しても部分マッチを試みる。
+        target_quote = issue.script_quote.strip()
+        target_fixed = issue.fixed_text.strip()
+        applied_for_this_issue = False
+
+        for turn in fixed_script.sections:
+            if not turn.is_dialogue():
+                continue
+            t = turn.text or ""
+            if not t:
+                continue
+
+            # 単純な完全一致 / 部分マッチを試行
+            if target_quote in t:
+                turn.text = t.replace(target_quote, target_fixed, 1)
+                applied += 1
+                applied_for_this_issue = True
+                break
+
+            # "話者: text" のようなプレフィックス付き quote を text 単体と比較
+            for sep in ("「", ": ", ":"):
+                if sep in target_quote:
+                    quote_body = target_quote.split(sep, 1)[1]
+                    fixed_body = target_fixed.split(sep, 1)[1] if sep in target_fixed else target_fixed
+                    # 末尾の閉じ括弧を除去
+                    quote_body = quote_body.rstrip("」 \t").strip()
+                    fixed_body = fixed_body.rstrip("」 \t").strip()
+                    if quote_body and quote_body in t:
+                        turn.text = t.replace(quote_body, fixed_body, 1)
+                        applied += 1
+                        applied_for_this_issue = True
+                        break
+            if applied_for_this_issue:
+                break
+
+        if not applied_for_this_issue:
+            logger.warning(
+                "[apply_fixes_to_script] Could not locate script_quote in any DialogueTurn: "
+                "quote=%r (skipping; original text retained in script_fixed)",
+                target_quote[:120],
+            )
+
+    return fixed_script, applied
