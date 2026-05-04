@@ -560,13 +560,22 @@ async def execute_scripting_phase(
     # MetadataGenerator 後、artifact build の前に台本のハルシネーション検出を行う。
     # config.fact_checker.enabled=True なら実行、エラーは WARNING のみ。
     # 出力: <session>/factcheck_report.json（UI 側で読み込んで表示）
+    #
+    # Phase 3A: 続けて FactFixAgent を実行し、high/medium の issues を自動修正する。
+    # config.fact_checker.auto_fix=True かつ FactCheckReport に high/medium issue が
+    # 1 件以上ある場合のみ実行。修正結果は script_fixed.json として保存し、
+    # 以降の音声合成は fixed 版を使う（artifact 内の script を差し替え）。
     fc_cfg = getattr(config.yaml.script_generator.orchestrator, "fact_checker", None)
     if fc_cfg is not None and getattr(fc_cfg, "enabled", False):
         cb.log("\n== Scripting Phase: Fact Check ==")
         cb.progress(0.92, "🔍 Fact-checking script vs research...")
         await asyncio.sleep(0)
         try:
-            from services.script_generation.fact_checker import FactChecker
+            from services.script_generation.fact_checker import (
+                FactChecker,
+                FactFixAgent,
+                apply_fixes_to_script,
+            )
             from services.script_generation.adapters.factory import LLMAdapterFactory
 
             curator_model = config.yaml.script_generator.orchestrator.curator_model
@@ -587,7 +596,45 @@ async def execute_scripting_phase(
                 f"✓ Fact check completed: confidence={fc_report.overall_confidence}, "
                 f"issues={len(fc_report.issues)} → {saved_fc_path.name}"
             )
-            cb.progress(0.94, "✅ Fact check completed")
+
+            # Phase 3A: 自動修正
+            auto_fix_enabled = getattr(fc_cfg, "auto_fix", True)
+            high_med_issues = [i for i in fc_report.issues if i.severity in ("high", "medium")]
+            if auto_fix_enabled and high_med_issues:
+                cb.log("\n== Scripting Phase: Auto-Fix (FactFixAgent) ==")
+                cb.progress(0.93, f"🛠 自動修正中（{len(high_med_issues)}件）...")
+                await asyncio.sleep(0)
+                try:
+                    fixer = FactFixAgent(fc_llm_port, config)
+                    await fixer.fix_report(fc_report, progress_log=cb.log)
+
+                    # 修正済み issues を report に書き戻して再保存（fixed_text/auto_fixed が埋まる）
+                    session_manager.save_fact_check_report(fc_report)
+
+                    if fixer.last_fixed_count > 0:
+                        fixed_script, applied = apply_fixes_to_script(script, fc_report)
+                        session_manager.save_script_fixed(fixed_script)
+                        cb.log(
+                            f"✓ 自動修正適用: {applied}件 → "
+                            f"{session_manager.get_script_fixed_path().name}"
+                        )
+                        # 以降の音声合成は fixed 版を使う
+                        script = fixed_script
+                    else:
+                        cb.log("[INFO] 自動修正: 適用件数 0 件のため script_fixed.json は作成しません")
+
+                    cb.progress(0.94, "✅ Fact check + auto-fix completed")
+                except Exception as e:
+                    # 自動修正の失敗もフェイルオープン（FactCheck の結果は保持）
+                    logger.warning("FactFixAgent failed (non-fatal, skipping): %s", e, exc_info=True)
+                    cb.log(f"⚠ 自動修正失敗（fact check は完了済み、original script を使用）: {e}")
+                    cb.progress(0.94, "⚠️ Auto-fix skipped")
+            else:
+                if not auto_fix_enabled:
+                    cb.log("[INFO] 自動修正は無効（config.fact_checker.auto_fix=false）")
+                else:
+                    cb.log("[INFO] 自動修正対象なし（high/medium issue が 0 件）")
+                cb.progress(0.94, "✅ Fact check completed")
         except Exception as e:
             # フェイルオープン: パイプラインを止めない。
             # PR-F: logger.error は呼ばず logger.warning に留める（致命的でないため）。

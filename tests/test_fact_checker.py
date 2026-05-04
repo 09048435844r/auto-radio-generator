@@ -475,3 +475,449 @@ def test_format_factcheck_markdown_handles_corrupt_json(tmp_path: Path):
     (tmp_path / "factcheck_report.json").write_text("not valid json", encoding="utf-8")
     md = _format_factcheck_markdown(tmp_path)
     assert "読み込みエラー" in md or "エラー" in md
+
+
+# ===========================================================================
+# Phase 3A: FactFixAgent / apply_fixes_to_script / FactCheckIssue extension
+# ===========================================================================
+
+def test_fact_check_issue_extension_defaults():
+    """新フィールド fixed_text / auto_fixed のデフォルト値"""
+    issue = FactCheckIssue(
+        severity="high", script_quote="q", issue="i", suggestion="s",
+    )
+    assert issue.fixed_text is None
+    assert issue.auto_fixed is False
+
+
+def test_fact_check_issue_roundtrip_with_extension():
+    """fixed_text / auto_fixed が JSON 往復を耐える"""
+    issue = FactCheckIssue(
+        severity="medium",
+        script_quote="9 割の患者",
+        issue="リサーチでは 70%",
+        suggestion="70% に修正",
+        fixed_text="約 70% の患者",
+        auto_fixed=True,
+    )
+    blob = issue.model_dump_json()
+    restored = FactCheckIssue.model_validate_json(blob)
+    assert restored.fixed_text == "約 70% の患者"
+    assert restored.auto_fixed is True
+
+
+def _make_fact_fixer(mock_app_config):
+    """Build a FactFixAgent without touching the LLM port (returns instance + mock_port)."""
+    from services.script_generation.fact_checker import FactFixAgent
+
+    mock_port = MagicMock()
+    mock_port.provider_name = "gemini"
+
+    mock_app_config.yaml.script_generator = MagicMock()
+    mock_app_config.yaml.script_generator.orchestrator = MagicMock()
+    mock_app_config.yaml.script_generator.orchestrator.curator_model = "gemini-2.5-flash"
+    mock_app_config.yaml.script_generator.orchestrator.fact_checker = MagicMock()
+    mock_app_config.yaml.script_generator.orchestrator.fact_checker.model = ""
+    mock_app_config.yaml.script_generator.orchestrator.fact_checker.auto_fix_max_tokens = 1024
+
+    return FactFixAgent(mock_port, mock_app_config), mock_port
+
+
+def test_fact_fixer_parse_response_valid():
+    from services.script_generation.fact_checker import FactFixAgent
+
+    res = FactFixAgent._parse_fix_response('{"fixed_text": "約 70% の患者が改善"}')
+    assert res == "約 70% の患者が改善"
+
+
+def test_fact_fixer_parse_response_handles_codeblock():
+    from services.script_generation.fact_checker import FactFixAgent
+
+    payload = "```json\n" + '{"fixed_text": "修正後テキスト"}' + "\n```"
+    assert FactFixAgent._parse_fix_response(payload) == "修正後テキスト"
+
+
+def test_fact_fixer_parse_response_returns_none_on_invalid():
+    from services.script_generation.fact_checker import FactFixAgent
+
+    assert FactFixAgent._parse_fix_response("garbage") is None
+    assert FactFixAgent._parse_fix_response('{"other_key": "x"}') is None
+    # empty string after strip
+    assert FactFixAgent._parse_fix_response('{"fixed_text": "   "}') is None
+
+
+def test_fact_fixer_skips_low_severity(mock_app_config):
+    """low severity issues は修正対象外。fix_report で auto_fixed=False のまま"""
+    from core.interfaces.llm_port import LLMResponse
+    from core.models import LLMUsage
+
+    fixer, mock_port = _make_fact_fixer(mock_app_config)
+    # generate は呼ばれてはいけないが、防御的に有効レスポンスを返す設定
+    mock_port.generate = AsyncMock(return_value=LLMResponse(
+        content='{"fixed_text": "should not be used"}',
+        usage=LLMUsage(provider="gemini", model_name="x", input_tokens=1, output_tokens=1),
+        finish_reason="stop",
+    ))
+
+    report = FactCheckReport(
+        overall_confidence=85,
+        issues=[
+            FactCheckIssue(severity="low", script_quote="q", issue="i", suggestion="s"),
+        ],
+        summary="",
+    )
+    result = asyncio.run(fixer.fix_report(report))
+
+    assert result.issues[0].auto_fixed is False
+    assert result.issues[0].fixed_text is None
+    assert fixer.last_fixed_count == 0
+    assert fixer.last_skipped_count == 1
+    mock_port.generate.assert_not_called()
+
+
+def test_fact_fixer_fixes_high_and_medium(mock_app_config):
+    """high/medium issues が LLM 呼び出しで修正されること"""
+    from core.interfaces.llm_port import LLMResponse
+    from core.models import LLMUsage
+
+    fixer, mock_port = _make_fact_fixer(mock_app_config)
+    mock_port.generate = AsyncMock(return_value=LLMResponse(
+        content='{"fixed_text": "修正後テキスト"}',
+        usage=LLMUsage(provider="gemini", model_name="x", input_tokens=10, output_tokens=5),
+        finish_reason="stop",
+    ))
+
+    report = FactCheckReport(
+        overall_confidence=60,
+        issues=[
+            FactCheckIssue(severity="high", script_quote="原文 high", issue="i1", suggestion="s1"),
+            FactCheckIssue(severity="medium", script_quote="原文 med", issue="i2", suggestion="s2"),
+            FactCheckIssue(severity="low", script_quote="原文 low", issue="i3", suggestion="s3"),
+        ],
+        summary="",
+    )
+    result = asyncio.run(fixer.fix_report(report))
+
+    # high / medium は修正、low はスキップ
+    assert result.issues[0].auto_fixed is True
+    assert result.issues[0].fixed_text == "修正後テキスト"
+    assert result.issues[1].auto_fixed is True
+    assert result.issues[1].fixed_text == "修正後テキスト"
+    assert result.issues[2].auto_fixed is False
+    assert result.issues[2].fixed_text is None
+    assert fixer.last_fixed_count == 2
+    assert fixer.last_skipped_count == 1
+    assert mock_port.generate.await_count == 2
+
+
+def test_fact_fixer_partial_failure_does_not_break_loop(mock_app_config):
+    """1 件の修正失敗が他の issues 修正を止めないこと"""
+    from core.interfaces.llm_port import LLMResponse
+    from core.models import LLMUsage
+
+    fixer, mock_port = _make_fact_fixer(mock_app_config)
+
+    async def flaky_generate(_request):
+        # 1 回目は例外、2 回目は成功
+        if mock_port.generate.await_count == 1:
+            raise RuntimeError("provider blip")
+        return LLMResponse(
+            content='{"fixed_text": "ok"}',
+            usage=LLMUsage(provider="gemini", model_name="x", input_tokens=1, output_tokens=1),
+            finish_reason="stop",
+        )
+    mock_port.generate = AsyncMock(side_effect=flaky_generate)
+
+    report = FactCheckReport(
+        overall_confidence=50,
+        issues=[
+            FactCheckIssue(severity="high", script_quote="q1", issue="i1", suggestion="s1"),
+            FactCheckIssue(severity="medium", script_quote="q2", issue="i2", suggestion="s2"),
+        ],
+        summary="",
+    )
+    result = asyncio.run(fixer.fix_report(report))
+
+    # 1 件目失敗、2 件目成功
+    assert result.issues[0].auto_fixed is False
+    assert result.issues[1].auto_fixed is True
+    assert fixer.last_fixed_count == 1
+    assert fixer.last_failed_count == 1
+
+
+def test_fact_fixer_fail_fast_on_length_truncation(mock_app_config):
+    """finish_reason='length' は RuntimeError → 該当 issue は failed としてカウントされる"""
+    from core.interfaces.llm_port import LLMResponse
+    from core.models import LLMUsage
+
+    fixer, mock_port = _make_fact_fixer(mock_app_config)
+    mock_port.generate = AsyncMock(return_value=LLMResponse(
+        content='{"fixed_t',
+        usage=LLMUsage(provider="gemini", model_name="x", input_tokens=10, output_tokens=1024),
+        finish_reason="length",
+    ))
+
+    report = FactCheckReport(
+        overall_confidence=50,
+        issues=[
+            FactCheckIssue(severity="high", script_quote="q", issue="i", suggestion="s"),
+        ],
+        summary="",
+    )
+    result = asyncio.run(fixer.fix_report(report))
+    assert result.issues[0].auto_fixed is False
+    assert fixer.last_failed_count == 1
+
+
+def test_fact_fixer_no_targets():
+    """high/medium issue が 0 件なら LLM を呼ばずに完走"""
+    # Use ad-hoc app config without mock fixture to keep test isolated
+    pass  # covered by test_fact_fixer_skips_low_severity
+
+
+# ---------------------------------------------------------------------------
+# apply_fixes_to_script
+# ---------------------------------------------------------------------------
+
+def test_apply_fixes_to_script_replaces_matched_quote():
+    from services.script_generation.fact_checker import apply_fixes_to_script
+
+    script = _make_minimal_script([
+        DialogueTurn(speaker="A", text="9 割の患者が改善した", turn_type=TurnType.DIALOGUE),
+        DialogueTurn(speaker="B", text="本当ですか？", turn_type=TurnType.DIALOGUE),
+    ])
+    report = FactCheckReport(
+        overall_confidence=60,
+        issues=[
+            FactCheckIssue(
+                severity="high",
+                script_quote="9 割の患者が改善した",
+                issue="誇張",
+                suggestion="70% に修正",
+                fixed_text="約 70% の患者が改善した",
+                auto_fixed=True,
+            ),
+        ],
+        summary="",
+    )
+
+    fixed_script, applied = apply_fixes_to_script(script, report)
+
+    assert applied == 1
+    assert fixed_script.sections[0].text == "約 70% の患者が改善した"
+    # Original script should be untouched
+    assert script.sections[0].text == "9 割の患者が改善した"
+
+
+def test_apply_fixes_to_script_handles_speaker_prefix():
+    """script_quote に話者プレフィックスがある場合（A: ... 形式）も適用できる"""
+    from services.script_generation.fact_checker import apply_fixes_to_script
+
+    script = _make_minimal_script([
+        DialogueTurn(speaker="A", text="9 割の患者が改善したのだ！", turn_type=TurnType.DIALOGUE),
+    ])
+    report = FactCheckReport(
+        overall_confidence=60,
+        issues=[
+            FactCheckIssue(
+                severity="high",
+                script_quote="A: 9 割の患者が改善したのだ！",
+                issue="誇張",
+                suggestion="70% へ",
+                fixed_text="A: 約 70% の患者が改善したのだ！",
+                auto_fixed=True,
+            ),
+        ],
+        summary="",
+    )
+    fixed_script, applied = apply_fixes_to_script(script, report)
+    assert applied == 1
+    assert "約 70%" in fixed_script.sections[0].text
+    assert "9 割" not in fixed_script.sections[0].text
+
+
+def test_apply_fixes_to_script_skips_unmatched_quote():
+    """script_quote がどのターンにもマッチしない場合は skip（ログ警告のみ）"""
+    from services.script_generation.fact_checker import apply_fixes_to_script
+
+    script = _make_minimal_script([
+        DialogueTurn(speaker="A", text="全く別のセリフ", turn_type=TurnType.DIALOGUE),
+    ])
+    report = FactCheckReport(
+        overall_confidence=60,
+        issues=[
+            FactCheckIssue(
+                severity="high",
+                script_quote="存在しない引用",
+                issue="x",
+                suggestion="y",
+                fixed_text="zzzzz",
+                auto_fixed=True,
+            ),
+        ],
+        summary="",
+    )
+    fixed_script, applied = apply_fixes_to_script(script, report)
+    assert applied == 0
+    # Original text retained (script_fixed.json は original の写し)
+    assert fixed_script.sections[0].text == "全く別のセリフ"
+
+
+def test_apply_fixes_to_script_skips_non_auto_fixed():
+    """auto_fixed=False の issue は適用対象外"""
+    from services.script_generation.fact_checker import apply_fixes_to_script
+
+    script = _make_minimal_script([
+        DialogueTurn(speaker="A", text="原文を残すべき", turn_type=TurnType.DIALOGUE),
+    ])
+    report = FactCheckReport(
+        overall_confidence=60,
+        issues=[
+            FactCheckIssue(
+                severity="high",
+                script_quote="原文を残すべき",
+                issue="x",
+                suggestion="y",
+                # fixed_text/auto_fixed not set
+            ),
+        ],
+        summary="",
+    )
+    fixed_script, applied = apply_fixes_to_script(script, report)
+    assert applied == 0
+    assert fixed_script.sections[0].text == "原文を残すべき"
+
+
+# ---------------------------------------------------------------------------
+# SessionManager: script_fixed.json
+# ---------------------------------------------------------------------------
+
+def test_session_manager_save_load_script_fixed(tmp_path: Path):
+    from core.session_manager import SessionManager
+
+    sm = SessionManager(project_root=tmp_path, session_id="sess_3a")
+    script = _make_minimal_script([
+        DialogueTurn(speaker="A", text="修正後テキスト", turn_type=TurnType.DIALOGUE),
+    ])
+
+    assert sm.has_script_fixed() is False
+    saved_path = sm.save_script_fixed(script)
+    assert saved_path.exists()
+    assert saved_path.name == "script_fixed.json"
+    assert sm.has_script_fixed() is True
+
+    loaded = sm.load_script_fixed()
+    assert any(t.text == "修正後テキスト" for t in loaded.sections)
+
+
+def test_session_manager_load_missing_script_fixed_raises(tmp_path: Path):
+    from core.session_manager import SessionManager
+
+    sm = SessionManager(project_root=tmp_path, session_id="sess_3a_missing")
+    with pytest.raises(FileNotFoundError):
+        sm.load_script_fixed()
+
+
+# ---------------------------------------------------------------------------
+# Phase 3B: UI markdown — before/after rendering
+# ---------------------------------------------------------------------------
+
+def test_format_factcheck_markdown_renders_before_after_for_fixed_issue(tmp_path: Path):
+    """auto_fixed=True の issue は『修正前』『修正後』表示になる"""
+    from app import _format_factcheck_markdown
+
+    report = FactCheckReport(
+        overall_confidence=70,
+        issues=[
+            FactCheckIssue(
+                severity="high",
+                script_quote="9 割の患者が改善",
+                issue="誇張",
+                suggestion="70% に修正",
+                fixed_text="約 70% の患者が改善",
+                auto_fixed=True,
+            ),
+        ],
+        summary="",
+    )
+    (tmp_path / "factcheck_report.json").write_text(
+        report.model_dump_json(), encoding="utf-8"
+    )
+    md = _format_factcheck_markdown(tmp_path)
+
+    assert "修正済み" in md
+    assert "修正前" in md
+    assert "修正後" in md
+    assert "9 割の患者が改善" in md
+    assert "約 70% の患者が改善" in md
+    # 自動修正 N 件 表示
+    assert "自動修正" in md
+    assert "1件" in md
+
+
+def test_format_factcheck_markdown_keeps_legacy_for_non_fixed_issue(tmp_path: Path):
+    """auto_fixed=False の issue は従来通り『問題点 + 修正案』表示"""
+    from app import _format_factcheck_markdown
+
+    report = FactCheckReport(
+        overall_confidence=70,
+        issues=[
+            FactCheckIssue(
+                severity="medium",
+                script_quote="原文",
+                issue="出典不明",
+                suggestion="出典を追記",
+                # auto_fixed defaults False
+            ),
+        ],
+        summary="",
+    )
+    (tmp_path / "factcheck_report.json").write_text(
+        report.model_dump_json(), encoding="utf-8"
+    )
+    md = _format_factcheck_markdown(tmp_path)
+
+    assert "該当箇所" in md
+    assert "修正案" in md
+    assert "修正済み" not in md
+    assert "修正前" not in md
+    assert "修正後" not in md
+
+
+def test_format_factcheck_markdown_mixed_fixed_and_unfixed(tmp_path: Path):
+    """修正済み + 未修正の混在ケース"""
+    from app import _format_factcheck_markdown
+
+    report = FactCheckReport(
+        overall_confidence=65,
+        issues=[
+            FactCheckIssue(
+                severity="high",
+                script_quote="数値誇張原文",
+                issue="誇張",
+                suggestion="数値を修正",
+                fixed_text="正しい数値",
+                auto_fixed=True,
+            ),
+            FactCheckIssue(
+                severity="low",
+                script_quote="軽微な脚色",
+                issue="補足推奨",
+                suggestion="出典追加",
+                # auto_fixed False (low はスキップ済み)
+            ),
+        ],
+        summary="",
+    )
+    (tmp_path / "factcheck_report.json").write_text(
+        report.model_dump_json(), encoding="utf-8"
+    )
+    md = _format_factcheck_markdown(tmp_path)
+
+    assert "修正済み" in md
+    assert "修正前" in md
+    assert "修正後" in md
+    assert "正しい数値" in md
+    # 軽微なほうは従来表示
+    assert "該当箇所" in md
+    assert "軽微な脚色" in md

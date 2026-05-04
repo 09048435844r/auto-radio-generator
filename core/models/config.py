@@ -284,6 +284,19 @@ class FactCheckerConfig(BaseModel):
         ge=500,
         description="LLM に渡すリサーチデータの最大文字数（先頭から切り出し）。",
     )
+    # Phase 3A: 自動修正エンジン (FactFixAgent)
+    auto_fix: bool = Field(
+        default=True,
+        description=(
+            "True にすると high/medium severity の issue を LLM で自動修正し、"
+            "script_fixed.json を出力する。修正は failopen（エラーは WARNING のみ）。"
+        ),
+    )
+    auto_fix_max_tokens: int = Field(
+        default=1024,
+        ge=128,
+        description="FactFixAgent の 1 件あたり max_tokens（短い書き換えのみのため小さめ）",
+    )
 
 
 class OrchestratorConfig(BaseModel):
