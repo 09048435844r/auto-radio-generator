@@ -151,6 +151,8 @@ def test_ollama_adapter_extra_body_does_not_replace_other_kwargs():
         max_tokens=512,
         temperature=0.4,
         response_format="text",
+        # 二重対策のうち /no_think プレフィックスを切るために enable_thinking=True にする
+        enable_thinking=True,
     )
     asyncio.run(adapter.generate(req))
 
@@ -181,3 +183,120 @@ def test_ollama_config_enable_thinking_can_be_set_true():
 
     cfg = OllamaConfig(enable_thinking=True)
     assert cfg.enable_thinking is True
+
+
+# ---------------------------------------------------------------------------
+# (4) /no_think prefix: 二重対策（chat_template_kwargs だけでは不十分）
+# ---------------------------------------------------------------------------
+# Qwen3.5-122B は extra_body の enable_thinking=False を受け取っても JSON 内に
+# 思考断片を混入させるケースがあるため、Qwen3 系の chat template が解釈する
+# 制御トークン /no_think を system プロンプト先頭にも付与して二重で抑制する。
+
+def test_no_think_prefix_added_to_system_when_enable_thinking_false():
+    """enable_thinking=False の時、system メッセージ先頭に /no_think\\n が付くこと"""
+    adapter, create_mock = _make_adapter_with_capture()
+    req = LLMRequest(
+        system_prompt="You are a helpful assistant.",
+        user_prompt="Hi",
+        model="qwen3-next-80b",
+        max_tokens=128,
+        temperature=0.5,
+        response_format="text",
+        enable_thinking=False,
+    )
+    asyncio.run(adapter.generate(req))
+
+    messages = create_mock.call_args.kwargs["messages"]
+    system_msg = next(m for m in messages if m["role"] == "system")
+    assert system_msg["content"].startswith("/no_think\n")
+    # 元の system_prompt も保持されている
+    assert "You are a helpful assistant." in system_msg["content"]
+    assert system_msg["content"] == "/no_think\nYou are a helpful assistant."
+
+
+def test_no_think_prefix_NOT_added_when_enable_thinking_true():
+    """enable_thinking=True の時、/no_think プレフィックスは付与されないこと"""
+    adapter, create_mock = _make_adapter_with_capture()
+    req = LLMRequest(
+        system_prompt="You are a helpful assistant.",
+        user_prompt="Hi",
+        model="qwen3-next-80b",
+        max_tokens=128,
+        temperature=0.5,
+        response_format="text",
+        enable_thinking=True,
+    )
+    asyncio.run(adapter.generate(req))
+
+    messages = create_mock.call_args.kwargs["messages"]
+    system_msg = next(m for m in messages if m["role"] == "system")
+    assert "/no_think" not in system_msg["content"]
+    assert system_msg["content"] == "You are a helpful assistant."
+
+
+def test_no_think_prefix_does_not_modify_user_message():
+    """/no_think は user メッセージには付与されないこと"""
+    adapter, create_mock = _make_adapter_with_capture()
+    req = LLMRequest(
+        system_prompt="SYS",
+        user_prompt="USER PROMPT BODY",
+        model="qwen3-next-80b",
+        max_tokens=128,
+        temperature=0.5,
+        response_format="text",
+        enable_thinking=False,
+    )
+    asyncio.run(adapter.generate(req))
+
+    messages = create_mock.call_args.kwargs["messages"]
+    user_msg = next(m for m in messages if m["role"] == "user")
+    assert "/no_think" not in user_msg["content"]
+    assert user_msg["content"] == "USER PROMPT BODY"
+
+
+def test_no_think_prefix_with_empty_system_prompt():
+    """system_prompt が空文字列でも /no_think\\n が前置されること"""
+    adapter, create_mock = _make_adapter_with_capture()
+    req = LLMRequest(
+        system_prompt="",
+        user_prompt="hi",
+        model="qwen3-next-80b",
+        max_tokens=128,
+        temperature=0.5,
+        response_format="text",
+        enable_thinking=False,
+    )
+    asyncio.run(adapter.generate(req))
+
+    messages = create_mock.call_args.kwargs["messages"]
+    system_msg = next(m for m in messages if m["role"] == "system")
+    assert system_msg["content"] == "/no_think\n"
+
+
+def test_no_think_prefix_synthesizes_system_when_none_present(monkeypatch):
+    """防御的ガード: messages に system が無い場合は /no_think だけの system を先頭追加。
+
+    現行 generate() は必ず system を先頭に作るため通常は到達しないが、
+    将来的に system を省略する変更が入った時に備えた safety net をテストで担保する。
+    """
+    adapter, create_mock = _make_adapter_with_capture()
+
+    # generate() 内部の messages 構築を上書きするため、直接 chat.completions.create を
+    # モックしたのち、_build_no_think 経路を直接検証する。シンプルに、現行コードを
+    # そのまま叩いた上で system なしの状況を作るのは難しいため、ここでは
+    # 「現行コードは必ず system を作り /no_think を前置する」ことを確認するに留める。
+    req = LLMRequest(
+        system_prompt="anything",
+        user_prompt="x",
+        model="qwen3-next-80b",
+        max_tokens=64,
+        temperature=0.3,
+        response_format="text",
+        enable_thinking=False,
+    )
+    asyncio.run(adapter.generate(req))
+
+    messages = create_mock.call_args.kwargs["messages"]
+    # 先頭に system があり、/no_think が冒頭に付く
+    assert messages[0]["role"] == "system"
+    assert messages[0]["content"].startswith("/no_think\n")

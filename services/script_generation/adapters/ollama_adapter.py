@@ -35,7 +35,23 @@ class OllamaAdapter(ILLMPort):
             {"role": "system", "content": request.system_prompt},
             {"role": "user", "content": request.user_prompt}
         ]
-        
+
+        # 2026-05-06: thinking mode 抑制の二重対策。chat_template_kwargs.enable_thinking
+        # だけでは Qwen3.5-122B が JSON 内に思考の断片を混入させる本運用バグの実績
+        # があるため、system プロンプトの先頭に /no_think トークンも付与する。
+        # これは Qwen3 系の chat template が解釈する制御トークンで、prompt-level で
+        # thinking を確実に無効化できる。enable_thinking=True の時は付与しない。
+        if not request.enable_thinking:
+            system_msg_found = False
+            for msg in messages:
+                if msg["role"] == "system":
+                    msg["content"] = "/no_think\n" + msg["content"]
+                    system_msg_found = True
+                    break
+            if not system_msg_found:
+                # 防御的: 何らかの理由で system メッセージが無い場合は先頭に追加
+                messages.insert(0, {"role": "system", "content": "/no_think"})
+
         # Ollama-specific: JSON mode and repetition penalty
         extra_params = {}
         if request.response_format == "json":
