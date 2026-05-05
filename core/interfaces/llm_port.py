@@ -14,7 +14,14 @@ class LLMRequest:
     max_tokens: int
     temperature: float
     response_format: str = "json"  # "json" | "text"
-    
+    # 2026-05-06: vLLM (Qwen3.5 thinking model) で thinking token が max_tokens を
+    # 食い潰し、可視メッセージが空のまま finish_reason="length" で返る本運用バグの
+    # 対策として、Ollama OpenAI 互換経路（vLLM 含む）には extra_body 経由で
+    # chat_template_kwargs.enable_thinking を付与する。
+    # 既定 False。将来エージェント別に thinking を有効化する場合は LLMRequest 構築
+    # 時に True を渡せる構造（純粋な追加パラメータ。他プロバイダーは無視可能）。
+    enable_thinking: bool = False
+
     def __post_init__(self):
         """Validate request parameters"""
         if self.max_tokens <= 0:

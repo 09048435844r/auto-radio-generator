@@ -49,10 +49,21 @@ class OllamaAdapter(ILLMPort):
             # Values > 1.0 can cause empty responses. Use conservative 0.8-1.0 range.
             # 0.0 = no penalty, 1.0 = moderate penalty, >1.0 = aggressive (risky)
             extra_params["frequency_penalty"] = 0.9
-        
+
+        # 2026-05-06: vLLM (Qwen3.5 thinking model) 対策。
+        # vLLM は chat_template_kwargs.enable_thinking=False を受け取ると、thinking
+        # token を生成せず可視メッセージだけを返す。これが無いと thinking token で
+        # max_tokens を食い潰し finish_reason="length" + 空 content で落ちる。
+        # Ollama 本体は未知の extra_body フィールドを無視するため、無害に共存する。
+        extra_body = {
+            "chat_template_kwargs": {
+                "enable_thinking": request.enable_thinking,
+            }
+        }
+
         max_retries = 3
         last_error = None
-        
+
         for attempt in range(max_retries):
             try:
                 response = await self._client.chat.completions.create(
@@ -60,6 +71,7 @@ class OllamaAdapter(ILLMPort):
                     messages=messages,
                     max_tokens=request.max_tokens,
                     temperature=request.temperature,
+                    extra_body=extra_body,
                     **extra_params
                 )
                 

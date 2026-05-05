@@ -96,6 +96,18 @@ class OllamaConfig(BaseModel):
     max_tokens: int = 16384  # Increased for long-form content
     temperature: float = 0.7
     costs: Dict[str, ModelCost] = Field(default_factory=dict)
+    # 2026-05-06: vLLM (Qwen3.5 thinking model) では chat_template_kwargs.enable_thinking
+    # を False にしないと thinking token が max_tokens を食い潰し空応答になる。
+    # 現時点は全エージェントで False を採用。将来エージェント別に True へ切替えられる
+    # よう config 駆動化しておく（既定値は False）。Ollama 本体は extra_body の未知
+    # フィールドを無視するため、Ollama 経路でも無害。
+    enable_thinking: bool = Field(
+        default=False,
+        description=(
+            "True にすると vLLM (OpenAI 互換) 側で thinking token を許可する。"
+            "Qwen3.5 系の thinking モデルでは False 推奨（既定）。"
+        ),
+    )
 
 
 class ScriptStructureConfig(BaseModel):
