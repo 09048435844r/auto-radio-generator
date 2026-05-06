@@ -215,6 +215,56 @@ class TopicCurator:
         
         return response.content, response.usage
 
+    @staticmethod
+    def _normalize_tone(raw) -> str:
+        """tone フィールドを文字列に正規化する（防御的）。
+
+        Qwen3.5-122B 等が tone をリストやネストリストで返すケースに対応:
+          - "驚き"             → "驚き"
+          - ["驚き"]           → "驚き"
+          - [["議論"]]         → "議論"
+          - ["驚き", ["議論"]] → "驚き"  （先頭の文字列を採用）
+          - None / "" / []     → "解説"  （デフォルト）
+          - その他の型          → str() 変換 → 空なら "解説"
+
+        Pydantic の CuratedTopic.tone は str 型なので、リストを直接渡すと
+        ValidationError でパイプライン全体がフェイルオープンに落ちる。
+        本関数で前段正規化することで再発を防ぐ。
+
+        Args:
+            raw: LLM が返した tone フィールドの生値（型は不定）
+
+        Returns:
+            正規化後の tone 文字列（必ず非空、デフォルト "解説"）
+        """
+        DEFAULT = "解説"
+
+        def _flatten_first_str(v):
+            """再帰的にフラット化して最初の非空文字列を返す。見つからなければ None。"""
+            if isinstance(v, str):
+                s = v.strip()
+                return s or None
+            if isinstance(v, list):
+                for item in v:
+                    result = _flatten_first_str(item)
+                    if result:
+                        return result
+            return None
+
+        if raw is None:
+            return DEFAULT
+        if isinstance(raw, str):
+            s = raw.strip()
+            return s or DEFAULT
+        if isinstance(raw, list):
+            return _flatten_first_str(raw) or DEFAULT
+        # その他の型（int / dict など）は str() で文字列化を試行
+        try:
+            s = str(raw).strip()
+            return s or DEFAULT
+        except Exception:
+            return DEFAULT
+
     def _parse_curation_response(self, response_text: str) -> CurationResult:
         """APIレスポンスを CurationResult に変換"""
         try:
@@ -274,7 +324,9 @@ class TopicCurator:
                 content=t.get("content", ""),
                 priority=t.get("priority", len(topics) + 1),
                 estimated_turns=t.get("estimated_turns", 30),
-                tone=t.get("tone", "解説"),
+                # 2026-05-06: tone は LLM がリスト or ネストリストで返すことがあるため
+                # 文字列に正規化してから渡す（Pydantic ValidationError 回避）
+                tone=self._normalize_tone(t.get("tone")),
                 key_facts=t.get("key_facts", []),
                 # Backward compatible: older LLM responses may not include selection_reason
                 selection_reason=t.get("selection_reason", "") or "",
