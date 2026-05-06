@@ -54,7 +54,24 @@ class OllamaAdapter(ILLMPort):
 
         # Ollama-specific: JSON mode and repetition penalty
         extra_params = {}
-        if request.response_format == "json":
+        if request.response_schema is not None:
+            # 2026-05-06: vLLM Structured Output (OpenAI 標準形式)。
+            # response_schema を渡された場合は response_format=json_schema で
+            # vLLM 側に schema 制約付き生成を依頼する。enum / required / 型を強制し、
+            # JSON 切断や型ミスマッチによる Pydantic ValidationError を根治。
+            # 実機検証 (vLLM 0.20.0 / Qwen3.5-122B-A10B-NVFP4) で
+            # extra_body.guided_json は無効、本形式のみが拘束を効かせると確認済み。
+            extra_params["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": request.response_schema_name,
+                    "strict": request.response_schema_strict,
+                    "schema": request.response_schema,
+                },
+            }
+            # JSON 生成と同等のキーワード反復許容
+            extra_params["frequency_penalty"] = 0.5
+        elif request.response_format == "json":
             extra_params["response_format"] = {"type": "json_object"}
             # JSON generation requires lower frequency_penalty to allow structured keywords
             # (e.g., "title", "description") to be repeated as needed

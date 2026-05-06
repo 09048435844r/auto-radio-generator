@@ -1,6 +1,6 @@
 """LLM Port Interface - Domain layer abstraction for LLM communication"""
 from abc import ABC, abstractmethod
-from typing import Optional, Any
+from typing import Optional, Any, Dict
 from dataclasses import dataclass
 from core.models import LLMUsage
 
@@ -21,6 +21,17 @@ class LLMRequest:
     # 既定 False。将来エージェント別に thinking を有効化する場合は LLMRequest 構築
     # 時に True を渡せる構造（純粋な追加パラメータ。他プロバイダーは無視可能）。
     enable_thinking: bool = False
+
+    # 2026-05-06: vLLM Structured Output (response_format=json_schema) 対応。
+    # Pydantic の model_json_schema() 出力をそのまま渡すと OllamaAdapter が
+    # OpenAI 標準形式の `response_format={"type":"json_schema", "json_schema":{...}}`
+    # に変換し、vLLM が schema 制約付きの JSON を返す（enum / required / 型を強制）。
+    # 既定 None で完全な後方互換（既存呼び出しは挙動不変、json_object モードを維持）。
+    # 他プロバイダー (Gemini / OpenAI / Anthropic) のアダプタは本フィールドを
+    # 「対応していなければ無視」する契約 — frozen dataclass なので追加は破壊的でない。
+    response_schema: Optional[Dict[str, Any]] = None
+    response_schema_name: str = "response"
+    response_schema_strict: bool = False
 
     def __post_init__(self):
         """Validate request parameters"""

@@ -182,14 +182,30 @@ class TopicCurator:
                     f"Using provider's default model instead."
                 )
                 model_to_use = None
-        
+
+        # 2026-05-06: vLLM Structured Output Phase 1 — TopicCurator に CurationResult
+        # スキーマを投与する。OllamaAdapter (vLLM 0.20.0) は response_schema を受けて
+        # response_format=json_schema に変換し、enum / required / 型を強制する。
+        # 効果:
+        #   - JSON 切断（Unterminated string）を vLLM 側で抑止
+        #   - tone を str に強制（リスト/ネストリスト返しを根治）
+        #   - key_facts 配列の型を強制
+        # strict=False は default 値を持つ optional フィールド（estimated_turns,
+        # tone, selection_reason 等）を必須化させないために必要。
+        # 他プロバイダー (Gemini / OpenAI / Anthropic) のアダプタは response_schema を
+        # 認識しないため無視されるだけで挙動不変（後方互換）。
+        curation_schema = CurationResult.model_json_schema()
+
         request = LLMRequest(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             model=model_to_use,
             max_tokens=self.max_tokens,  # PR-D: config 駆動（旧ハードコード 8192）
             temperature=0.3,  # キュレーションは低温度で安定性を確保
-            response_format="json"
+            response_format="json",
+            response_schema=curation_schema,
+            response_schema_name="curation_result",
+            response_schema_strict=False,
         )
 
         response = await self._llm.generate(request)
