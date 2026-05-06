@@ -124,7 +124,10 @@ class TopicCurator:
             if fact_sheet.theme_summary:
                 prompt += f"### テーマ要約\n{fact_sheet.theme_summary}\n\n"
             # Phase 4 review #6: top_facts already handles len(facts) < limit internally
-            top_facts = fact_sheet.top_facts(limit=20)
+            # 2026-05-06: 20 → 50 に拡張。リサーチ側 structured_facts が 100 件超で
+            # 来るケースで top 20 だけだと数値・固有名詞のカバレッジが薄かったため、
+            # Curator の判断材料を増やして key_facts 選定の粒度を上げる。
+            top_facts = fact_sheet.top_facts(limit=50)
             if top_facts:
                 prompt += f"### 意外性の高いファクト（上位{len(top_facts)}件、surprise_score 降順）\n"
                 for i, fact in enumerate(top_facts, 1):
@@ -158,7 +161,7 @@ class TopicCurator:
             f'      "priority": 1,\n'
             f'      "estimated_turns": 30,\n'
             f'      "tone": "驚き",\n'
-            f'      "key_facts": ["ファクト1", "ファクト2", "ファクト3"],\n'
+            f'      "key_facts": ["数値・固有名詞を含む具体ファクト1", "...", "ファクト10〜15（10件以上、数値・固有名詞優先）"],\n'
             f'      "selection_reason": "なぜこのトピックが面白いのか80〜120文字で（切り口の核心を具体的に）"\n'
             f'    }}\n'
             f'  ],\n'
