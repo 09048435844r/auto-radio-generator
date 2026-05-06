@@ -86,7 +86,7 @@ class VoicevoxClient(IAudioSynthesizer):
                 # Mockファイルの情報を取得
                 audio_segment = AudioSegment.from_wav(str(mock_audio_file))
                 duration_sec = len(audio_segment) / 1000.0
-                mock_chapters = self._build_mock_chapters(script, duration_sec)
+                mock_chapters = self._build_mock_chapters(script, duration_sec, segments=segments)
                 subtitle_path = output_dir / "subtitles.ass"
 
                 if mock_subtitle_file.exists():
@@ -122,30 +122,51 @@ class VoicevoxClient(IAudioSynthesizer):
         chapters: list[ChapterMarker] = []  # YouTubeチャプター情報
         current_time_ms = 0
         pause_ms = self.audio_config.pause_between_phrases_ms
-        
+
+        # 2026-05-06: dialogue index → ScriptSegment マップを構築。
+        # deep_dive_N の topic_title 引き当て + segment_id ベースの chapter dedup に使う。
+        # 不一致 / segments=None なら [] が返り、従来の line.section ベース動作になる。
+        seg_for_idx = self._build_segment_index_map(script, segments)
+        last_segment_id: Optional[str] = None
+
         console.print(f"[cyan]音声合成中...[/cyan] {len(script.get_dialogue_only())} フレーズ")
-        
+
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             console=console
         ) as progress:
             task = progress.add_task("合成中...", total=len(script.get_dialogue_only()))
-            
+
             async with httpx.AsyncClient(timeout=60.0) as client:
                 for i, line in enumerate(script.get_dialogue_only()):
                     # セクション開始を検出してチャプターを記録
                     # Note: 冒頭に2秒の無音が追加されるため、チャプタータイムスタンプを2秒オフセット
                     if line.section:
-                        chapter_title = self._get_chapter_title(line.section, line.text, line.chapter_title)
-                        pre_roll_offset_sec = 2.0  # 冒頭の無音時間（秒）
-                        adjusted_time_sec = (current_time_ms / 1000.0) + pre_roll_offset_sec
-                        chapters.append(ChapterMarker(
-                            start_time_sec=adjusted_time_sec,
-                            title=chapter_title,
-                            section_id=line.section
-                        ))
-                        console.print(f"[yellow]  ▶ チャプター: {chapter_title} @ {adjusted_time_sec:.1f}s[/yellow]")
+                        # segment アクセス（segments が無い経路では None）
+                        current_seg = seg_for_idx[i] if i < len(seg_for_idx) else None
+                        topic_title = getattr(current_seg, "topic_title", None) if current_seg else None
+                        # dedup キー: segment_id 優先（同一 section が複数 deep_dive を跨ぐ問題対策）
+                        dedup_key = (
+                            getattr(current_seg, "segment_id", None) if current_seg else None
+                        ) or line.section
+
+                        if dedup_key != last_segment_id:
+                            chapter_title = self._get_chapter_title(
+                                line.section,
+                                line.text,
+                                line.chapter_title,
+                                topic_title=topic_title,
+                            )
+                            pre_roll_offset_sec = 2.0  # 冒頭の無音時間（秒）
+                            adjusted_time_sec = (current_time_ms / 1000.0) + pre_roll_offset_sec
+                            chapters.append(ChapterMarker(
+                                start_time_sec=adjusted_time_sec,
+                                title=chapter_title,
+                                section_id=line.section
+                            ))
+                            console.print(f"[yellow]  ▶ チャプター: {chapter_title} @ {adjusted_time_sec:.1f}s[/yellow]")
+                            last_segment_id = dedup_key
                     
                     # 話者IDからVOICEVOX speaker_idを取得
                     # line.speaker は "A" または "B"
@@ -195,7 +216,7 @@ class VoicevoxClient(IAudioSynthesizer):
         self._generate_ass(adjusted_phrase_data, subtitle_path)
         
         # チャプターマーカーを生成（調整済みタイムスタンプを使用）
-        chapters = self._build_chapters(adjusted_phrase_data, script)
+        chapters = self._build_chapters(adjusted_phrase_data, script, segments=segments)
         
         # セグメント単位のタイミング情報を計算（調整済みタイムスタンプを使用）
         # segment_pausesを渡してジングル情報をSegmentTimingに含める
@@ -487,8 +508,16 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         centiseconds = (ms % 1000) // 10
         return f"{hours:01d}:{minutes:02d}:{seconds:02d}.{centiseconds:02d}"
 
-    def _build_mock_chapters(self, script: Script, total_duration_sec: float) -> list[ChapterMarker]:
-        """Mockモード用に台本のsection情報からチャプター時刻を推定する"""
+    def _build_mock_chapters(
+        self,
+        script: Script,
+        total_duration_sec: float,
+        segments: Optional[list] = None,
+    ) -> list[ChapterMarker]:
+        """Mockモード用に台本のsection情報からチャプター時刻を推定する
+
+        2026-05-06: segments があれば topic_title をチャプター名に反映する。
+        """
         dialogue = script.get_dialogue_only()
         if not dialogue:
             return []
@@ -497,12 +526,21 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         total_lines = len(dialogue)
         timeline_span_sec = max(1.0, float(total_duration_sec) - pre_roll_offset_sec)
         mock_chapters: list[ChapterMarker] = []
+        seg_for_idx = self._build_segment_index_map(script, segments)
 
         for index, line in enumerate(dialogue):
             if not line.section:
                 continue
 
-            chapter_title = self._get_chapter_title(line.section, line.text, line.chapter_title)
+            current_seg = seg_for_idx[index] if index < len(seg_for_idx) else None
+            topic_title = getattr(current_seg, "topic_title", None) if current_seg else None
+
+            chapter_title = self._get_chapter_title(
+                line.section,
+                line.text,
+                line.chapter_title,
+                topic_title=topic_title,
+            )
             position_ratio = index / max(1, total_lines - 1)
             estimated_start = pre_roll_offset_sec + (timeline_span_sec * position_ratio)
             estimated_start = min(max(0.0, estimated_start), max(0.0, total_duration_sec - 0.1))
@@ -566,37 +604,64 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
         return phrase_data
     
-    def _build_chapters(self, phrase_data: list, script: Script) -> list[ChapterMarker]:
+    def _build_chapters(
+        self,
+        phrase_data: list,
+        script: Script,
+        segments: Optional[list] = None,
+    ) -> list[ChapterMarker]:
         """Build chapter markers from phrase data and script sections
-        
+
+        2026-05-06: segments を受け取り、deep_dive_N の各セグメントに紐づく
+        topic_title をチャプタータイトルとして使う。同一 section 値（例:
+        "deep_dive"）が複数 deep_dive 区間で使われる本運用構成では、
+        line.section 単位の dedup だと全 deep_dive がひとつのチャプターに
+        畳み込まれてしまうため、segment_id 単位で dedup する。
+
         Args:
             phrase_data: List of (audio_segment, start_ms, end_ms, text, speaker) tuples
             script: Script object with section information
-        
+            segments: Optional ScriptSegment list（topic_title 引き当て用）。
+                      None / 不一致時は line.section ベースの従来動作にフォールバック。
+
         Returns:
             List of ChapterMarker objects
         """
         if not phrase_data or not script:
             return []
-        
+
         pre_roll_offset_ms = 2000  # Pre-roll silence added to audio
         chapters: list[ChapterMarker] = []
         dialogue = script.get_dialogue_only()
-        
+        seg_for_idx = self._build_segment_index_map(script, segments)
+
         # Map dialogue lines to phrase data by index
+        last_dedup_key: Optional[str] = None
         for idx, line in enumerate(dialogue):
             if not line.section or idx >= len(phrase_data):
                 continue
-            
+
             # Get timing from phrase_data
             _, start_ms, _, text, _ = phrase_data[idx]
             start_sec = (start_ms + pre_roll_offset_ms) / 1000.0
-            
-            # Generate chapter title
-            chapter_title = self._get_chapter_title(line.section, line.text, line.chapter_title)
-            
-            # Only add chapter if it's a new section (avoid duplicates)
-            if not chapters or chapters[-1].section_id != line.section:
+
+            # segment（あれば）から topic_title と segment_id を取得
+            current_seg = seg_for_idx[idx] if idx < len(seg_for_idx) else None
+            topic_title = getattr(current_seg, "topic_title", None) if current_seg else None
+            dedup_key = (
+                getattr(current_seg, "segment_id", None) if current_seg else None
+            ) or line.section
+
+            # Generate chapter title（topic_title を渡して deep_dive を実タイトルに）
+            chapter_title = self._get_chapter_title(
+                line.section,
+                line.text,
+                line.chapter_title,
+                topic_title=topic_title,
+            )
+
+            # 新しいセグメント / セクションに入った時のみチャプター追加
+            if dedup_key != last_dedup_key:
                 chapters.append(
                     ChapterMarker(
                         start_time_sec=start_sec,
@@ -604,25 +669,60 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                         section_id=line.section,
                     )
                 )
-        
+                last_dedup_key = dedup_key
+
         return chapters
     
-    def _get_chapter_title(self, section_id: str, text: str, chapter_title: Optional[str] = None) -> str:
+    def _get_chapter_title(
+        self,
+        section_id: str,
+        text: str,
+        chapter_title: Optional[str] = None,
+        topic_title: Optional[str] = None,
+    ) -> str:
         """セクションIDからチャプタータイトルを生成
-        
+
+        2026-05-06: 内部 segment_type 名（"deep_dive" 等）が視聴者向けチャプター
+        にそのまま漏れていた問題への対策。優先順位を以下に整理:
+          1. AI 生成の DialogueTurn.chapter_title（個別タイトル）
+          2. 視聴者向け変換ルール（intro→「はじめに」/ deep_dive→トピック名 / conclusion→「まとめ」）
+          3. 固定マッピング（後方互換）
+          4. section_id そのまま
+
         Args:
-            section_id: セクションID (例: 'intro', 'news_1')
+            section_id: セクションID (例: 'intro', 'deep_dive', 'deep_dive_1')
             text: セリフテキスト
-            chapter_title: AI生成のチャプタータイトル（優先使用）
-        
+            chapter_title: AI生成のチャプタータイトル（最優先）
+            topic_title: deep_dive 系セグメントに紐づくトピックタイトル
+                         （ScriptSegment.topic_title / CuratedTopic.title 由来）
+
         Returns:
             チャプタータイトル文字列
         """
-        # 優先度1: AI生成のchapter_titleがあれば使用
+        # 優先度1: AI生成のchapter_titleがあれば使用（個別タイトルが付いている場合）
         if chapter_title and chapter_title.strip():
             return chapter_title.strip()
-        
-        # 優先度2: 固定マッピングにフォールバック（後方互換性のため）
+
+        sid = (section_id or "").strip().lower()
+
+        # 優先度2: 視聴者向け変換ルール
+        # intro / オープニング系 → 「はじめに」
+        if sid == "intro" or sid.startswith("intro_") or sid in ("opening", "オープニング"):
+            return "はじめに"
+        # conclusion / まとめ / ending 系 → 「まとめ」
+        if (
+            sid == "conclusion"
+            or sid.startswith("conclusion_")
+            or sid in ("ending", "まとめ", "closing")
+        ):
+            return "まとめ"
+        # deep_dive 系 → トピックタイトル（取得できれば）
+        if sid == "deep_dive" or sid.startswith("deep_dive"):
+            if topic_title and topic_title.strip():
+                return topic_title.strip()
+            # topic_title が無い場合は legacy 固定マッピングへフォールスルー
+
+        # 優先度3: 固定マッピング（後方互換性のため）
         section_titles = {
             "intro": "オープニング",
             "definition": "基礎解説",
@@ -639,14 +739,44 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             "conclusion": "まとめ",
             "ending": "エンディング",
         }
-        
+
         base_title = section_titles.get(section_id, section_id)
-        
+
         # news_N の場合、セリフから見出しを抽出（最初の30文字まで）
         if section_id.startswith("news_"):
             headline = text[:30].replace('\n', ' ')
             if len(text) > 30:
                 headline += "..."
             return f"{base_title}: {headline}"
-        
+
+        # 優先度4: section_id そのまま（base_title）
         return base_title
+
+    @staticmethod
+    def _build_segment_index_map(script: Script, segments: Optional[list]) -> list:
+        """dialogue_only の各 index に対応する ScriptSegment を引けるリストを構築
+
+        ScriptSegment.turns を順に消費し、dialogue 配列の i 番目の line がどの
+        segment に属するかを O(N) で決める。segments が None / 空 / 総ターン数が
+        合わない場合は空リストを返し、呼び出し側は従来動作（line.section 単位の
+        chapter 生成）にフォールバックする。
+
+        Args:
+            script: 音声合成対象の Script
+            segments: ScriptSegment のリスト（orchestrator 出力）
+
+        Returns:
+            list: index → ScriptSegment のマップ。サイズ不一致なら []
+        """
+        if not segments:
+            return []
+        dialogue = script.get_dialogue_only()
+        seg_for_idx: list = []
+        for seg in segments:
+            turns_attr = getattr(seg, "turns", None) or []
+            for _ in turns_attr:
+                seg_for_idx.append(seg)
+        # 不一致なら捨てる（フェイルセーフ: 従来動作にフォールバック）
+        if len(seg_for_idx) != len(dialogue):
+            return []
+        return seg_for_idx
