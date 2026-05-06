@@ -194,7 +194,14 @@ class TopicCurator:
         # tone, selection_reason 等）を必須化させないために必要。
         # 他プロバイダー (Gemini / OpenAI / Anthropic) のアダプタは response_schema を
         # 認識しないため無視されるだけで挙動不変（後方互換）。
-        curation_schema = CurationResult.model_json_schema()
+        # ↑ 上記 Phase 1 設計コメントは履歴のため残す。
+        # ※ 2026-05-06 ロールバック実施: 本運用で TopicCurator 出力に文字化け
+        #    （例: "製認気消失"）、BOM 文字混入（tone=﻿ など）、トピック数不足
+        #    （要求 3 件 → 2 件）が観測されたため、response_schema 投与を取りやめた。
+        #    JSON schema 強制が日本語の創造的生成（タイトル・selection_reason・
+        #    key_facts の物語性）と相性が悪く、token 選択が歪むのが原因と推定。
+        #    LLMRequest.response_schema 基盤と OllamaAdapter 側の変換ロジックは
+        #    保持し、将来 FactExtractor 等の構造重視エージェントで再利用予定。
 
         request = LLMRequest(
             system_prompt=system_prompt,
@@ -203,9 +210,6 @@ class TopicCurator:
             max_tokens=self.max_tokens,  # PR-D: config 駆動（旧ハードコード 8192）
             temperature=0.3,  # キュレーションは低温度で安定性を確保
             response_format="json",
-            response_schema=curation_schema,
-            response_schema_name="curation_result",
-            response_schema_strict=False,
         )
 
         response = await self._llm.generate(request)

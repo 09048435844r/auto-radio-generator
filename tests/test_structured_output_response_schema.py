@@ -209,8 +209,13 @@ def test_ollama_adapter_extra_body_still_attached_with_schema():
 
 
 # ---------------------------------------------------------------------------
-# (4) TopicCurator: CurationResult スキーマを LLMRequest に乗せる
+# (4) TopicCurator: response_schema は使わない（2026-05-06 ロールバック契約）
 # ---------------------------------------------------------------------------
+# Phase 1 で TopicCurator に CurationResult schema を投与した結果、本運用で
+# 日本語コンテンツ品質劣化（文字化け / BOM 混入 / トピック数不足）が発生。
+# JSON schema 強制が日本語の創造的生成と相性が悪いため適用を取りやめた。
+# LLMRequest.response_schema 基盤と OllamaAdapter の変換ロジックは保持しているが、
+# TopicCurator は通常の response_format="json" モードに戻している。
 
 def _make_curator(mock_app_config):
     from services.script_generation.topic_curator import TopicCurator
@@ -226,8 +231,11 @@ def _make_curator(mock_app_config):
     return TopicCurator(mock_port, mock_app_config)
 
 
-def test_topic_curator_passes_curation_result_schema(mock_app_config):
-    """TopicCurator._call_api が CurationResult.model_json_schema() を載せた LLMRequest を投げる"""
+def test_topic_curator_does_not_pass_response_schema_after_rollback(mock_app_config):
+    """ロールバック契約: TopicCurator は response_schema を渡さない。
+
+    再投入する際は本テストを更新すること（schema 投与の良し悪しは別途実機検証する）。
+    """
     curator = _make_curator(mock_app_config)
 
     captured = {}
@@ -241,53 +249,38 @@ def test_topic_curator_passes_curation_result_schema(mock_app_config):
         )
 
     curator._llm.generate = _fake_generate
-
     asyncio.run(curator._call_api("sys", "usr"))
 
     req = captured["request"]
-    assert req.response_schema is not None, "TopicCurator は CurationResult schema を渡すべき"
-    assert isinstance(req.response_schema, dict)
-    assert req.response_schema_name == "curation_result"
-    assert req.response_schema_strict is False  # default 値の柔軟性のため
-    # スキーマが CurationResult 由来であることを確認（topics プロパティが存在）
-    assert req.response_schema == CurationResult.model_json_schema()
-    assert "properties" in req.response_schema
-    assert "topics" in req.response_schema["properties"]
-
-
-def test_topic_curator_schema_includes_curated_topic_definition(mock_app_config):
-    """CurationResult スキーマは $defs.CuratedTopic を含む（vLLM が型情報を必要とする）"""
-    curator = _make_curator(mock_app_config)
-    schema = CurationResult.model_json_schema()
-    # Pydantic の model_json_schema は ネストモデルを $defs に格納する
-    assert "$defs" in schema
-    assert "CuratedTopic" in schema["$defs"]
-    ct = schema["$defs"]["CuratedTopic"]
-    # 主要フィールドが存在
-    for field in ["title", "content", "priority", "tone", "key_facts"]:
-        assert field in ct["properties"], f"CuratedTopic に {field} プロパティが無い"
+    assert req.response_schema is None, (
+        "Rollback contract: TopicCurator は response_schema を渡さない設定に戻されている。"
+        "本運用で日本語コンテンツの品質劣化（文字化け / BOM / トピック数不足）が確認されたため。"
+        "再投入する場合は本テストを更新し、品質を実機検証してから commit すること。"
+    )
+    # 通常の JSON モードに戻っている
+    assert req.response_format == "json"
 
 
 # ---------------------------------------------------------------------------
 # (5) 構造的契約: 他プロバイダーアダプタは response_schema を「読まない」
-#     （Phase 1 では Ollama 専用、他は無視で後方互換）
+#     （現状 Ollama 専用、他は無視で後方互換）
 # ---------------------------------------------------------------------------
 
 ADAPTER_SRC_DIR = Path(__file__).resolve().parent.parent / "services" / "script_generation" / "adapters"
 
 
-def test_other_adapters_do_not_consume_response_schema_in_phase1():
-    """Phase 1: gemini/openai/anthropic アダプタは response_schema を参照しない（参照が無い → 自然に無視）"""
+def test_other_adapters_do_not_consume_response_schema():
+    """gemini/openai/anthropic アダプタは response_schema を参照しない（参照が無い → 自然に無視）"""
     for fname in ["gemini_adapter.py", "openai_adapter.py", "anthropic_adapter.py"]:
         src = (ADAPTER_SRC_DIR / fname).read_text(encoding="utf-8")
         assert "response_schema" not in src, (
-            f"{fname} に response_schema 参照がある。Phase 1 では他プロバイダーは "
-            f"非対応 (LLMRequest フィールドを完全に無視) で固める方針"
+            f"{fname} に response_schema 参照がある。"
+            f"現状は他プロバイダー非対応 (LLMRequest フィールドを完全に無視) で固める方針"
         )
 
 
 def test_ollama_adapter_consumes_response_schema():
-    """OllamaAdapter は response_schema を読み出して使うこと（Phase 1 の唯一の対応プロバイダー）"""
+    """OllamaAdapter は response_schema を読み出して使うこと（基盤を保持しているため）"""
     src = (ADAPTER_SRC_DIR / "ollama_adapter.py").read_text(encoding="utf-8")
     # 参照されている
     assert re.search(r"request\.response_schema", src), (
