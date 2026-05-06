@@ -248,6 +248,48 @@ def _build_metadata_chapter_block(chapters: list[ChapterMarker]) -> list[str]:
     ]
 
 
+def _resolve_script_for_metadata(output_base, fallback_script, log_fn=None):
+    """metadata 生成に使う Script を解決する（FactFix 修正版を優先）。
+
+    2026-05-06: FactChecker / FactFixAgent が script_fixed.json を生成したのに、
+    metadata.txt は常に原文 script から生成されていたためハルシネーション内容が
+    YouTube 説明文に載ってしまうバグへの対策。SessionManager.has_script_fixed /
+    load_script_fixed で出力ディレクトリを参照し、存在すれば FactFix 後の Script を
+    採用する。読み込み失敗時はフェイルオープン（fallback_script を返す）。
+
+    Args:
+        output_base: 当該実行の出力ディレクトリ（script_fixed.json があるならここ）
+        fallback_script: script_fixed.json が無い / 読込失敗時に使う Script
+        log_fn: 任意のログ関数（None ならログ出さない）
+
+    Returns:
+        Script: metadata 生成に使うべき Script オブジェクト
+    """
+    from core.session_manager import SessionManager
+
+    log = log_fn or (lambda msg: None)
+    try:
+        # session_dir 直接指定で SessionManager を構築（既存ディレクトリの再利用、
+        # __init__ の mkdir(exist_ok=True) は no-op）
+        sm = SessionManager(project_root=PROJECT_ROOT, session_dir=output_base)
+        if sm.has_script_fixed():
+            try:
+                fixed_script = sm.load_script_fixed()
+                log(f"✓ FactFix 修正済み台本を metadata 生成に使用 (script_fixed.json)")
+                return fixed_script
+            except Exception as e:
+                # 読込失敗（壊れた JSON 等）はフェイルオープン
+                log(f"⚠ script_fixed.json 読込失敗、原文 script で続行: {e}")
+                return fallback_script
+        else:
+            log(f"ℹ script_fixed.json なし、原文 script を metadata に使用")
+            return fallback_script
+    except Exception as e:
+        # SessionManager 構築失敗もフェイルオープン
+        log(f"⚠ SessionManager 構築失敗、原文 script で続行: {e}")
+        return fallback_script
+
+
 def _extract_urls(text: str) -> list[str]:
     """テキスト中のURLを抽出する。"""
     if not text:
@@ -1597,8 +1639,10 @@ async def generate_video_workflow(
         
         # YouTube用メタデータを生成
         metadata_path = output_base / "metadata.txt"
+        # FactFix 修正済み台本があればそちらを優先（ハルシネーションが概要欄に載るのを防ぐ）
+        effective_script = _resolve_script_for_metadata(output_base, script, log_fn=log)
         generated_metadata = _generate_youtube_metadata(
-            script=script,
+            script=effective_script,
             chapters=synthesis_result.chapters,
             output_path=metadata_path,
             theme=theme,
@@ -2074,8 +2118,12 @@ def run_workflow_sync(
                 metadata_path.write_text("", encoding="utf-8")
                 callbacks.log("[INFO] Mockモード設定によりメタデータ生成をスキップしました")
             else:
+                # FactFix 修正済み台本があればそちらを優先（ハルシネーションが概要欄に載るのを防ぐ）
+                effective_script = _resolve_script_for_metadata(
+                    output_base, scripting_result.script, log_fn=callbacks.log
+                )
                 generated_metadata = _generate_youtube_metadata(
-                    script=scripting_result.script,
+                    script=effective_script,
                     chapters=production_result.chapters,
                     output_path=metadata_path,
                     theme=theme,
