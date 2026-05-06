@@ -104,10 +104,15 @@ class ScriptOrchestrator(IScriptOrchestrator):
             context.provider,
             model_override=fact_extractor_model,
         )
-        self.fact_extractor = FactExtractor(self._fact_extractor_port, context.config)
-
-        # Pass session_dir to SegmentGenerator for markdown script saving
+        # Pass session_dir to both FactExtractor and SegmentGenerator for markdown saving
+        # (FactExtractor: 2 段階モードで Phase 1 の fact_sheet_phase1.md を出力)
         markdown_output_dir = getattr(context, 'session_dir', None)
+        self.fact_extractor = FactExtractor(
+            self._fact_extractor_port,
+            context.config,
+            markdown_output_dir=markdown_output_dir,
+        )
+
         self.generator = SegmentGenerator(self._segment_port, context.config, markdown_output_dir=markdown_output_dir)
         
         self.metadata_gen = MetadataGenerator(self._metadata_port, context.config)
