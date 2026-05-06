@@ -192,11 +192,16 @@ def test_extract_facts_propagates_self_inconsistency_runtime_error(mock_app_conf
             self.usage = usage
             self.finish_reason = finish_reason
 
-    raw = json.dumps({
-        "facts": [],
-        "theme_summary": "summary",
-        "extractor_reasoning": "数値系ファクト5件を抽出した",
-    })
+    # 2026-05-06: 2 段階アーキテクチャでも自己矛盾は検出されることを担保。
+    # Phase 1 が markdown を返したが「抽出方針」に「N件抽出」と書きながら
+    # `### Fact N` ブロックを 0 件しか出さない症状（旧 JSON 経路の自己矛盾と同型）
+    raw = (
+        "# FactSheet\n\n"
+        "## テーマ要約\nsummary\n\n"
+        "## 抽出方針\n数値系ファクト5件を抽出した\n\n"
+        "## ファクト一覧\n"
+        # 意図的に Fact ブロックを 0 件のままにする（自己矛盾を再現）
+    )
 
     async def mock_generate(req):
         return _FakeResponse(raw, fake_usage, "stop")

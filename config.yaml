@@ -448,7 +448,9 @@ script_generator:
                             # 2026-05-06: プロキシ先が Qwen3.5-122B-A10B-NVFP4 に切り替わり再統一。
                             # 空にすると curator_model にフォールバックする。
       max_facts: 30      # 抽出するファクトの最大数（LLM への指示値）
-      max_tokens: 8192   # LLMの出力上限。length 切り詰め時はフェイルファストで例外
+      max_tokens: 12288  # 2026-05-06: 8192 → 12288 にバンプ。2 段階アーキテクチャ移行に伴い
+                         # Phase 1 で markdown 形式（30 件 × 約 6 行 = 180 行 / 6,000〜7,500 字）
+                         # を生成するため余裕を確保。length 切り詰め時はフェイルファストで例外
     # PR-D Issue C: 他エージェントの max_tokens config 駆動化（旧ハードコード値を踏襲）
     # いずれも finish_reason=length 時は RuntimeError を送出し、呼び出し側が
     # フォールバック処理（orchestrator の try/except 等）でハンドリングする。
