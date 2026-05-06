@@ -453,7 +453,9 @@ script_generator:
     # いずれも finish_reason=length 時は RuntimeError を送出し、呼び出し側が
     # フォールバック処理（orchestrator の try/except 等）でハンドリングする。
     topic_curator:
-      max_tokens: 8192   # 旧ハードコード値。JSON 途中切断を防ぐため大きめ
+      max_tokens: 12288  # 2026-05-06: key_facts 10〜15件・数値+CI+固有名詞リッチ化に伴い 8192→12288 へ。
+                         # 3 topics × 14 key_facts ×〜80字 + content 500〜800字 ×3 で実機 8000〜10000 トークン消費する
+                         # ケースを観測。JSON 途中切断（Unterminated string）を防ぐため余裕を確保
     segment_generator:
       max_tokens_single: 8192  # 1-phase JSON 生成用
       max_tokens_phase1: 4096  # 2-phase 生成の Phase 1（Markdown creative）

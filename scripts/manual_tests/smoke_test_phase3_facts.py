@@ -1,12 +1,19 @@
 """Smoke test: structured_facts → FactSheet → key_facts → 台本 への反映確認
 
 Phase 3 強化（Curator top_facts limit=50, key_facts 10〜15 件指示, 言語制約）の
-動作確認用スモークテスト。output/_phase3_test/research_brief.json を入力として
-台本生成を実行し、以下を計測する:
+動作確認用スモークテスト。指定の research_brief.json を入力として台本生成を実行し、
+以下を計測する:
 
   1. CuratedTopic.key_facts の平均件数（10 件以上を目標）
   2. 簡体字中国語のリーク件数（0 件を期待）
   3. 元 structured_facts 由来の数値・固有名詞が台本本文に何件現れるか
+  4. 統計指標（95%CI / SMD / HR / p<）が台本本文にどれだけ取り込まれるか
+
+使い方:
+  python scripts/manual_tests/smoke_test_phase3_facts.py
+      → デフォルト fixture: output/_phase3_test/research_brief.json
+  python scripts/manual_tests/smoke_test_phase3_facts.py path/to/brief.json
+      → 任意 fixture を指定
 """
 import asyncio
 import json
@@ -65,9 +72,14 @@ def extract_fact_terms(structured_facts: dict) -> list[str]:
 async def main():
     config = load_config(PROJECT_ROOT)
 
-    brief = ResearchBrief.model_validate_json(
-        (PROJECT_ROOT / "output" / "_phase3_test" / "research_brief.json").read_text(encoding="utf-8")
-    )
+    # CLI 引数で fixture パスを差し替え可能
+    if len(sys.argv) > 1:
+        brief_path = Path(sys.argv[1])
+    else:
+        brief_path = PROJECT_ROOT / "output" / "_phase3_test" / "research_brief.json"
+    print(f"Fixture: {brief_path}")
+
+    brief = ResearchBrief.model_validate_json(brief_path.read_text(encoding="utf-8"))
     print(f"=== Smoke test: {brief.theme!r} (mode={brief.research_mode}) ===")
     print(f"structured_facts: k_num={len(brief.structured_facts.get('key_numbers') or [])}, "
           f"k_ent={len(brief.structured_facts.get('key_entities') or [])}, "
@@ -133,8 +145,22 @@ async def main():
     miss = [t for t in fact_terms if t not in full_text]
     print(f"    Miss: {miss[:15]}")
 
-    # 4. 台本サイズ
-    print(f"\n[4] 台本: {len(script.sections)} ターン / 本文 {len(full_text)} 文字")
+    # 4. 統計指標パターンの取り込み（95%CI / SMD / HR / p< 等）
+    stat_patterns = {
+        "95%CI": re.compile(r"95\s*%\s*CI|95\s*%\s*信頼区間"),
+        "SMD/Cohen": re.compile(r"SMD|標準化平均差|Cohen"),
+        "HR/ハザード比": re.compile(r"HR\s*[=:]?\s*\d|ハザード比"),
+        "p値 (p<・p=)": re.compile(r"p\s*[<=]\s*0?\.\d"),
+        "%pt": re.compile(r"%\s*pt|パーセントポイント"),
+        "メタアナリシス": re.compile(r"メタアナリシス|メタ解析"),
+    }
+    print(f"\n[4] 統計指標の台本反映:")
+    for label, pat in stat_patterns.items():
+        count = len(pat.findall(full_text))
+        print(f"    {label}: {count}件" + (" ✓" if count > 0 else ""))
+
+    # 5. 台本サイズ
+    print(f"\n[5] 台本: {len(script.sections)} ターン / 本文 {len(full_text)} 文字")
     print(f"    タイトル: {script.title!r}")
 
 

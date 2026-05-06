@@ -1853,6 +1853,11 @@ def run_workflow_sync(
                         content=brief.research_content,
                         sources=imported_sources,
                         usage=None,
+                        # 2026-05-06: research_import 経路でも structured_facts を引き継ぐ。
+                        # これが無いとリサーチ側で抽出された数値・固有名詞が ResearchResult に
+                        # 載らず、Orchestrator Step 0.5 の FactSheet.from_structured_facts
+                        # 分岐が常に skip → 全件 FactExtractor フォールバックになる。
+                        structured_facts=brief.structured_facts,
                     )
 
                     # PR-I 同系統: インポートされた ResearchBrief を SSOT として
