@@ -390,23 +390,8 @@ def test_extract_facts_uses_config_max_tokens(mock_app_config):
     fake_usage = LLMUsage(
         provider="gemini", model_name="test", input_tokens=1, output_tokens=1, request_count=1
     )
-    # 2026-05-06: 2 段階アーキテクチャ移行に伴い markdown 形式の応答を mock する。
-    # Phase 1 の出力フォーマットを最小構成で満たし、Phase 2 の regex parser を通る。
-    valid_markdown = (
-        "# FactSheet\n\n"
-        "## テーマ要約\nテストテーマ。\n\n"
-        "## 抽出方針\n単体テスト用。\n\n"
-        "## ファクト一覧\n\n"
-        "### Fact 1\n"
-        "- **カテゴリ**: 数値\n"
-        "- **意外性スコア**: 7\n"
-        "- **数値**: 100\n"
-        "- **主語**: テスト\n"
-        "- **出典**: なし\n"
-        "- **記述**: テスト用ファクト1\n"
-    )
     fake_response = _FakeLLMResponse(
-        content=valid_markdown,
+        content=json.dumps({"facts": [], "theme_summary": "ok"}),
         usage=fake_usage,
         finish_reason="stop",
     )
