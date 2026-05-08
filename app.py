@@ -455,6 +455,7 @@ def generate_video(
     jingle_choice: str = "なし",
     jingle_custom_path: str = "",
     research_import_filepath: Optional[str] = None,
+    verified_script_filepath: Optional[str] = None,
     progress=gr.Progress()
 ) -> tuple[str | None, str, str, str, str, str, Optional[ThumbnailRegenerationState], str]:
     """動画生成を実行し、サムネイル再作成用Stateも返す
@@ -481,11 +482,23 @@ def generate_video(
     Returns:
         (動画パス, ログ出力, コストレポート, タイトル, 概要欄, YouTube状態, ThumbnailRegenerationState)
     """
-    # 入力検証（リサーチインポート時はテーマ不要）
-    if (not theme or not theme.strip()) and not use_mock and not research_import_filepath:
+    # 入力検証（リサーチインポート時 or 外部台本モード時はテーマ不要）
+    if (
+        (not theme or not theme.strip())
+        and not use_mock
+        and not research_import_filepath
+        and not verified_script_filepath
+    ):
         return None, "エラー: テーマを入力してください。", "", "", "", "YouTube: 未実行", None, _FACTCHECK_PLACEHOLDER
 
-    effective_theme = theme.strip() if theme and theme.strip() else ("Mock run" if use_mock else "Imported Research")
+    effective_theme = (
+        theme.strip()
+        if theme and theme.strip()
+        else (
+            "Mock run" if use_mock
+            else ("External Script" if verified_script_filepath else "Imported Research")
+        )
+    )
     
     # ジングルパスを解決
     jingle_path = resolve_jingle_path(jingle_choice, jingle_custom_path)
@@ -549,6 +562,7 @@ def generate_video(
         second_mode=second_mode_enum,
         jingle_path=jingle_path,
         research_import_filepath=research_import_filepath or None,
+        external_script_path=verified_script_filepath or None,
     )
     
     # 成功時に設定を保存とState作成
@@ -1977,78 +1991,109 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
         """)
         with gr.Row():
             with gr.Column(scale=1):
-                with gr.Group(elem_classes="group-container"):
-                    gr.Markdown("### 📋 企画設定")
-
-                    with gr.Row():
-                        theme_input = gr.Textbox(
-                            label="テーマ",
-                            placeholder="例: AIの未来について / 最近のゲーム事情 / 宇宙開発の最新動向",
-                            lines=2,
-                            info="動画で話すテーマを入力してください（必須）",
-                            scale=2,
-                        )
-                        research_mode_dropdown = gr.Dropdown(
-                            label="リサーチモード",
-                            choices=list(RESEARCH_MODE_MAP.keys()),
-                            value=saved_settings.research_mode,
-                            info="Perplexityによるリサーチの方向性を選択",
-                            scale=1,
-                        )
-                    
-                    with gr.Row():
-                        llm_provider_dropdown = gr.Dropdown(
-                            label="🤖 LLMプロバイダー",
-                            choices=["gemini", "openai", "anthropic", "ollama"],
-                            value="ollama",
-                            info="台本生成に使用するAIモデルを選択",
-                            scale=1,
-                        )
-
-                    avoid_topics_input = gr.Textbox(
-                        label="避けてほしい話題 (オプション)",
-                        placeholder="例: 食事療法 運動不足 (スペースやカンマで区切って複数入力可)",
-                        lines=1,
-                        info="台本に含めたくないトピックを指定できます",
+                # Step 3 (2026-05-09): 外部台本モード（推奨経路）
+                # Mac 側 radio_director の VerifiedScript JSON を渡せば、
+                # Phase 1 (planning) + Phase 2 (scripting) を完全 bypass し、
+                # 動画生成のみを実行する。LLM API コストゼロで安定した品質。
+                with gr.Accordion("🎬 外部台本モード（推奨 / VerifiedScript JSON）", open=True):
+                    gr.Markdown(
+                        "**Mac 側 `radio_director` で生成した VerifiedScript JSON を選択すると、"
+                        "リサーチ + 台本生成を完全スキップして動画生成のみを行います。**\n\n"
+                        "- 配置先: `output/imports/<run_id>/verified_script.json`\n"
+                        "- LLM API コスト: ¥0\n"
+                        "- 旧 LLM 経路 (下記「📋 企画設定」アコーディオン) は v2 で削除予定"
+                    )
+                    verified_script_file = gr.File(
+                        label="VerifiedScript JSON (Mac 側 radio_director の出力)",
+                        file_types=[".json"],
+                        type="filepath",
+                        value=None,
                     )
 
-                    with gr.Accordion("📂 リサーチデータのインポート（リサーチAPIをスキップ）", open=False):
-                        gr.Markdown(
-                            "過去に生成した `research_brief.json` を指定すると、"
-                            "Perplexity APIの呼び出しをスキップしてコストゼロでリサーチフェーズを完了できます。"
-                            "指定しない場合は通常通りAPIでリサーチを実行します。"
-                        )
-                        research_import_file = gr.File(
-                            label="リサーチデータをインポート (任意・research_brief.json)",
-                            file_types=[".json"],
-                            type="filepath",
-                            value=None,
+                # 旧 LLM 経路 (Deprecated: v2 で削除予定)
+                # 既存コンポーネントの ID は維持し、event handler の配線も変更しない。
+                # アコーディオンで包むだけで折りたたみ表示にする。
+                with gr.Accordion(
+                    "⚠️ 旧 LLM 経路（Deprecated: v2 で削除予定 / Phase 1+2 自動実行）",
+                    open=False,
+                ):
+                    gr.Markdown(
+                        "外部台本モードを使わない場合のみ展開してください。"
+                        "Gemini + Perplexity でリサーチと台本生成を行う旧経路です。"
+                    )
+
+                    with gr.Group(elem_classes="group-container"):
+                        gr.Markdown("### 📋 企画設定")
+
+                        with gr.Row():
+                            theme_input = gr.Textbox(
+                                label="テーマ",
+                                placeholder="例: AIの未来について / 最近のゲーム事情 / 宇宙開発の最新動向",
+                                lines=2,
+                                info="動画で話すテーマを入力してください（必須）",
+                                scale=2,
+                            )
+                            research_mode_dropdown = gr.Dropdown(
+                                label="リサーチモード",
+                                choices=list(RESEARCH_MODE_MAP.keys()),
+                                value=saved_settings.research_mode,
+                                info="Perplexityによるリサーチの方向性を選択",
+                                scale=1,
+                            )
+
+                        with gr.Row():
+                            llm_provider_dropdown = gr.Dropdown(
+                                label="🤖 LLMプロバイダー",
+                                choices=["gemini", "openai", "anthropic", "ollama"],
+                                value="ollama",
+                                info="台本生成に使用するAIモデルを選択",
+                                scale=1,
+                            )
+
+                        avoid_topics_input = gr.Textbox(
+                            label="避けてほしい話題 (オプション)",
+                            placeholder="例: 食事療法 運動不足 (スペースやカンマで区切って複数入力可)",
+                            lines=1,
+                            info="台本に含めたくないトピックを指定できます",
                         )
 
-                    # 第2部モード設定
-                    gr.Markdown("### 📖 第2部モード (2-Story Mode)")
-                    with gr.Row():
-                        second_mode_dropdown = gr.Dropdown(
-                            label="第2部のモード (オプション)",
-                            choices=["なし"] + list(RESEARCH_MODE_MAP.keys()),
-                            value="なし",
-                            info="第2部で異なるリサーチモードを使用します",
-                            scale=1,
+                        with gr.Accordion("📂 リサーチデータのインポート（リサーチAPIをスキップ）", open=False):
+                            gr.Markdown(
+                                "過去に生成した `research_brief.json` を指定すると、"
+                                "Perplexity APIの呼び出しをスキップしてコストゼロでリサーチフェーズを完了できます。"
+                                "指定しない場合は通常通りAPIでリサーチを実行します。"
+                            )
+                            research_import_file = gr.File(
+                                label="リサーチデータをインポート (任意・research_brief.json)",
+                                file_types=[".json"],
+                                type="filepath",
+                                value=None,
+                            )
+
+                        # 第2部モード設定
+                        gr.Markdown("### 📖 第2部モード (2-Story Mode)")
+                        with gr.Row():
+                            second_mode_dropdown = gr.Dropdown(
+                                label="第2部のモード (オプション)",
+                                choices=["なし"] + list(RESEARCH_MODE_MAP.keys()),
+                                value="なし",
+                                info="第2部で異なるリサーチモードを使用します",
+                                scale=1,
+                            )
+                            jingle_dropdown = gr.Dropdown(
+                                label="場面転換ジングル",
+                                choices=["なし", "デフォルト", "カスタムファイル"],
+                                value="なし",
+                                info="第1部と第2部の間に挿入するジングル",
+                                scale=1,
+                            )
+
+                        jingle_path_input = gr.Textbox(
+                            label="ジングルファイルパス",
+                            placeholder="assets/jingles/custom.mp3",
+                            visible=False,
+                            info="カスタムジングルファイルのパスを指定",
                         )
-                        jingle_dropdown = gr.Dropdown(
-                            label="場面転換ジングル",
-                            choices=["なし", "デフォルト", "カスタムファイル"],
-                            value="なし",
-                            info="第1部と第2部の間に挿入するジングル",
-                            scale=1,
-                        )
-                    
-                    jingle_path_input = gr.Textbox(
-                        label="ジングルファイルパス",
-                        placeholder="assets/jingles/custom.mp3",
-                        visible=False,
-                        info="カスタムジングルファイルのパスを指定",
-                    )
 
                 with gr.Group(elem_classes="group-container"):
                     gr.Markdown("### 🎨 クリエイティブ設定")
@@ -2289,6 +2334,7 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
         "jingle_path_input": jingle_path_input,
         "avoid_topics_input": avoid_topics_input,
         "research_import_file": research_import_file,
+        "verified_script_file": verified_script_file,
         "bg_preview": bg_preview,
         "selected_bg_filename": selected_bg_filename,
         "custom_bg_upload": custom_bg_upload,
@@ -2553,6 +2599,7 @@ def create_ui() -> gr.Blocks:
                 generator_components["jingle_dropdown"],
                 generator_components["jingle_path_input"],
                 generator_components["research_import_file"],
+                generator_components["verified_script_file"],
             ],
             outputs=[
                 generator_components["video_output"],
