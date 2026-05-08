@@ -58,17 +58,25 @@ class Segment(BaseModel):
         ...,
         description="セグメント種別 (Mac 側 SSOT: intro/deep_dive/conclusion の 3 値)",
     )
-    topic_index: int = Field(..., description="トピックインデックス (0 起点)")
+    # Mac 側 fixture では intro / conclusion で None になるため Optional
+    topic_index: Optional[int] = Field(
+        default=None,
+        description="トピックインデックス (deep_dive では 0 起点、intro/conclusion では None)",
+    )
     title: str = Field(..., min_length=1, description="セグメントタイトル (chapter 表示等で使用)")
     turns: List[Turn] = Field(..., min_length=1, description="ターンリスト (最低 1 件)")
 
 
 class KeyClaim(BaseModel):
-    """show_spec の key_claims 要素 (Mac 側 SSOT、Windows 側では参照のみ)"""
+    """show_spec の key_claims 要素 (Mac 側 SSOT、Windows 側では参照のみ)。
+
+    Mac 側 fixture では confidence は文字列の場合もある (例: "medium")。
+    Windows 側では show_spec は使用しないため、ここは Any で寛容に受ける。
+    """
     text: str
     source_idx: Optional[int] = None
     source_tier: Optional[str] = None
-    confidence: Optional[float] = None
+    confidence: Optional[Any] = None  # Mac 側で str / float のいずれもありうる
 
 
 class TopicSpec(BaseModel):
