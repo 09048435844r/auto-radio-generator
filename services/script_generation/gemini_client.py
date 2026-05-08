@@ -1,7 +1,14 @@
-"""Gemini APIを使用した台本生成クライアント"""
+"""Gemini APIを使用した台本生成クライアント
+
+⚠️ Deprecated (Step 3, 2026-05-09):
+本モジュールは旧 LLM 経路の一部です。Step 4 (v2) で完全削除予定。
+新規ユーザーは Mac 側 radio_director の VerifiedScript JSON を `--phase external`
+または Gradio UI の「外部台本モード」アコーディオンから読み込むことを推奨します。
+"""
 import json
 import math
 import re
+import warnings
 from pathlib import Path
 from typing import Optional
 
@@ -160,17 +167,28 @@ class GeminiClient(IScriptGenerator):
     
     async def generate(self, theme: str, research_data: Optional[ResearchResult] = None, avoid_topics: Optional[str] = None, excluded_topics: Optional[str] = None) -> Script:
         """テーマとリサーチデータに基づいて台本を生成する
-        
+
+        ⚠️ Deprecated (Step 3, 2026-05-09): Step 4 (v2) で削除予定の旧 LLM 経路。
+        外部台本モード (radio_director の VerifiedScript JSON) を推奨。
+        関数 level で warn することで import 時の汚染を避け、実際に呼ばれた時のみ警告。
+
         Args:
             theme: 台本のテーマ
             research_data: リサーチ結果（オプション）
             avoid_topics: 避けてほしい話題（オプション）
             excluded_topics: 除外する話題（第2部モード用、オプション）
-        
+
         Note:
             API使用量は self.last_usage で取得可能
         """
-        
+        # Step 3: 旧 LLM 経路の deprecated 警告 (関数 level、実際に呼ばれた時のみ)
+        warnings.warn(
+            "GeminiClient.generate は Step 4 (v2) で削除予定の旧 LLM 経路です。"
+            "外部台本モード (radio_director の VerifiedScript JSON) を推奨します。",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         # Mock Mode Check
         mock_mode = self.config.yaml.dev.mock_mode if hasattr(self.config.yaml, 'dev') else False
         if mock_mode:
