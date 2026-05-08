@@ -290,6 +290,10 @@ python main.py --phase render --session 20260404_065500
 # 外部ファイルから読み込んで実行
 python main.py --phase script --research-brief workspace/20260404_065500/research_brief.json
 python main.py --phase render --script workspace/20260404_065500/script_artifact.json
+
+# 🎬 外部台本モード（推奨、Step 3 / 2026-05-09 追加）
+# Mac 側 radio_director の VerifiedScript JSON で動画生成のみを実行。LLM コスト ¥0
+python main.py --phase external --verified-script output/imports/run_001/verified_script.json
 ```
 
 **パイプライン分離の利点**:
@@ -297,6 +301,74 @@ python main.py --phase render --script workspace/20260404_065500/script_artifact
 - **コスト削減**: 全体を再実行せず、特定フェーズのみを修正・再実行
 - **柔軟な開発**: 各フェーズを独立して改善・テスト可能
 - **セッション管理**: `workspace/{session_id}/` 配下に中間成果物を永続化
+
+## 🎬 外部台本モード (Step 3 / 2026-05-09)
+
+Mac Studio 側 `radio_director` パイプラインが生成する **VerifiedScript JSON** を
+入力として、Phase 1 (リサーチ計画) と Phase 2 (台本生成) を**完全 bypass** し、
+動画生成 (VOICEVOX → FFmpeg → NVENC) のみを実行する経路。
+
+### 設計コンセプト
+
+- **SSOT 分離**: Mac 側で台本品質を担保 → Windows 側は動画化に専念
+- **コスト ¥0**: Gemini / Perplexity API は一切呼ばれない (旧 LLM 経路の `@deprecated` 警告で識別可能)
+- **手動レビュー**: VerifiedScript JSON を Mac から手動コピーすることで人間レビュー工程を確保
+
+### 使い方
+
+#### Gradio UI から
+1. `output/imports/<run_id>/verified_script.json` に Mac 側 VerifiedScript を配置
+2. Generator タブの「🎬 外部台本モード（推奨 / VerifiedScript JSON）」アコーディオンを展開
+3. ファイルピッカーで JSON を選択
+4. 「動画を生成する」ボタンで実行
+
+#### CLI から
+```bash
+python main.py --phase external --verified-script output/imports/run_001/verified_script.json
+```
+
+### VerifiedScript JSON の構造
+
+Mac 側 `radio_director` の SSOT 仕様 (詳細は `docs/step3_implementation_plan.md` 参照):
+
+```json
+{
+  "script": {
+    "show_spec": { ... },
+    "segments": [
+      {"segment_type": "intro", "title": "...", "turns": [{"speaker": "A", "text": "..."}, ...]},
+      {"segment_type": "deep_dive", "topic_index": 0, "title": "...", "turns": [...]},
+      ...,
+      {"segment_type": "conclusion", "title": "...", "turns": [...]}
+    ],
+    "metrics": { ... }
+  },
+  "metrics": { ... },
+  "warnings": [ ... ],
+  "metadata": {
+    "title": "動画タイトル",
+    "thumbnail_title": "短縮 (15字以内)",
+    "description": "概要文 (50〜2000字)",
+    "hashtags": ["#タグ1", "#タグ2", "#タグ3"],
+    "chapters": [{"timestamp": "0:00", "title": "イントロ"}, ...],
+    "references": []
+  }
+}
+```
+
+### Step 4 (v2) で削除予定の項目
+
+外部台本モードでの動画生成が連続 10 回以上フォールバック発動なしで成功した時点で、
+以下を物理削除する:
+
+- `services/research/` (PerplexityResearcher、Step 3 では `@deprecated`)
+- `services/script_generation/` のうち Gemini 経路 (GeminiClient.generate)
+- `services/cost_calculator.py`
+- `core/interfaces/script_generator.py`、`researcher.py`
+- `core/models/usage.py` の `GeminiUsage` / `PerplexityUsage` 部分
+- 旧 Generator タブ UI (theme/research_mode/avoid_topics 入力欄、Deprecated アコーディオン全体)
+- `main.py` の旧 phase 経路 (`--phase research/script/all`)
+- `run_workflow_sync` の theme 引数など旧経路向けパラメータ
 
 ## 🔑 YouTube API のセットアップ
 
