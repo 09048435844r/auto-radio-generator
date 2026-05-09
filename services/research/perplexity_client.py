@@ -1,7 +1,14 @@
-"""Perplexity APIを使用したリサーチクライアント"""
+"""Perplexity APIを使用したリサーチクライアント
+
+⚠️ Deprecated (Step 3, 2026-05-09):
+本モジュールは旧 LLM 経路の一部です。Step 4 (v2) で完全削除予定。
+新規ユーザーは Mac 側 radio_director の VerifiedScript JSON を `--phase external`
+または Gradio UI の「外部台本モード」アコーディオンから読み込むことを推奨します。
+"""
 import asyncio
 import os
 import json
+import warnings
 from pathlib import Path
 from urllib.parse import urlparse
 from openai import OpenAI
@@ -26,8 +33,18 @@ class PerplexityResearcher(IResearcher):
     PERPLEXITY_BASE_URL = "https://api.perplexity.ai"
     
     def __init__(self, config: AppConfig):
+        # Step 3 (2026-05-09): 旧 LLM 経路の deprecated 警告。
+        # Step 4 (v2) で本クラスは物理削除予定。
+        # 関数 level (init) で warn することで import 時の汚染を避け、
+        # 実際に旧経路が使われた時のみ警告する。
+        warnings.warn(
+            "PerplexityResearcher は Step 4 (v2) で削除予定の旧 LLM 経路です。"
+            "外部台本モード (radio_director の VerifiedScript JSON) を推奨します。",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         super().__init__(config)
-        
+
         api_key = config.env.perplexity_api_key
         if not api_key:
             raise ValueError("PERPLEXITY_API_KEY が設定されていません")

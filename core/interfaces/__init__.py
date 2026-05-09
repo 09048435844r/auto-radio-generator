@@ -3,6 +3,7 @@ from .script_generator import IScriptGenerator
 from .script_orchestrator import IScriptOrchestrator
 from .audio_synthesizer import IAudioSynthesizer, SynthesisResult, ChapterMarker, SegmentTiming
 from .video_renderer import IVideoRenderer, RenderResult
+from .script_loader import IScriptLoader
 from .llm_port import (
     ILLMPort,
     LLMRequest,
@@ -26,6 +27,7 @@ __all__ = [
     "SegmentTiming",
     "IVideoRenderer",
     "RenderResult",
+    "IScriptLoader",
     "ILLMPort",
     "LLMRequest",
     "LLMResponse",

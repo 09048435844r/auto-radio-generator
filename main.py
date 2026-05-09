@@ -1,10 +1,16 @@
 """自動ラジオ動画生成システム - メインエントリーポイント
 
 パイプライン分離アーキテクチャ対応:
-- --phase all: 一気通貫モード（デフォルト）
-- --phase research: リサーチフェーズのみ実行
-- --phase script: 台本作成フェーズのみ実行
+- --phase all: 一気通貫モード（デフォルト、旧 LLM 経路）
+- --phase research: リサーチフェーズのみ実行（旧 LLM 経路）
+- --phase script: 台本作成フェーズのみ実行（旧 LLM 経路）
 - --phase render: 動画生成フェーズのみ実行
+- --phase external: 外部台本モード（推奨）
+
+Step 3 (2026-05-09): Mac 側 radio_director の VerifiedScript JSON を読み込み、
+Phase 1 (planning) + Phase 2 (scripting) を完全 bypass する `--phase external` を追加。
+旧 LLM 経路 (research/script/all) は deprecated 注記付きで残置、Step 4 (v2) で
+削除予定。
 """
 import argparse
 import asyncio
@@ -57,15 +63,22 @@ Examples:
   # 外部ファイルから読み込んで実行
   python main.py --phase script --research-brief workspace/20260404_065500/research_brief.json
   python main.py --phase render --script workspace/20260404_065500/script_artifact.json
+
+  # Step 3 (2026-05-09): 外部台本モード（推奨）
+  python main.py --phase external --verified-script output/imports/run_001/verified_script.json
 """
     )
-    
-    # Phase selection
+
+    # Phase selection (external is Step 3 推奨経路)
     parser.add_argument(
         "--phase",
-        choices=["all", "research", "script", "render"],
+        choices=["all", "research", "script", "render", "external"],
         default="all",
-        help="実行するフェーズ (all: 全フェーズ, research: リサーチのみ, script: 台本作成のみ, render: 動画生成のみ)"
+        help=(
+            "実行するフェーズ "
+            "(all: 全フェーズ, research: リサーチのみ, script: 台本作成のみ, "
+            "render: 動画生成のみ, external: 外部台本モード [推奨])"
+        )
     )
     
     # Session management
@@ -86,6 +99,13 @@ Examples:
         "--script",
         type=str,
         help="RadioScriptArtifactファイルのパス（--phase render時に使用）"
+    )
+
+    # Step 3: VerifiedScript path (for --phase external)
+    parser.add_argument(
+        "--verified-script",
+        type=str,
+        help="VerifiedScript JSON のパス（--phase external 時に必須）"
     )
     
     # Theme (for new execution)
@@ -266,6 +286,62 @@ async def main():
             border_style="green"
         ))
     
+    elif args.phase == "external":
+        # Step 3 (2026-05-09): 外部台本モード（推奨）
+        # Mac 側 radio_director の VerifiedScript JSON を読み込み、
+        # Phase 1 (planning) + Phase 2 (scripting) を完全 bypass。
+        # その後 Phase 3 (production) を実行する。
+        if not args.verified_script:
+            console.print("[red]Error: --verified-script <path> is required for --phase external[/red]")
+            return
+
+        from services.pipeline import execute_external_script_phase
+
+        ext_phase_result = await execute_external_script_phase(
+            verified_script_path=Path(args.verified_script),
+            session_manager=session_manager,
+            config=app_config,
+            callbacks=callbacks,
+        )
+
+        # ExternalScriptPhaseResult を RadioScriptArtifact 互換に組み立てて
+        # 既存 execute_production_phase を呼ぶ
+        script_artifact = RadioScriptArtifact(
+            session_id=session_manager.session_id,
+            script=ext_phase_result.script,
+            segments=[seg.model_dump() for seg in ext_phase_result.segments],
+            visual_identity=None,
+            research_brief_path=None,
+            llm_usage=None,
+        )
+
+        result = await execute_production_phase(
+            script_artifact=script_artifact,
+            session_manager=session_manager,
+            config=app_config,
+            project_root=PROJECT_ROOT,
+            callbacks=callbacks,
+        )
+
+        console.print("\n" + "=" * 50)
+        console.print(Panel.fit(
+            f"""[bold green]✓ 動画生成完了！（外部台本モード / LLM コスト ¥0）[/bold green]
+
+[bold]入力 VerifiedScript:[/bold] {args.verified_script}
+
+[bold]出力ファイル:[/bold]
+  📹 動画: {result.video_path}
+  🎵 音声: {result.audio_path}
+  📄 字幕: {result.subtitle_path}
+
+[bold]動画情報:[/bold]
+  ⏱️ 長さ: {result.duration_sec:.1f}秒
+  📦 サイズ: {result.file_size_mb:.1f}MB
+  🎬 タイトル: {script_artifact.script.title}""",
+            title="完了 (Step 3: 外部台本モード)",
+            border_style="green"
+        ))
+
     elif args.phase == "render":
         # Production phase only
         if args.script:
