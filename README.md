@@ -1,9 +1,52 @@
-# 🎙️ 自動ラジオ動画生成システム v3.6.1
+# 🎙️ 自動ラジオ動画生成システム v4.0.0 (Step 4 v2)
 
-Perplexity + **複数LLM (Gemini/OpenAI/Anthropic)** + VOICEVOX + FFmpeg + **FLUX.1** を連携し、
-リサーチから台本生成、音声合成、動画レンダリング、YouTube投稿用メタデータ作成までを一気通貫で自動化するプロジェクトです。
+VOICEVOX + FFmpeg + **FLUX.1** + **外部台本モード（Mac 側 `radio_director` 連携）** で
+動画生成を行うプロジェクトです。Step 4 v2 (2026-05-10) で **Gemini 自動台本生成経路を物理削除**し、
+外部台本モード（VerifiedScript JSON 受け取り）を唯一の自動経路に確定しました。
 
-## 🔧 最新の修正（Unreleased）
+## 🆕 Step 4 v2 (2026-05-10) - Gemini 自動経路の物理削除
+
+外部台本モード (`--phase external`) を Generator タブの自動経路として確定。Perplexity リサーチ
+ベンチマーク経路と HITL タブは保持（@deprecated 注記付き）。
+
+### 削除済み機能
+- **Gemini 直叩き台本生成**: `services/script_generation/gemini_client.py` 物理削除
+- **Gemini Adapter**: `services/script_generation/adapters/gemini_adapter.py` 物理削除
+- **GeminiUsage 後方互換 alias**: `core/models/usage.py` から削除（`LLMUsage` に統一）
+- **CLI: `--phase all` / `--phase script`**: `main.py` から削除（外部台本モードに集約）
+- **CLI: `--provider` / `--research-brief`**: 不要となったため削除
+- **UI: 旧 LLM 経路アコーディオン**: app.py から物理削除
+- **UI: llm_provider / second_mode / jingle_dropdown**: 物理削除
+- **workflow.py: `generate_video_workflow` / `_execute_gradio_scripting_phase` /
+  `execute_planning_phase`**: Phase 1+2 関連関数を物理削除
+- **workflow.py: 2-Story Mode**: `_merge_scripts` / `_create_script_full_transcript` 削除
+
+### 保持された機能（Yuru-Stoic 方針）
+- **外部台本モード**: 推奨経路（`--phase external --verified-script <path>` / Gradio UI）
+- **Perplexity リサーチ単独実行**: `--phase research` ベンチマーク用（AI 検索計画作成は廃止し
+  `queries=[theme]` のシンプル経路に変更）
+- **HITL タブ**: 完全動作。`services/pipeline/scripting_phase.py` + `orchestrator.py` +
+  agents（topic_curator / segment_generator / metadata_generator / fact_extractor /
+  fact_checker / show_runner）を @deprecated 注記付きで保持
+- **provider-agnostic adapter**: OpenAI / Anthropic / Ollama を保持（@deprecated 注記）
+
+### 推奨経路
+```bash
+# 外部台本モード（Mac 側 radio_director の VerifiedScript JSON）
+python main.py --phase external --verified-script output/imports/run_001/verified_script.json
+
+# Perplexity リサーチ単独実行（ベンチマーク用）
+python main.py --phase research --theme "テスト" --mode trivia
+
+# 既存セッションから動画生成のみ
+python main.py --phase render --session 20260404_065500
+```
+
+詳細: `docs/step4_implementation_plan.md`
+
+---
+
+## 🔧 過去の修正（Unreleased / Step 3 まで）
 
 ### 動画品質の改善
 - ✅ **動画途切れ問題の修正**: 末尾5秒が欠落する問題を解決（音声497.6秒 → 動画497.6秒に一致）
