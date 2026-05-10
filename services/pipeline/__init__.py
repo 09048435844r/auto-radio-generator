@@ -2,6 +2,8 @@
 
 各フェーズを独立実行可能なサービスとして提供する。
 Step 3 (2026-05-09): 外部台本モード用 phase を追加。
+Step 4 v2 (2026-05-10): execute_curation_only / execute_scripting_phase は HITL 経路の
+ためにのみ残置（@deprecated）。新規呼び出しは外部台本モードを推奨。
 """
 from services.pipeline.research_phase import execute_research_phase
 from services.pipeline.scripting_phase import execute_scripting_phase, execute_curation_only

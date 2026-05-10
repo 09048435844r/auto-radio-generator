@@ -1,4 +1,11 @@
-"""台本作成フェーズ実行サービス
+"""台本作成フェーズ実行サービス（@deprecated / HITL 用に残置）
+
+Step 4 v2 (2026-05-10): Generator タブの自動経路 + main.py --phase script は削除済み。
+このモジュールが提供する execute_fact_extraction_only / execute_curation_only /
+execute_scripting_phase は **HITL タブからのみ呼ばれる**ため物理保持されている。
+
+外部台本モード（VerifiedScript JSON）が推奨経路。本モジュールの全 public 関数は
+将来削除候補（Step 5 で HITL 自体の見直しが入る場合に再評価）。
 
 ResearchBriefを入力として台本を生成し、RadioScriptArtifactを生成する。
 """
