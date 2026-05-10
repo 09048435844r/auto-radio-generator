@@ -20,12 +20,13 @@ FIXTURE_PATH = Path(__file__).parent / "fixtures" / "verified_script_sample.json
 # ---------------------------------------------------------------------------
 
 def test_main_py_has_phase_external_choice():
+    """Step 4 v2 (2026-05-10): --phase choices から 'all'/'script' を削除し
+    'research'/'render'/'external' のみ残す"""
     src = MAIN_PY_PATH.read_text(encoding="utf-8")
-    # argparse choices に "external" が含まれる
     assert re.search(
-        r'choices=\["all",\s*"research",\s*"script",\s*"render",\s*"external"\]',
+        r'choices=\["research",\s*"render",\s*"external"\]',
         src,
-    ), "main.py の --phase choices に 'external' が含まれていない"
+    ), "main.py の --phase choices が Step 4 v2 仕様 (research/render/external) と一致しない"
 
 
 def test_main_py_has_verified_script_argument():
