@@ -88,11 +88,11 @@ class TestGenerateVideoMock:
         )
         
         # generate_video_mock を実行
+        # Step 4 v2 (2026-05-10): llm_provider / second_mode / jingle_* 引数は削除済み
         mock_progress = Mock()
         result = generate_video_mock(
             theme="テストテーマ",
             research_mode="trivia",
-            llm_provider="gemini",
             background_image="test_bg.png",
             bgm_file="test_bgm.mp3",
             bgm_volume=0.5,
@@ -102,18 +102,15 @@ class TestGenerateVideoMock:
             avoid_topics="テスト,サンプル",
             upload_to_youtube=False,
             footer_text="フッター",
-            second_mode="なし",
-            jingle_choice="なし",
-            jingle_custom_path="",
             progress=mock_progress
         )
-        
+
         # 戻り値の検証
         assert isinstance(result, tuple)
         assert len(result) == 7, f"Expected 7 elements, got {len(result)}"
-        
+
         video_path, log_text, cost_text, title, description, youtube_url, thumbnail_state = result
-        
+
         assert video_path == "mock_video.mp4"
         assert log_text == "テストログ"
         assert cost_text == "テストコスト"
@@ -121,7 +118,7 @@ class TestGenerateVideoMock:
         assert description == "テスト説明"
         assert youtube_url == "https://youtube.com/watch?v=test"
         assert isinstance(thumbnail_state, ThumbnailRegenerationState)
-        
+
         # Stateの内容検証
         assert thumbnail_state.theme == "モックテーマ"
         assert thumbnail_state.script_summary == "モック要約"
@@ -129,12 +126,11 @@ class TestGenerateVideoMock:
         assert thumbnail_state.background_path == "mock/bg.png"
         assert thumbnail_state.base_title == "モック元タイトル"
         assert thumbnail_state.generation_count == 0
-        
+
         # generate_video が正しい引数で呼ばれたことを確認
         mock_generate_video.assert_called_once_with(
             theme="テストテーマ",
             research_mode="trivia",
-            llm_provider="gemini",
             background_image="test_bg.png",
             bgm_file="test_bgm.mp3",
             bgm_volume=0.5,
@@ -145,9 +141,6 @@ class TestGenerateVideoMock:
             avoid_topics="テスト,サンプル",
             upload_to_youtube=False,
             footer_text="フッター",
-            second_mode="なし",
-            jingle_choice="なし",
-            jingle_custom_path="",
             progress=mock_progress
         )
 

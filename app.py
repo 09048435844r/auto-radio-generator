@@ -66,36 +66,6 @@ from urllib.parse import urlparse
 import asyncio
 
 
-# デフォルトジングル設定
-DEFAULT_JINGLES = {
-    "デフォルト": "assets/jingles/default.mp3",
-    "明るい": "assets/jingles/bright.mp3",
-    "シリアス": "assets/jingles/serious.mp3",
-    "クール": "assets/jingles/cool.mp3",
-}
-
-
-def resolve_jingle_path(jingle_choice: str, custom_path: str = "") -> Optional[str]:
-    """ジングル選択に基づいてファイルパスを解決"""
-    if jingle_choice == "なし" or jingle_choice == "":
-        return None
-    elif jingle_choice == "カスタムファイル":
-        if custom_path and Path(custom_path).exists():
-            return custom_path
-        else:
-            return None
-    elif jingle_choice in DEFAULT_JINGLES:
-        default_path = PROJECT_ROOT / DEFAULT_JINGLES[jingle_choice]
-        return str(default_path) if default_path.exists() else None
-    else:
-        return None
-
-
-def toggle_jingle_path_visibility(jingle_choice: str) -> str:
-    """ジングルパス入力の表示/非表示を切り替え"""
-    return gr.update(visible=(jingle_choice == "カスタムファイル"))
-
-
 async def check_api_health() -> tuple[str, str, str]:
     """Check API health for Gemini, Perplexity, and Ollama with actual models from config"""
     app_config = load_config()
@@ -440,7 +410,6 @@ def _format_factcheck_markdown(output_dir: Optional[str | Path]) -> str:
 def generate_video(
     theme: str,
     research_mode: str,
-    llm_provider: str,
     background_image: str,
     bgm_file: str,
     bgm_volume: float,
@@ -451,45 +420,52 @@ def generate_video(
     upload_to_youtube: bool = False,
     footer_text: str = "",
     use_mock: bool = False,
-    second_mode: str = "なし",
-    jingle_choice: str = "なし",
-    jingle_custom_path: str = "",
     research_import_filepath: Optional[str] = None,
     verified_script_filepath: Optional[str] = None,
     progress=gr.Progress()
 ) -> tuple[str | None, str, str, str, str, str, Optional[ThumbnailRegenerationState], str]:
-    """動画生成を実行し、サムネイル再作成用Stateも返す
-    
+    """動画生成を実行し、サムネイル再作成用Stateも返す（外部台本モード前提）
+
+    Step 4 v2 (2026-05-10): Gemini 自動台本生成経路を削除。本関数は外部台本モード
+    (verified_script_filepath) もしくは Mock 実行のみをサポートする。
+
     Args:
-        theme: 動画のテーマ
-        research_mode: リサーチモード
-        llm_provider: LLMプロバイダー ("gemini" | "openai" | "anthropic")
+        theme: 動画のテーマ（外部台本モード時は VerifiedScript.metadata.title から復元される）
+        research_mode: リサーチモード（research_only_btn と共有のため受け取るが auto では未使用）
         background_image: 背景画像ファイル名
         bgm_file: BGMファイル名
         bgm_volume: BGM音量 (0.0-0.5)
         fade_time: フェードイン/アウト時間 (秒)
         speed_scale: 音声スピード (0.8-1.5)
         enable_spectrum: スペクトラム表示
-        avoid_topics: 避けてほしい話題（Negative Prompt）
+        avoid_topics: research_import 時の除外要件メモ用
         upload_to_youtube: YouTubeへ自動アップロードするか（UI優先）
         footer_text: 概要欄フッター文（UI入力優先）
         use_mock: Mockモードを使用するか
-        second_mode: 第2部のリサーチモード
-        jingle_choice: 場面転換ジングルの選択
-        jingle_custom_path: カスタムジングルファイルのパス
+        research_import_filepath: research_brief.json のインポートパス（任意）
+        verified_script_filepath: 外部台本モード用の VerifiedScript JSON
         progress: Gradio進捗バー
-    
+
     Returns:
         (動画パス, ログ出力, コストレポート, タイトル, 概要欄, YouTube状態, ThumbnailRegenerationState)
     """
-    # 入力検証（リサーチインポート時 or 外部台本モード時はテーマ不要）
+    # 入力検証: 外部台本モード または mock または research_import のいずれか必須
     if (
-        (not theme or not theme.strip())
-        and not use_mock
+        not use_mock
         and not research_import_filepath
         and not verified_script_filepath
     ):
-        return None, "エラー: テーマを入力してください。", "", "", "", "YouTube: 未実行", None, _FACTCHECK_PLACEHOLDER
+        return (
+            None,
+            "エラー: 外部台本モード (VerifiedScript JSON) を指定してください。"
+            "Step 4 v2 で旧 LLM 自動経路は削除されました。",
+            "",
+            "",
+            "",
+            "YouTube: 未実行",
+            None,
+            _FACTCHECK_PLACEHOLDER,
+        )
 
     effective_theme = (
         theme.strip()
@@ -499,35 +475,20 @@ def generate_video(
             else ("External Script" if verified_script_filepath else "Imported Research")
         )
     )
-    
-    # ジングルパスを解決
-    jingle_path = resolve_jingle_path(jingle_choice, jingle_custom_path)
-    if jingle_choice != "なし" and not jingle_path:
-        append_log(f"[WARNING] ジングルファイルが見つかりません: {jingle_choice}")
-    
+
     # ログをクリア
     clear_logs()
     append_log("自動ラジオ動画生成システム v3.5.0")
     append_log("=" * 40)
-    
-    if second_mode != "なし":
-        append_log(f"[INFO] 第2部モード有効: {research_mode} → {second_mode}")
-    if jingle_path:
-        append_log(f"[INFO] ジングル有効: {jingle_choice} ({jingle_path})")
-    
-    # リサーチモードを変換
+
+    # リサーチモードを変換（research_import 経路で参照される可能性がある）
     mode = RESEARCH_MODE_MAP.get(research_mode)
-    second_mode_enum = RESEARCH_MODE_MAP.get(second_mode) if second_mode != "なし" else None
     enable_research = mode is not None
-    
-    # デバッグ: UIから渡されたllm_providerの値を確認
-    append_log(f"[DEBUG] UI llm_provider = {llm_provider}")
-    
+
     # オーバーライド設定を作成
     overrides = UIOverrides(
         research_mode=mode,
         enable_research=enable_research,
-        llm_provider=llm_provider,
         bgm_volume=bgm_volume,
         fade_in_sec=fade_time,
         fade_out_sec=fade_time,
@@ -536,19 +497,17 @@ def generate_video(
         background_image=background_image,
         bgm_file=bgm_file
     )
-    
-    append_log(f"[DEBUG] UIOverrides.llm_provider = {overrides.llm_provider}")
-    
+
     # 進捗表示用コールバック
     def log_callback(msg: str):
         append_log(msg)
-    
+
     def progress_callback(ratio: float, desc: str):
         progress(ratio, desc=desc)
 
     if use_mock and upload_to_youtube:
         append_log("[INFO] Mockモード実行のため、YouTubeアップロード設定は無効化されます")
-    
+
     # ワークフロー実行
     result: WorkflowResult = run_workflow_sync(
         theme=effective_theme,
@@ -559,8 +518,6 @@ def generate_video(
         avoid_topics=avoid_topics if avoid_topics and avoid_topics.strip() else None,
         upload_override=upload_to_youtube,
         footer_text_override=footer_text,
-        second_mode=second_mode_enum,
-        jingle_path=jingle_path,
         research_import_filepath=research_import_filepath or None,
         external_script_path=verified_script_filepath or None,
     )
@@ -648,7 +605,6 @@ def generate_video(
 def generate_video_mock(
     theme: str,
     research_mode: str,
-    llm_provider: str,
     background_image: str,
     bgm_file: str,
     bgm_volume: float,
@@ -658,15 +614,11 @@ def generate_video_mock(
     avoid_topics: str = "",
     upload_to_youtube: bool = False,
     footer_text: str = "",
-    second_mode: str = "なし",
-    jingle_choice: str = "なし",
-    jingle_custom_path: str = "",
     progress=gr.Progress()
 ) -> tuple[str | None, str, str, str, str, str, Optional[ThumbnailRegenerationState], str]:
     return generate_video(
         theme=theme,
         research_mode=research_mode,
-        llm_provider=llm_provider,
         background_image=background_image,
         bgm_file=bgm_file,
         bgm_volume=bgm_volume,
@@ -677,135 +629,8 @@ def generate_video_mock(
         avoid_topics=avoid_topics,
         upload_to_youtube=upload_to_youtube,
         footer_text=footer_text,
-        second_mode=second_mode,
-        jingle_choice=jingle_choice,
-        jingle_custom_path=jingle_custom_path,
         progress=progress,
     )
-
-
-def generate_script_only(
-    theme: str,
-    research_mode: str,
-    progress=gr.Progress()
-) -> tuple[str, str]:
-    """台本のみを生成してマニュアルタブに転送
-    
-    AIプロデューサー機能を使用した3ステッププロセス:
-    Step 0: AIが検索計画を作成
-    Step 1: 複数クエリで並列リサーチ
-    Step 2: 収集した情報を元に台本生成
-    
-    Args:
-        theme: 動画のテーマ
-        research_mode: リサーチモード
-        progress: Gradio進捗バー
-    
-    Returns:
-        (台本JSON, ログ出力)
-    """
-    import asyncio
-    from services.research import PerplexityResearcher
-    from services.script_generation import GeminiClient
-    
-    # ログをクリア
-    clear_logs()
-    append_log("🎬 AIプロデューサーモード")
-    append_log("=" * 40)
-    append_log("多角的深掘り検索で台本を生成します")
-    
-    # 入力検証
-    if not theme or not theme.strip():
-        return "", "エラー: テーマを入力してください。"
-    
-    try:
-        # 設定読み込み
-        app_config = load_config(PROJECT_ROOT)
-        
-        # リサーチモードを変換
-        mode = RESEARCH_MODE_MAP.get(research_mode)
-        
-        async def generate():
-            # Step 0: AIプロデューサーが検索計画を作成
-            research_result = None
-            script_generator = None
-            
-            if mode:
-                progress(0.1, desc="Step 0: AIが検索計画を作成中...")
-                append_log(f"\n== Step 0: 検索計画作成 ==")
-                append_log(f"テーマ: {theme.strip()}")
-                
-                script_generator = GeminiClient(app_config)
-                plan = await script_generator.create_research_plan(theme.strip(), mode, instruction=None)
-                
-                append_log(f"\n✓ 検索計画作成完了")
-                append_log(f"切り口: {plan.angle}")
-                append_log(f"\n検索クエリ:")
-                for i, q in enumerate(plan.queries, 1):
-                    append_log(f"  {i}. {q}")
-                
-                # Step 1: 複数クエリで並列リサーチ
-                progress(0.3, desc="Step 1: 並列リサーチ中...")
-                append_log(f"\n== Step 1: 並列リサーチ ({research_mode}) ==")
-                
-                researcher = PerplexityResearcher(app_config)
-                research_result = await researcher.research_multi(plan.queries, mode)
-                
-                append_log(f"\n✓ 並列リサーチ完了")
-                append_log(f"収集した情報: {len(research_result.content)}文字")
-            else:
-                append_log("リサーチなしで台本生成")
-            
-            # Step 2: 収集した情報を元に台本生成
-            progress(0.7, desc="Step 2: 台本生成中...")
-            append_log(f"\n== Step 2: 台本生成 ==")
-            
-            if not script_generator:
-                script_generator = GeminiClient(app_config)
-            
-            script = script_generator.generate(
-                theme=theme.strip(),
-                research_data=research_result
-            )
-            
-            append_log(f"\n✓ 台本生成完了")
-            append_log(f"  タイトル: {script.title}")
-            append_log(f"  セリフ数: {len(script.dialogue)}")
-            
-            return script
-        
-        # 非同期実行
-        script = asyncio.run(generate())
-        
-        # 台本をJSONに変換
-        script_dict = {
-            "title": script.title,
-            "thumbnail_title": script.thumbnail_title,
-            "description": script.description,
-            "dialogue": [
-                {
-                    "speaker": line.speaker,
-                    "text": line.text,
-                    "section": line.section
-                }
-                for line in script.dialogue
-            ]
-        }
-        script_json = json.dumps(script_dict, ensure_ascii=False, indent=2)
-        
-        progress(1.0, desc="完了!")
-        append_log("\n" + "=" * 40)
-        append_log("✓ AIプロデューサーモード完了")
-        append_log("マニュアル制作タブの Step B に移動して台本を編集できます")
-        
-        return script_json, get_logs()
-        
-    except Exception as e:
-        error_msg = f"台本生成中にエラーが発生しました: {str(e)}"
-        append_log(f"\n❌ {error_msg}")
-        import traceback
-        append_log(f"\n詳細:\n{traceback.format_exc()}")
-        return "", get_logs()
 
 
 def research_only(
@@ -2010,90 +1835,48 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
                         value=None,
                     )
 
-                # 旧 LLM 経路 (Deprecated: v2 で削除予定)
-                # 既存コンポーネントの ID は維持し、event handler の配線も変更しない。
-                # アコーディオンで包むだけで折りたたみ表示にする。
+                # 🔍 Perplexity リサーチオプション（ベンチマーク用 / research_only_btn 用）
+                # Step 4 v2 (2026-05-10): 旧 LLM 自動経路 (Phase 1+2) は削除済み。
+                # ここに残るのは Perplexity リサーチ単独実行（research_only_btn）と、
+                # research_brief.json のインポート機能のみ。
                 with gr.Accordion(
-                    "⚠️ 旧 LLM 経路（Deprecated: v2 で削除予定 / Phase 1+2 自動実行）",
+                    "🔍 Perplexity リサーチオプション（ベンチマーク・リサーチ単独実行用）",
                     open=False,
                 ):
                     gr.Markdown(
-                        "外部台本モードを使わない場合のみ展開してください。"
-                        "Gemini + Perplexity でリサーチと台本生成を行う旧経路です。"
+                        "Perplexity API でリサーチのみを実行する（`🔍 リサーチのみ実行` ボタン用）か、"
+                        "過去の `research_brief.json` をインポートして外部台本モードと併用する場合に展開してください。"
                     )
 
-                    with gr.Group(elem_classes="group-container"):
-                        gr.Markdown("### 📋 企画設定")
-
-                        with gr.Row():
-                            theme_input = gr.Textbox(
-                                label="テーマ",
-                                placeholder="例: AIの未来について / 最近のゲーム事情 / 宇宙開発の最新動向",
-                                lines=2,
-                                info="動画で話すテーマを入力してください（必須）",
-                                scale=2,
-                            )
-                            research_mode_dropdown = gr.Dropdown(
-                                label="リサーチモード",
-                                choices=list(RESEARCH_MODE_MAP.keys()),
-                                value=saved_settings.research_mode,
-                                info="Perplexityによるリサーチの方向性を選択",
-                                scale=1,
-                            )
-
-                        with gr.Row():
-                            llm_provider_dropdown = gr.Dropdown(
-                                label="🤖 LLMプロバイダー",
-                                choices=["gemini", "openai", "anthropic", "ollama"],
-                                value="ollama",
-                                info="台本生成に使用するAIモデルを選択",
-                                scale=1,
-                            )
-
-                        avoid_topics_input = gr.Textbox(
-                            label="避けてほしい話題 (オプション)",
-                            placeholder="例: 食事療法 運動不足 (スペースやカンマで区切って複数入力可)",
-                            lines=1,
-                            info="台本に含めたくないトピックを指定できます",
+                    with gr.Row():
+                        theme_input = gr.Textbox(
+                            label="テーマ（リサーチ単独実行時のみ必須）",
+                            placeholder="例: AIの未来について / 最近のゲーム事情",
+                            lines=2,
+                            info="リサーチのみ実行時のテーマ（外部台本モード時は不要）",
+                            scale=2,
+                        )
+                        research_mode_dropdown = gr.Dropdown(
+                            label="リサーチモード",
+                            choices=list(RESEARCH_MODE_MAP.keys()),
+                            value=saved_settings.research_mode,
+                            info="Perplexity リサーチの方向性",
+                            scale=1,
                         )
 
-                        with gr.Accordion("📂 リサーチデータのインポート（リサーチAPIをスキップ）", open=False):
-                            gr.Markdown(
-                                "過去に生成した `research_brief.json` を指定すると、"
-                                "Perplexity APIの呼び出しをスキップしてコストゼロでリサーチフェーズを完了できます。"
-                                "指定しない場合は通常通りAPIでリサーチを実行します。"
-                            )
-                            research_import_file = gr.File(
-                                label="リサーチデータをインポート (任意・research_brief.json)",
-                                file_types=[".json"],
-                                type="filepath",
-                                value=None,
-                            )
+                    avoid_topics_input = gr.Textbox(
+                        label="避けてほしい話題 (オプション)",
+                        placeholder="例: 食事療法 運動不足",
+                        lines=1,
+                        info="リサーチ実行時の除外要件",
+                    )
 
-                        # 第2部モード設定
-                        gr.Markdown("### 📖 第2部モード (2-Story Mode)")
-                        with gr.Row():
-                            second_mode_dropdown = gr.Dropdown(
-                                label="第2部のモード (オプション)",
-                                choices=["なし"] + list(RESEARCH_MODE_MAP.keys()),
-                                value="なし",
-                                info="第2部で異なるリサーチモードを使用します",
-                                scale=1,
-                            )
-                            jingle_dropdown = gr.Dropdown(
-                                label="場面転換ジングル",
-                                choices=["なし", "デフォルト", "カスタムファイル"],
-                                value="なし",
-                                info="第1部と第2部の間に挿入するジングル",
-                                scale=1,
-                            )
-
-                        jingle_path_input = gr.Textbox(
-                            label="ジングルファイルパス",
-                            placeholder="assets/jingles/custom.mp3",
-                            visible=False,
-                            info="カスタムジングルファイルのパスを指定",
-                        )
+                    research_import_file = gr.File(
+                        label="リサーチデータをインポート (任意・research_brief.json)",
+                        file_types=[".json"],
+                        type="filepath",
+                        value=None,
+                    )
 
                 with gr.Group(elem_classes="group-container"):
                     gr.Markdown("### 🎨 クリエイティブ設定")
@@ -2328,10 +2111,6 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
         # 全自動モードコンポーネント
         "theme_input": theme_input,
         "research_mode_dropdown": research_mode_dropdown,
-        "llm_provider_dropdown": llm_provider_dropdown,
-        "second_mode_dropdown": second_mode_dropdown,
-        "jingle_dropdown": jingle_dropdown,
-        "jingle_path_input": jingle_path_input,
         "avoid_topics_input": avoid_topics_input,
         "research_import_file": research_import_file,
         "verified_script_file": verified_script_file,
@@ -2571,20 +2350,12 @@ def create_ui() -> gr.Blocks:
             outputs=[settings_components["settings_status"]],
         )
         
-        # ジングル選択時のイベントハンドラ
-        generator_components["jingle_dropdown"].change(
-            fn=toggle_jingle_path_visibility,
-            inputs=[generator_components["jingle_dropdown"]],
-            outputs=[generator_components["jingle_path_input"]],
-        )
-        
         # 動画生成
         generator_components["generate_btn"].click(
             fn=generate_video,
             inputs=[
                 generator_components["theme_input"],
                 generator_components["research_mode_dropdown"],
-                generator_components["llm_provider_dropdown"],
                 generator_components["selected_bg_filename"],
                 generator_components["bgm_dropdown"],
                 generator_components["bgm_volume_slider"],
@@ -2595,9 +2366,6 @@ def create_ui() -> gr.Blocks:
                 generator_components["youtube_upload_checkbox"],  # 動画生成タブのチェックボックスを使用
                 settings_components["footer_text_input"],
                 gr.Checkbox(value=False, visible=False),  # use_mock placeholder
-                generator_components["second_mode_dropdown"],
-                generator_components["jingle_dropdown"],
-                generator_components["jingle_path_input"],
                 generator_components["research_import_file"],
                 generator_components["verified_script_file"],
             ],
@@ -2643,7 +2411,6 @@ def create_ui() -> gr.Blocks:
             inputs=[
                 generator_components["theme_input"],
                 generator_components["research_mode_dropdown"],
-                generator_components["llm_provider_dropdown"],
                 generator_components["selected_bg_filename"],
                 generator_components["bgm_dropdown"],
                 generator_components["bgm_volume_slider"],
@@ -2653,9 +2420,6 @@ def create_ui() -> gr.Blocks:
                 generator_components["avoid_topics_input"],
                 settings_components["upload_to_youtube_checkbox"],
                 settings_components["footer_text_input"],
-                generator_components["second_mode_dropdown"],
-                generator_components["jingle_dropdown"],
-                generator_components["jingle_path_input"],
             ],
             outputs=[
                 generator_components["video_output"],

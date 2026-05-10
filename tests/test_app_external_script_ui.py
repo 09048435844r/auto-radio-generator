@@ -33,22 +33,39 @@ def test_app_has_verified_script_file_picker():
     )
 
 
-def test_app_old_llm_path_is_in_deprecated_accordion():
-    """旧 LLM 経路 (theme_input / research_mode_dropdown / avoid_topics_input) が
-    'Deprecated: v2 で削除予定' を header に持つアコーディオンの内側に位置する"""
+def test_app_perplexity_options_accordion_replaces_deprecated_accordion():
+    """Step 4 v2 (2026-05-10): 旧 LLM 経路 Deprecated アコーディオンは物理削除済み。
+    代わりに 'Perplexity リサーチオプション' アコーディオンに theme_input /
+    research_mode_dropdown / avoid_topics_input / research_import_file が含まれる
+    （research_only ベンチマーク + research_brief.json インポート用）。"""
     src = APP_PY_PATH.read_text(encoding="utf-8")
-    # Deprecated アコーディオンの開始箇所
-    dep_match = re.search(
-        r'gr\.Accordion\(\s*\n?\s*"⚠️ 旧 LLM 経路（Deprecated: v2 で削除予定 / Phase 1\+2 自動実行）"',
+    # 旧 Deprecated アコーディオンが残っていないこと
+    assert "Deprecated: v2 で削除予定" not in src, (
+        "Step 4 v2 で削除されるべき Deprecated アコーディオンの文字列が残っている"
+    )
+
+    # 新 Perplexity リサーチオプション アコーディオンが存在
+    perp_match = re.search(
+        r'gr\.Accordion\(\s*\n?\s*"🔍 Perplexity リサーチオプション',
         src,
     )
-    assert dep_match, "Deprecated アコーディオンが見当たらない"
+    assert perp_match, "新 Perplexity リサーチオプション アコーディオンが見当たらない"
 
-    # アコーディオン以降に theme_input / research_mode_dropdown / avoid_topics_input が登場する
-    rest = src[dep_match.start():]
+    rest = src[perp_match.start():]
     assert "theme_input = gr.Textbox(" in rest
     assert "research_mode_dropdown = gr.Dropdown(" in rest
     assert "avoid_topics_input = gr.Textbox(" in rest
+    assert "research_import_file = gr.File(" in rest
+
+
+def test_app_gemini_only_components_removed():
+    """Step 4 v2: Gemini auto path 専用 UI コンポーネントが削除されている"""
+    src = APP_PY_PATH.read_text(encoding="utf-8")
+    # 削除確認
+    assert "llm_provider_dropdown" not in src, "llm_provider_dropdown が残存"
+    assert "second_mode_dropdown" not in src, "second_mode_dropdown が残存"
+    assert "jingle_dropdown" not in src, "jingle_dropdown が残存"
+    assert "jingle_path_input" not in src, "jingle_path_input が残存"
 
 
 def test_app_registers_verified_script_file_in_components_dict():
@@ -88,9 +105,9 @@ def test_app_existing_research_import_components_preserved():
 
 
 def test_app_input_validation_accepts_external_script_without_theme():
-    """外部台本モード時はテーマ未入力でもエラーにしない"""
+    """Step 4 v2: 外部台本モード または mock または research_import のいずれかが必須。
+    テーマだけでは生成不可（旧 Gemini 自動経路は削除済み）。"""
     src = APP_PY_PATH.read_text(encoding="utf-8")
-    # 入力検証ブロックに verified_script_filepath ガードがある
     assert "and not verified_script_filepath" in src, (
-        "テーマ未入力時のガード条件に verified_script_filepath が含まれていない"
+        "外部台本モードガード `and not verified_script_filepath` が見当たらない"
     )
