@@ -187,16 +187,6 @@ def test_workflow_no_longer_uses_research_data_topic_for_theme():
         )
 
 
-def test_workflow_inline_research_brief_uses_plan_queries():
-    """generate_video_workflow 内のインライン ResearchBrief 構築が plan.queries を使うこと。"""
-    src = Path(
-        "E:/windsurf/auto_radio_generator/workflow.py"
-    ).read_text(encoding="utf-8")
-
-    # plan.queries / plan.angle の参照が ResearchBrief 構築付近に存在する
-    assert "queries=list(plan.queries)" in src or "queries=plan.queries" in src, (
-        "PR-I: インライン ResearchBrief は plan.queries を参照すべき"
-    )
-    assert "angle=plan.angle" in src, (
-        "PR-I: インライン ResearchBrief は plan.angle を参照すべき"
-    )
+# Step 4 v2 (2026-05-10): generate_video_workflow が物理削除されたため、
+# `test_workflow_inline_research_brief_uses_plan_queries` は撤去。
+# `_save_research_results` 単体への呼び出し契約は本ファイル冒頭のテストで担保される。

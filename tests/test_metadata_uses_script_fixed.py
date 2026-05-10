@@ -117,17 +117,16 @@ def test_resolver_works_without_log_fn(tmp_path: Path):
 
 def test_metadata_call_sites_route_through_resolver():
     """workflow.py 内の `_generate_youtube_metadata(...)` 呼び出しの直前で
-    `_resolve_script_for_metadata` が呼ばれていること（両方の call site で）。
+    `_resolve_script_for_metadata` が呼ばれていること。
 
-    これが無いと回帰: FactFix 修正版があっても原文 script から metadata.txt が
-    生成されハルシネーション内容が YouTube 説明文に載る。
+    Step 4 v2 (2026-05-10): generate_video_workflow を物理削除したため、
+    呼び出し箇所は run_workflow_sync 内の 1 件のみとなった (定義 1 + 呼び出し 1 = 2 件)。
     """
     src = WORKFLOW_SRC_PATH.read_text(encoding="utf-8")
 
-    # `_generate_youtube_metadata(` の登場回数（定義 1 + 呼び出し N）
+    # `_generate_youtube_metadata(` の登場回数（定義 1 + 呼び出し 1）
     call_sites = list(re.finditer(r"_generate_youtube_metadata\s*\(", src))
-    # 定義 1 件 + 呼び出し 2 件 = 3 件のはず
-    assert len(call_sites) >= 3, (
+    assert len(call_sites) >= 2, (
         f"_generate_youtube_metadata の出現箇所が想定より少ない: {len(call_sites)} 件"
     )
 
@@ -136,11 +135,11 @@ def test_metadata_call_sites_route_through_resolver():
         m.start() for m in call_sites
         if not src[max(0, m.start() - 40):m.start()].rstrip().endswith("def")
     ]
-    assert len(call_positions) == 2, (
-        f"_generate_youtube_metadata の呼び出し回数が想定 2 件と異なる: {len(call_positions)}"
+    assert len(call_positions) == 1, (
+        f"_generate_youtube_metadata の呼び出し回数が想定 1 件と異なる: {len(call_positions)}"
     )
 
-    # 各呼び出しの直前 ~600 文字以内に _resolve_script_for_metadata が出現すること
+    # 呼び出しの直前 ~600 文字以内に _resolve_script_for_metadata が出現すること
     for pos in call_positions:
         window = src[max(0, pos - 600):pos]
         assert "_resolve_script_for_metadata" in window, (

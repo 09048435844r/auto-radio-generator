@@ -106,15 +106,6 @@ class WorkflowResult:
 
 
 @dataclass
-class PlanningPhaseResult:
-    """企画フェーズの実行結果"""
-    queries: list[str]
-    angle: str
-    gemini_usage: Optional[GeminiUsage] = None
-    duration_sec: float = 0.0
-
-
-@dataclass
 class ScriptingPhaseResult:
     """台本作成フェーズの実行結果"""
     script: Script
@@ -303,86 +294,6 @@ def _resolve_dynamic_tags(script: Script, fallback_description: str) -> list[str
         return _normalize_non_empty_strings(script.hashtags)
     extracted = re.findall(r"#\S+", fallback_description or "")
     return _normalize_non_empty_strings(extracted)
-
-
-def _merge_scripts(
-    scripts: List[Script],
-    jingle_path: Optional[str] = None,
-    add_chapter_markers: bool = True
-) -> Script:
-    """複数の台本を1つに結合する（拡張性重視）
-    
-    Args:
-        scripts: 結合する台本リスト
-        jingle_path: 挿入するジングルファイルのパス
-        add_chapter_markers: チャプターマーカーを追加するか
-    
-    Returns:
-        結合された台本
-    """
-    if not scripts:
-        raise ValueError("scriptsリストが空です")
-    
-    if len(scripts) == 1:
-        return scripts[0]
-    
-    from core.models.script import create_jingle_turn, create_chapter_marker
-    
-    # 結合されたセクションを格納するリスト
-    merged_sections: List[DialogueTurn] = []
-    
-    # メタデータを結合
-    merged_title = f"{scripts[0].title} & {scripts[1].title}"
-    merged_theme = f"{scripts[0].theme} + {scripts[1].theme}" if scripts[0].theme and scripts[1].theme else scripts[0].theme
-    merged_hashtags = list(set(scripts[0].hashtags + scripts[1].hashtags))
-    merged_references = list(set(scripts[0].references + scripts[1].references))
-    
-    for i, script in enumerate(scripts):
-        # チャプターマーカーを追加（2部目以降）
-        if add_chapter_markers and i > 0:
-            chapter_marker = create_chapter_marker(
-                chapter_title=f"第{i+1}部: {script.title}",
-                section=f"part_{i+1}"
-            )
-            merged_sections.append(chapter_marker)
-        
-        # 対話セクションを追加
-        merged_sections.extend(script.sections)
-        
-        # ジングルを追加（最後の台本以外）
-        if jingle_path and i < len(scripts) - 1:
-            jingle_turn = create_jingle_turn(
-                jingle_path=jingle_path,
-                section=f"jingle_{i+1}"
-            )
-            merged_sections.append(jingle_turn)
-    
-    # 結合された台本を作成
-    return Script(
-        title=merged_title,
-        theme=merged_theme,
-        sections=merged_sections,
-        thumbnail_title=scripts[0].thumbnail_title,
-        description=scripts[0].description,
-        hashtags=merged_hashtags,
-        references=merged_references
-    )
-
-
-def _create_script_full_transcript(script: Script) -> str:
-    """台本の全量をプレーンテキストに変換（第2部へのコンテキスト渡し用）
-    
-    Args:
-        script: テキスト化する台本
-    
-    Returns:
-        台本の全発話テキスト（「ずんだもん: [セリフ]」形式）
-    """
-    lines = []
-    for turn in script.get_dialogue_only():
-        speaker_name = "ずんだもん" if turn.speaker == "A" else "四国めたん"
-        lines.append(f"{speaker_name}: {turn.text}")
-    return "\n".join(lines)
 
 
 def _create_script_summary(script: Script, max_turns: int = 5) -> str:
@@ -752,296 +663,10 @@ def apply_overrides(config: AppConfig, overrides: UIOverrides) -> AppConfig:
     return config
 
 
-async def execute_planning_phase(
-    theme: str,
-    mode: ResearchMode,
-    config: AppConfig,
-    instruction: Optional[str] = None,
-    callbacks: Optional[ProgressCallback] = None
-) -> PlanningPhaseResult:
-    """企画フェーズ: AIプロデューサーが検索計画を作成
-    
-    Args:
-        theme: 動画のテーマ
-        mode: リサーチモード
-        config: アプリケーション設定
-        instruction: 追加指示（オプション）
-        callbacks: 進捗コールバック
-    
-    Returns:
-        PlanningPhaseResult: 検索クエリリストと切り口
-    """
-    cb = callbacks or ProgressCallback()
-    start_time = time.time()
-    
-    cb.log(f"\n== Phase 1: 企画（検索計画作成） ==")
-    cb.log(f"テーマ: {theme}")
-    cb.log(f"モード: {mode}")
-    cb.progress(0.10, "🤔 企画・検索計画を作成中...")
-    
-    try:
-        # 検索計画はGeminiで実行（OpenAI/Anthropicは未対応）
-        script_generator = create_script_generator(config, provider="gemini")
-        plan = await script_generator.create_research_plan(theme, mode, instruction)
-        
-        max_queries = max(1, int(getattr(config.yaml.researcher, "max_queries_per_plan", 3)))
-        if len(plan.queries) > max_queries:
-            cb.log(f"[WARN] 検索クエリ数を上限 {max_queries} 件に制限しました（生成: {len(plan.queries)}件）")
-            plan.queries = plan.queries[:max_queries]
-
-        cb.log(f"✓ 検索計画作成完了")
-        cb.log(f"切り口: {plan.angle}")
-        cb.log(f"\n検索クエリ:")
-        for i, q in enumerate(plan.queries, 1):
-            cb.log(f"  {i}. {q}")
-        
-        # Usage記録
-        gemini_usage = script_generator.last_usage
-        
-        duration = time.time() - start_time
-        cb.log(f"✓ 企画フェーズ完了 ({duration:.1f}秒)")
-        
-        return PlanningPhaseResult(
-            queries=plan.queries,
-            angle=plan.angle,
-            gemini_usage=gemini_usage,
-            duration_sec=duration
-        )
-    
-    except Exception as e:
-        cb.log(f"❌ 企画フェーズエラー: {e}")
-        raise
-
-
-async def _execute_gradio_scripting_phase(
-    theme: str,
-    mode: ResearchMode,
-    queries: list[str],
-    config: AppConfig,
-    output_dir: Path,
-    enable_research: bool = True,
-    preloaded_research_data: Optional[ResearchResult] = None,
-    excluded_topics: Optional[str] = None,
-    avoid_topics: Optional[str] = None,
-    provider: str = "gemini",
-    callbacks: Optional[ProgressCallback] = None
-) -> ScriptingPhaseResult:
-    """Gradio 自動モード向け台本作成フェーズ（リサーチ + 台本生成）
-
-    内部実装は `services.pipeline.execute_scripting_phase` に委譲するため、
-    HITL / CLI モードと完全に同一の挙動（ShowRunner, MetadataGenerator,
-    VisualIdentity, show_plan.json 永続化 等）を提供する。
-
-    リサーチステップだけは Gradio 側のここで引き続き実行し、得られた
-    ResearchResult を ResearchBrief に変換してパイプライン層へ渡す。
-
-    Args:
-        theme: 動画のテーマ
-        mode: リサーチモード
-        queries: 検索クエリリスト（企画フェーズの出力）
-        config: アプリケーション設定
-        output_dir: 出力ディレクトリ（`output/{timestamp}/`）
-        enable_research: リサーチを実行するか
-        preloaded_research_data: 事前に取得済みのリサーチ結果（2-Story Mode 用）
-        excluded_topics: 除外すべき既出情報（オプション）
-        avoid_topics: 避けてほしい話題（Negative Prompt、オプション）
-        provider: LLMプロバイダー名（"gemini" | "openai" | "anthropic" | "ollama"）
-        callbacks: 進捗コールバック
-
-    Returns:
-        ScriptingPhaseResult: 台本とリサーチ結果（レガシー呼び出し元との契約維持）
-    """
-    # Lazy imports to avoid circular dependency
-    # (services.pipeline.scripting_phase imports helpers from workflow.py).
-    from services.pipeline.scripting_phase import (
-        execute_scripting_phase as pipeline_execute_scripting,
-    )
-    from core.session_manager import SessionManager
-    from core.models.artifacts import ResearchBrief
-    from core.models.visual import VisualIdentity as _VisualIdentityModel
-    from core.models.curation import ScriptSegment as _ScriptSegmentModel
-    from dataclasses import asdict as _dc_asdict, is_dataclass as _is_dataclass
-
-    cb = callbacks or ProgressCallback()
-    research_start = time.time()
-    research_data = preloaded_research_data
-    research_content: Optional[str] = None
-    perplexity_usage: Optional[PerplexityUsage] = None
-    research_duration = 0.0
-
-    # ---------------------------------------------------------------
-    # Step 1: Research (unchanged from legacy workflow.py behavior)
-    # ---------------------------------------------------------------
-    if research_data is not None:
-        cb.log("[INFO] 既存リサーチ結果を再利用します（API呼び出しなし）")
-        research_content = research_data.content
-        perplexity_usage = research_data.usage
-    elif enable_research and queries:
-        cb.log(f"\n== Phase 2-1: リサーチ ==")
-        cb.log(f"モード: {mode}")
-        if excluded_topics:
-            cb.log(
-                f"除外トピック: {excluded_topics[:100]}..."
-                if len(excluded_topics) > 100
-                else f"除外トピック: {excluded_topics}"
-            )
-        cb.progress(0.30, "🔍 リサーチを実行中 (Perplexity)...")
-
-        try:
-            researcher = create_researcher(config)
-            research_data = await researcher.research_multi(
-                queries, mode, avoid_topics=avoid_topics
-            )
-
-            cb.log(f"✓ リサーチ完了")
-            cb.log(f"収集した情報: {len(research_data.content)}文字")
-
-            research_content = research_data.content
-            perplexity_usage = research_data.usage
-            research_duration = time.time() - research_start
-
-            # Legacy side effect: write research.json / research_brief.json /
-            # research_report.md into `output_dir`. Kept intact for UI / import flows.
-            # PR-I: theme/queries を呼び出し元から明示渡し（research_data.topic は連結
-            # クエリ全文になるため ResearchBrief に書くと下流フェーズが破綻する）。
-            _save_research_results(
-                research_data,
-                output_dir,
-                cb,
-                theme=theme,
-                plan_queries=list(queries) if queries else [theme],
-                plan_angle="自動生成",
-            )
-
-        except Exception as e:
-            cb.log(f"❌ リサーチエラー（処理中断）: {e}")
-            import traceback
-            cb.log(f"[DEBUG] {traceback.format_exc()}")
-            raise
-    else:
-        cb.log("[INFO] リサーチスキップ")
-
-    cb.progress(0.45, "✅ リサーチ完了")
-
-    # ---------------------------------------------------------------
-    # Step 2: Bridge ResearchResult → ResearchBrief and hand off to the
-    # unified pipeline version (SSOT for scripting across all modes).
-    # ---------------------------------------------------------------
-    if research_data is None:
-        raise RuntimeError(
-            "台本生成にはリサーチデータが必要ですが、research_data が None のため継続できません。"
-        )
-
-    # Mount SessionManager on the Gradio output_dir so downstream artifacts
-    # (script.json, show_plan.json, script_artifact.json, metadata) land alongside
-    # the existing Gradio auto-mode outputs rather than under workspace/.
-    project_root_path = (
-        Path(getattr(config, "project_root", None) or output_dir.parent.parent)
-        .resolve()
-    )
-    session_manager = SessionManager(
-        project_root=project_root_path,
-        session_dir=output_dir,
-    )
-
-    # If _save_research_results already wrote research_brief.json, reuse it verbatim;
-    # otherwise synthesize one (e.g. preloaded_research_data path for 2-Story Part 2).
-    if session_manager.has_research_brief():
-        research_brief = session_manager.load_research_brief()
-    else:
-        # Serialize sources safely (they may be pydantic or dataclass instances).
-        raw_sources = getattr(research_data, "sources", None) or []
-        serialized_sources = []
-        for src in raw_sources:
-            if hasattr(src, "model_dump"):
-                serialized_sources.append(src.model_dump())
-            elif _is_dataclass(src):
-                serialized_sources.append(_to_json_safe(_dc_asdict(src)))
-            else:
-                serialized_sources.append(_to_json_safe(src))
-
-        research_brief = ResearchBrief(
-            session_id=output_dir.name,
-            theme=theme or getattr(research_data, "topic", ""),
-            research_mode=str(getattr(research_data, "mode", mode)),
-            research_content=research_data.content,
-            research_sources=serialized_sources,
-            queries=list(queries) if queries else [theme or getattr(research_data, "topic", "")],
-            angle="自動生成",
-            curated_topics=None,
-            perplexity_usage=(
-                _to_json_safe(_dc_asdict(research_data.usage))
-                if research_data.usage and _is_dataclass(research_data.usage)
-                else None
-            ),
-            gemini_usage_planning=None,
-        )
-        try:
-            session_manager.save_research_brief(research_brief)
-        except Exception as e:
-            cb.log(f"[WARN] ResearchBrief 保存に失敗（非致命的）: {e}")
-
-    # ---------------------------------------------------------------
-    # Step 3: Delegate to the unified pipeline (ShowRunner + Metadata +
-    # VisualIdentity + speaker diagnostics are all handled inside).
-    # ---------------------------------------------------------------
-    script_start = time.time()
-    script_artifact = await pipeline_execute_scripting(
-        research_brief=research_brief,
-        session_manager=session_manager,
-        config=config,
-        excluded_topics=excluded_topics,
-        avoid_topics=avoid_topics,
-        provider=provider,
-        callbacks=cb,
-    )
-    script_duration = time.time() - script_start
-
-    # ---------------------------------------------------------------
-    # Step 4: Adapt RadioScriptArtifact → ScriptingPhaseResult so that
-    # existing Gradio-side callers (run_workflow_sync, 2-Story Mode) see
-    # no contract change.
-    # ---------------------------------------------------------------
-    # segments: List[dict] → List[ScriptSegment] when possible
-    segments = None
-    if script_artifact.segments:
-        try:
-            segments = [
-                _ScriptSegmentModel.model_validate(seg) for seg in script_artifact.segments
-            ]
-        except Exception as e:
-            cb.log(f"[WARN] segments の再構築に失敗、dict のまま返却します: {e}")
-            segments = list(script_artifact.segments)
-
-    # visual_identity: dict → VisualIdentity
-    visual_identity: Optional[VisualIdentity] = None
-    if script_artifact.visual_identity:
-        try:
-            visual_identity = _VisualIdentityModel.model_validate(script_artifact.visual_identity)
-        except Exception as e:
-            cb.log(f"[WARN] VisualIdentity の再構築に失敗: {e}")
-            visual_identity = None
-
-    # gemini_usage: reconstruct LLMUsage if present
-    gemini_usage: Optional[LLMUsage] = None
-    if script_artifact.llm_usage:
-        try:
-            gemini_usage = LLMUsage(**script_artifact.llm_usage)
-        except Exception as e:
-            cb.log(f"[WARN] LLMUsage の再構築に失敗: {e}")
-            gemini_usage = None
-
-    return ScriptingPhaseResult(
-        script=script_artifact.script,
-        research_content=research_content,
-        research_sources=getattr(research_data, "sources", None),
-        perplexity_usage=perplexity_usage,
-        gemini_usage=gemini_usage,
-        research_duration_sec=research_duration,
-        script_duration_sec=script_duration,
-        segments=segments,
-        visual_identity=visual_identity,
-    )
+# Step 4 v2 (2026-05-10): execute_planning_phase / _execute_gradio_scripting_phase
+# は Gemini 自動台本生成経路の中核として削除済み。Perplexity リサーチは
+# `services/pipeline/research_phase.py:execute_research_phase`、
+# 台本生成は外部台本モード (services/pipeline/external_script_phase.py) を使う。
 
 
 async def execute_production_phase(
@@ -1318,446 +943,6 @@ async def check_prerequisites(
     return True, ""
 
 
-async def generate_video_workflow(
-    theme: str,
-    overrides: Optional[UIOverrides] = None,
-    log_callback: Optional[Callable[[str], None]] = None,
-    progress_callback: Optional[Callable[[float, str], None]] = None,
-    project_root: Optional[Path] = None
-) -> WorkflowResult:
-    """動画生成ワークフローを実行
-    
-    Args:
-        theme: 動画のテーマ
-        overrides: UIからのパラメータオーバーライド
-        log_callback: ログ出力用コールバック関数
-        progress_callback: 進捗コールバック (ratio, description)
-        project_root: プロジェクトルートパス
-    
-    Returns:
-        WorkflowResult: 実行結果（Usage/Cost情報含む）
-    """
-    root = project_root or PROJECT_ROOT
-    overrides = overrides or UIOverrides()
-    workflow_start = time.time()
-    
-    # Usage集約用
-    total_usage = TotalUsage()
-    
-    # ログファイルライター（出力ディレクトリ作成後に初期化）
-    log_writer: Optional[LogFileWriter] = None
-    
-    def log(msg: str):
-        if log_callback:
-            log_callback(msg)
-        # ログファイルにも書き込み
-        if log_writer:
-            log_writer.write(msg)
-    
-    def progress(ratio: float, desc: str):
-        if progress_callback:
-            progress_callback(ratio, desc)
-    
-    try:
-        # ========== Phase 0: 設定読み込み (0-5%) ==========
-        progress(0.0, "設定を読み込み中...")
-        log("設定を読み込み中...")
-        config = load_config(root)
-        config = apply_overrides(config, overrides)
-        
-        # 素材パスのオーバーライド
-        if overrides.background_image:
-            config.yaml.paths.background_image = f"assets/backgrounds/{overrides.background_image}"
-        if overrides.bgm_file:
-            config.yaml.paths.bgm_file = f"assets/bgm/{overrides.bgm_file}"
-        
-        # 前提条件チェック
-        progress(0.02, "前提条件を確認中...")
-        success, error = await check_prerequisites(config, log_callback)
-        if not success:
-            return WorkflowResult(success=False, error_message=error)
-        progress(0.05, "前提条件OK")
-        
-        # 出力ディレクトリを準備（リサーチ結果保存のため早期に作成）
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_base = root / config.yaml.paths.output_dir / timestamp
-        output_base.mkdir(parents=True, exist_ok=True)
-        
-        # ログファイルライターを初期化
-        log_writer = LogFileWriter(output_base)
-        log(f"出力ディレクトリ: {output_base}")
-        
-        # ========== Phase 1: リサーチ (5-20%) - AIプロデューサーモード ==========
-        research_data = None
-        if overrides.enable_research and overrides.research_mode:
-            progress(0.05, f"リサーチ中 ({overrides.research_mode})...")
-            log(f"\n== リサーチ (AIプロデューサーモード) ==")
-            log(f"テーマ: {theme}")
-            log(f"モード: {overrides.research_mode}")
-            
-            research_start = time.time()
-            try:
-                # Step 0: AIプロデューサーが検索計画を作成
-                progress(0.05, "Step 0: AIが検索計画を作成中...")
-                log(f"\n== Step 0: 検索計画作成 ==")
-                
-                # リサーチ計画作成はGemini固定（OpenAI/Anthropicは未対応）
-                log(f"使用エンジン: gemini (リサーチ計画作成)")
-                research_planner = create_script_generator(config, provider="gemini")
-                plan = await research_planner.create_research_plan(theme, overrides.research_mode, instruction=None)
-                
-                log(f"✓ 検索計画作成完了")
-                log(f"切り口: {plan.angle}")
-                log(f"\n検索クエリ:")
-                for i, q in enumerate(plan.queries, 1):
-                    log(f"  {i}. {q}")
-                
-                # Step 1: 複数クエリで並列リサーチ
-                progress(0.10, "Step 1: 並列リサーチ中...")
-                log(f"\n== Step 1: 並列リサーチ ({overrides.research_mode}) ==")
-                
-                researcher = create_researcher(config)
-                research_data = await researcher.research_multi(plan.queries, overrides.research_mode)
-                
-                log(f"\n✓ 並列リサーチ完了")
-                log(f"収集した情報: {len(research_data.content)}文字")
-                
-                # Usage記録
-                if research_data and research_data.usage:
-                    total_usage.perplexity = research_data.usage
-                
-                total_usage.research_duration_sec = time.time() - research_start
-                log(f"✓ リサーチ完了: {len(research_data.content)}文字 ({total_usage.research_duration_sec:.1f}秒)")
-                
-                progress(0.20, "リサーチ完了")
-                
-            except Exception as e:
-                log(f"⚠ リサーチスキップ（エラー）: {e}")
-                import traceback
-                log(f"[DEBUG] Traceback: {traceback.format_exc()}")
-        else:
-            log(f"[DEBUG] リサーチスキップ条件:")
-            log(f"[DEBUG]   enable_research: {overrides.enable_research}")
-            log(f"[DEBUG]   research_mode: {overrides.research_mode}")
-            progress(0.20, "リサーチスキップ")
-        
-        # リサーチ結果をJSONで保存（リサーチブロックの外で実行）
-        if research_data:
-            try:
-                from dataclasses import asdict
-                import json
-                
-                log(f"[DEBUG] research.json保存処理開始")
-                log(f"[DEBUG] research_data type: {type(research_data)}")
-                log(f"[DEBUG] output_base: {output_base}")
-                
-                research_path = output_base / "research.json"
-                research_path.parent.mkdir(parents=True, exist_ok=True)
-                
-                log(f"[DEBUG] 保存先パス: {research_path}")
-                log(f"[DEBUG] ディレクトリ存在: {research_path.parent.exists()}")
-                
-                research_dict = _to_json_safe(asdict(research_data))
-                log(f"[DEBUG] dataclass→dict変換完了")
-                
-                # usageは既にasdict()により辞書化済み
-                if research_dict.get('usage'):
-                    log(f"[DEBUG] usage type: {type(research_dict['usage'])}")
-                    log(f"[DEBUG] usage辞書化済み（asdict()により自動変換）")
-                
-                json_str = json.dumps(research_dict, ensure_ascii=False, indent=2)
-                log(f"[DEBUG] JSON文字列化完了 ({len(json_str)} 文字)")
-                
-                research_path.write_text(json_str, encoding="utf-8")
-                log(f"✓ リサーチ結果保存: {research_path}")
-                log(f"[DEBUG] ファイルサイズ: {research_path.stat().st_size} bytes")
-                
-                # ResearchBrief も保存（インポート機能用）
-                # 案1実装: 自動モードで生成したリサーチデータを再利用可能にする
-                from core.models.artifacts import ResearchBrief
-                
-                session_id = output_base.name
-                # PR-I: theme は引数の元テーマを使う（research_data.topic は
-                # PerplexityClient が ", ".join(queries) で連結した全文になるため、
-                # ResearchBrief.theme として下流に流すと MetadataGenerator 等が
-                # クエリ全文をテーマと誤認して破綻する）。
-                # plan が成功して research_data が取れている経路なので、
-                # plan.queries / plan.angle が必ず参照可能。
-                research_brief = ResearchBrief(
-                    session_id=session_id,
-                    theme=theme,
-                    research_mode=research_data.mode,
-                    created_at=datetime.now().isoformat(),
-                    research_content=research_data.content,
-                    research_sources=[s.model_dump() for s in (research_data.sources or [])],
-                    queries=list(plan.queries),
-                    angle=plan.angle,
-                    curated_topics=None,
-                    perplexity_usage=asdict(research_data.usage) if research_data.usage else None,
-                    gemini_usage_planning=None
-                )
-                
-                research_brief_path = output_base / "research_brief.json"
-                research_brief_json = json.dumps(research_brief.model_dump(), ensure_ascii=False, indent=2)
-                research_brief_path.write_text(research_brief_json, encoding="utf-8")
-                log(f"✓ リサーチブリーフ保存（インポート用）: {research_brief_path}")
-                log(f"[DEBUG] ブリーフサイズ: {research_brief_path.stat().st_size} bytes")
-                
-                # Markdownレポートも保存（人間が読みやすい形式）
-                report_path = output_base / "research_report.md"
-                report_content = f"""# リサーチレポート
-
-**テーマ**: {theme}
-**モード**: {research_data.mode}
-**生成日時**: {datetime.now().strftime('%Y年%m月%d日 %H:%M:%S')}
-
----
-
-{research_data.content}
-"""
-                report_path.write_text(report_content, encoding="utf-8")
-                log(f"✓ リサーチレポート保存: {report_path}")
-                log(f"[DEBUG] レポートサイズ: {report_path.stat().st_size} bytes")
-                
-                # Perplexityの生データを全文保存（加工なし）
-                full_report_path = output_base / "full_research_report.md"
-                full_report_path.write_text(research_data.content, encoding="utf-8")
-                log(f"✓ Perplexity全文レポート保存: {full_report_path}")
-                log(f"[DEBUG] 全文レポートサイズ: {full_report_path.stat().st_size} bytes")
-                
-            except Exception as save_error:
-                log(f"⚠ リサーチ結果保存エラー: {save_error}")
-                import traceback
-                log(f"[DEBUG] Traceback: {traceback.format_exc()}")
-        else:
-            log(f"[DEBUG] research_dataがNullのため保存スキップ")
-        
-        # ========== Phase 2: 台本生成 (20-35%) ==========
-        progress(0.20, "台本を生成中...")
-        log(f"\n== 台本生成 ==")
-        log(f"テーマ: {theme}")
-        # プロバイダーの決定
-        log(f"[DEBUG] overrides.llm_provider = {overrides.llm_provider}")
-        log(f"[DEBUG] config default_provider = {getattr(config.yaml.script_generator, 'default_provider', 'gemini')}")
-        provider = overrides.llm_provider or getattr(config.yaml.script_generator, 'default_provider', 'gemini')
-        log(f"使用エンジン: {provider}")
-        
-        script_start = time.time()
-        script_generator = create_script_generator(config, provider=provider)
-        script, segments = await script_generator.generate(theme, research_data)
-
-        diagnostics, suspected_swap = _build_speaker_diagnostics(script)
-        for msg in diagnostics:
-            log(msg)
-        if suspected_swap:
-            log("[yellow][WARN] 口調ヒント上、A/B話者の役割逆転の疑いがあります[/yellow]")
-        
-        # Usage記録（プロバイダー別に集約）
-        if script_generator.last_usage:
-            provider = script_generator.last_usage.provider
-            if provider in total_usage.llm_usage:
-                # 既存の使用量に加算
-                existing = total_usage.llm_usage[provider]
-                total_usage.llm_usage[provider] = LLMUsage(
-                    provider=provider,
-                    model_name=script_generator.last_usage.model_name,
-                    input_tokens=existing.input_tokens + script_generator.last_usage.input_tokens,
-                    output_tokens=existing.output_tokens + script_generator.last_usage.output_tokens,
-                    request_count=existing.request_count + script_generator.last_usage.request_count
-                )
-            else:
-                total_usage.llm_usage[provider] = script_generator.last_usage
-        
-        total_usage.script_duration_sec = time.time() - script_start
-        log(f"✓ 台本生成完了: {len(script.sections)}フレーズ ({total_usage.script_duration_sec:.1f}秒)")
-        log(f"タイトル: {script.title}")
-        progress(0.35, "台本生成完了")
-        
-        # 音声出力ディレクトリを準備
-        audio_output_dir = output_base / "audio"
-        video_output_path = output_base / "videos" / f"radio_{timestamp}.mp4"
-        
-        # ========== Phase 3: 音声合成 (35-75%) ==========
-        progress(0.35, "音声合成中...")
-        log(f"\n== 音声合成 ==")
-        log(f"フレーズ数: {len(script.get_dialogue_only())}")
-        
-        audio_start = time.time()
-        voicevox = VoicevoxClient(config)
-        
-        # 音声合成（進捗を更新）
-        total_phrases = len(script.get_dialogue_only())
-        synthesis_result = await voicevox.synthesize(
-            script, 
-            audio_output_dir,
-            speed_scale_override=overrides.speed_scale,
-            segments=segments
-        )
-        
-        # Usage記録
-        total_usage.voicevox = VoicevoxUsage(
-            phrase_count=total_phrases,
-            total_duration_sec=synthesis_result.total_duration_sec
-        )
-        total_usage.audio_duration_sec = time.time() - audio_start
-        
-        log(f"✓ 音声合成完了: {synthesis_result.total_duration_sec:.1f}秒 ({total_usage.audio_duration_sec:.1f}秒)")
-        progress(0.75, "音声合成完了")
-        
-        # ========== Phase 4: 動画生成 (75-95%) ==========
-        progress(0.75, "動画を生成中...")
-        log(f"\n== 動画生成 ==")
-        log(f"BGM音量: {config.yaml.video_renderer.bgm_volume}")
-        log(f"フェードイン: {config.yaml.video_renderer.bgm_fade_in_sec}秒")
-        log(f"フェードアウト: {config.yaml.video_renderer.bgm_fade_out_sec}秒")
-        log(f"スペクトラム: {'ON' if config.yaml.video_renderer.enable_spectrum else 'OFF'}")
-        
-        render_start = time.time()
-        background_image = root / config.yaml.paths.background_image
-        bgm_file = root / config.yaml.paths.bgm_file
-        
-        ffmpeg = FfmpegRenderer(config)
-        render_result = await ffmpeg.render(
-            synthesis_result=synthesis_result,
-            background_image=background_image,
-            bgm_file=bgm_file,
-            output_path=video_output_path,
-            subtitle_path=synthesis_result.subtitle_path
-        )
-        
-        total_usage.render_duration_sec = time.time() - render_start
-        log(f"✓ 動画生成完了: {render_result.file_size_mb:.1f}MB ({total_usage.render_duration_sec:.1f}秒)")
-        progress(0.95, "動画生成完了")
-        
-        # ========== Phase 5: 後処理 (95-100%) ==========
-        progress(0.95, "後処理中...")
-        
-        # 台本をファイルに保存
-        script_path = output_base / "script.json"
-        script_path.parent.mkdir(parents=True, exist_ok=True)
-        script_path.write_text(script.model_dump_json(indent=2), encoding="utf-8")
-        
-        # YouTube用メタデータを生成
-        metadata_path = output_base / "metadata.txt"
-        # FactFix 修正済み台本があればそちらを優先（ハルシネーションが概要欄に載るのを防ぐ）
-        effective_script = _resolve_script_for_metadata(output_base, script, log_fn=log)
-        generated_metadata = _generate_youtube_metadata(
-            script=effective_script,
-            chapters=synthesis_result.chapters,
-            output_path=metadata_path,
-            theme=theme,
-            provider=provider
-        )
-        log(f"✓ YouTubeメタデータ生成: {metadata_path.name}")
-        
-        # サムネイル画像を生成（AI生成のthumbnail_titleを使用）
-        thumbnail_generator = ThumbnailGenerator()
-        thumbnail_path = output_base / "thumbnail.png"
-        thumbnail_generator.generate(
-            title=generated_metadata.get("title", script.title),
-            thumbnail_title=generated_metadata.get("thumbnail_title", ""),
-            background_path=background_image,
-            output_path=thumbnail_path
-        )
-        log(f"✓ サムネイル画像生成: {thumbnail_path.name}")
-        
-        # ログファイルを完了
-        if log_writer:
-            log_writer.finalize()
-            log(f"✓ 処理ログ保存: {log_writer.log_path.name}")
-        
-        # メタデータの内容を読み込んでUIへ渡す
-        metadata_content = metadata_path.read_text(encoding="utf-8")
-        
-        # 日付入りタイトルを生成（AI生成タイトル + 日付）
-        creation_date = datetime.now().strftime("%Y.%m.%d")
-        ai_title = generated_metadata.get("title", script.title)
-        formatted_title = f"{ai_title} ({creation_date}制作)"
-        
-        publishing_config = getattr(config.yaml, "publishing", None)
-        chapter_lines = _format_chapter_lines(synthesis_result.chapters)
-
-        script_description = (
-            generated_metadata.get("description")
-            or script.description
-            or ""
-        )
-        dynamic_tags = _resolve_dynamic_tags(script, fallback_description=script_description)
-        references = _resolve_references(
-            script,
-            theme=theme,
-            fallback_description=script_description,
-            research_sources=getattr(research_data, "sources", None),
-        )
-
-        configured_tags = getattr(publishing_config, "default_tags", []) if publishing_config else []
-        if not isinstance(configured_tags, list):
-            configured_tags = []
-        fixed_tags = _normalize_non_empty_strings([str(tag) for tag in configured_tags])
-
-        configured_footer = (
-            getattr(publishing_config, "footer_text", "") if publishing_config else ""
-        )
-
-        # 使用モデル情報を生成
-        llm_model_info = ""
-        if total_usage.llm_usage:
-            model_parts = []
-            for provider, usage in total_usage.llm_usage.items():
-                if usage.model_name:
-                    model_parts.append(f"{provider.upper()}: {usage.model_name}")
-            if model_parts:
-                llm_model_info = "■台本生成モデル\n" + "\n".join(model_parts)
-
-        formatted_description = build_video_description(
-            script_description=script_description,
-            chapters=chapter_lines,
-            references=references,
-            dynamic_tags=dynamic_tags,
-            fixed_tags=fixed_tags,
-            footer_text=(configured_footer or "").strip(),
-            llm_model_info=llm_model_info,
-        )
-        
-        # 総所要時間
-        total_usage.total_duration_sec = time.time() - workflow_start
-        
-        # コスト計算
-        cost_calculator = CostCalculator(config)
-        cost = cost_calculator.calculate(total_usage)
-        cost_report = cost_calculator.format_cost_report(total_usage, cost)
-        
-        log(f"\n== 完了 ==")
-        log(f"動画: {render_result.video_path}")
-        log(f"総所要時間: {total_usage.total_duration_sec:.1f}秒")
-        progress(1.0, "完了!")
-        
-        return WorkflowResult(
-            success=True,
-            video_path=render_result.video_path,
-            script=script,
-            audio_path=synthesis_result.audio_path,
-            subtitle_path=synthesis_result.subtitle_path,
-            duration_sec=total_usage.total_duration_sec,
-            file_size_mb=render_result.file_size_mb,
-            usage=total_usage,
-            cost=cost,
-            cost_report=cost_report,
-            metadata_content=metadata_path.read_text(encoding="utf-8") if metadata_path.exists() else "",
-            formatted_title=formatted_title,
-            formatted_description=generated_metadata.get("description", script.description)
-        )
-        
-    except Exception as e:
-        error_msg = f"エラーが発生しました: {str(e)}"
-        log(f"\n❌ {error_msg}")
-        
-        # エラー時もログファイルを完了
-        if log_writer:
-            log_writer.finalize()
-        
-        return WorkflowResult(success=False, error_message=error_msg)
-
 
 def run_workflow_sync(
     theme: str,
@@ -1768,28 +953,26 @@ def run_workflow_sync(
     avoid_topics: Optional[str] = None,
     upload_override: Optional[bool] = None,
     footer_text_override: Optional[str] = None,
-    second_mode: Optional[ResearchMode] = None,
-    jingle_path: Optional[str] = None,
     research_import_filepath: Optional[str] = None,
     external_script_path: Optional[str] = None,
 ) -> WorkflowResult:
-    """同期版ワークフロー実行（Gradioから呼び出し用）
-    
-    3つの独立したフェーズ関数を順次呼び出すシンプルなラッパー。
-    これにより、自動モードが「手動工程の連続実行」と等価であることを保証します。
-    
+    """同期版ワークフロー実行（Gradio から呼び出し用 / 外部台本モード前提）
+
+    Step 4 v2 (2026-05-10): Phase 1 (planning) + Phase 2 (scripting) の自動経路は
+    削除済み。`external_script_path` (VerifiedScript JSON) が必須。
+
     Args:
-        theme: 動画のテーマ
+        theme: 動画のテーマ（外部台本モード時は VerifiedScript.metadata.title から復元）
         overrides: UIからのパラメータオーバーライド
         log_callback: ログ出力用コールバック関数
         progress_callback: 進捗コールバック (ratio, description)
         use_mock: Mockモードを使用するか（開発・テスト用）
-        avoid_topics: 避けてほしい話題（Negative Prompt、オプション）
+        avoid_topics: research_import 経由で渡される除外要件メモ
         upload_override: YouTubeアップロード実行のUI優先フラグ
         footer_text_override: 概要欄フッター文（UI入力優先）
-        second_mode: 第2部のリサーチモード（2-Story Mode用）
-        jingle_path: 場面転換ジングルのファイルパス
-    
+        research_import_filepath: research_brief.json インポート（参考保持用）
+        external_script_path: VerifiedScript JSON のパス（必須）
+
     Returns:
         WorkflowResult: 実行結果（Usage/Cost情報含む）
     """
@@ -1991,11 +1174,9 @@ def run_workflow_sync(
                     callbacks.log(f"❌ VerifiedScript ロード失敗: {_e}")
                     return WorkflowResult(success=False, error_message=str(_e))
 
-            # ========== Phase 1: 企画（検索計画作成） ==========
-            planning_result = None
-            queries = []
-
-            # 外部台本モードでは Phase 1 (planning) + Phase 2 (scripting) を完全 bypass
+            # ========== Phase 1+2 (deleted in Step 4 v2): 外部台本モード必須 ==========
+            # Step 4 v2 (2026-05-10): Gemini 自動台本生成経路は削除済み。
+            # external_script_path が指定されている場合のみ scripting_result を構築する。
             if external_mode and external_phase_result is not None:
                 callbacks.log("[INFO] 外部台本モード: Phase 1 (planning) + Phase 2 (scripting) を完全スキップ")
                 # ScriptingPhaseResult 互換のスタブを構築 (Phase 3 production にそのまま渡せるように)
@@ -2010,128 +1191,16 @@ def run_workflow_sync(
                     segments=external_phase_result.segments,
                     visual_identity=None,
                 )
-            elif config.yaml.dev.mock_mode:
-                callbacks.log("[yellow]⚠ MOCK MODE: Skipping planning phase[/yellow]")
-                # ダミーの検索クエリを設定
-                queries = [
-                    "Mock Query 1: テーマに関する一般的な調査",
-                    "Mock Query 2: トレンドと背景",
-                    "Mock Query 3: 面白い雑学"
-                ]
-                angle = "Mock Mode: 既存のデータを使用して高速に動画生成をテストする"
-                callbacks.log(f"切り口: {angle}")
-            elif overrides_obj.enable_research and overrides_obj.research_mode:
-                planning_result = await execute_planning_phase(
-                    theme=theme,
-                    mode=overrides_obj.research_mode,
-                    config=config,
-                    callbacks=callbacks
-                )
-                queries = planning_result.queries
-                if planning_result.gemini_usage:
-                    # プロバイダー別に集約（企画フェーズはGemini固定）
-                    planning_provider = planning_result.gemini_usage.provider
-                    total_usage.llm_usage[planning_provider] = planning_result.gemini_usage
             else:
-                callbacks.log("[INFO] 企画フェーズスキップ（リサーチ無効）")
-            
-            # ========== Phase 2: 台本作成（リサーチ → 台本生成） ==========
-            # 外部台本モードでは Phase 2 全体を完全 bypass (scripting_result は上で設定済み)
-            if not external_mode:
-                should_enable_research = bool(overrides_obj.enable_research) and not bool(config.yaml.dev.mock_mode)
-                if config.yaml.dev.mock_mode and overrides_obj.enable_research:
-                    callbacks.log("[INFO] Mockモードのためリサーチ工程をスキップします")
-
-                max_requests_per_workflow = max(1, int(getattr(config.yaml.researcher, "max_requests_per_workflow", 6)))
-                planned_requests = len(queries) if should_enable_research else 0
-                if planned_requests > max_requests_per_workflow:
-                    raise RuntimeError(
-                        f"Perplexity呼び出し予定数が上限を超えています: {planned_requests} > {max_requests_per_workflow}. "
-                        "検索クエリ数を減らすか、設定の max_requests_per_workflow を見直してください。"
-                    )
-
-                # 第2部モードの場合は2つの台本を生成して結合
-                if second_mode:
-                    primary_mode_label = getattr(overrides_obj.research_mode, "value", overrides_obj.research_mode)
-                    secondary_mode_label = getattr(second_mode, "value", second_mode)
-                    callbacks.log(f"[INFO] 第2部モードで台本を生成します: {primary_mode_label} → {secondary_mode_label}")
-
-                    # 第1部の台本を生成
-                    callbacks.progress(0.15, "第1部の台本を生成中...")
-                    part1_result = await _execute_gradio_scripting_phase(
-                        theme=theme,
-                        mode=overrides_obj.research_mode or "trivia",
-                        queries=queries,
-                        config=config,
-                        output_dir=output_base,
-                        enable_research=should_enable_research,
-                        preloaded_research_data=preloaded_research,
-                        avoid_topics=avoid_topics,
-                        provider=provider,
-                        callbacks=callbacks
-                    )
-
-                    # 第1部の全量トランスクリプトを作成（第2部への完全コンテキスト渡し）
-                    part1_full_transcript = _create_script_full_transcript(part1_result.script)
-
-                    # 第2部のクエリを生成（第1部の全内容を既出事実として渡す）
-                    excluded_topics = f"--- 第1部 放送済み ---\n{part1_full_transcript}\n--- 第1部 終了 ---"
-                    if avoid_topics:
-                        excluded_topics += f"\n追加除外: {avoid_topics}"
-
-                    callbacks.log(f"[INFO] 第1部の全量コンテキストを第2部へ渡しました ({len(part1_full_transcript)}文字)")
-
-                    callbacks.progress(0.25, "第2部の台本を生成中...")
-                    part2_result = await _execute_gradio_scripting_phase(
-                        theme=theme,
-                        mode=second_mode,
-                        queries=queries,
-                        config=config,
-                        output_dir=output_base,
-                        enable_research=False,
-                        preloaded_research_data=ResearchResult(
-                            topic=part1_result.script.title,
-                            mode=overrides_obj.research_mode or "trivia",
-                            content=part1_result.research_content or "",
-                            sources=part1_result.research_sources,
-                            usage=None,
-                        ) if part1_result.research_content else None,
-                        excluded_topics=excluded_topics,
-                        avoid_topics=avoid_topics,
-                        provider=provider,
-                        callbacks=callbacks
-                    )
-
-                    # 2つの台本を結合
-                    # LLMUsage加算（同じプロバイダーを使用）
-                    default_usage = LLMUsage(provider=provider, model_name="", input_tokens=0, output_tokens=0, request_count=0)
-                    combined_usage = (part1_result.gemini_usage or default_usage) + (part2_result.gemini_usage or default_usage)
-
-                    scripting_result = ScriptingPhaseResult(
-                        script=_merge_scripts([part1_result.script, part2_result.script], jingle_path, add_chapter_markers=True),
-                        research_content=part1_result.research_content,  # 第1部のリサーチ内容を保持
-                        research_sources=part1_result.research_sources,
-                        gemini_usage=combined_usage,
-                        perplexity_usage=part1_result.perplexity_usage,
-                        research_duration_sec=part1_result.research_duration_sec + part2_result.research_duration_sec,
-                        script_duration_sec=part1_result.script_duration_sec + part2_result.script_duration_sec,
-                    )
-
-                    callbacks.log(f"[INFO] 台本結合完了: 第1部({len(part1_result.script.sections)}行) + 第2部({len(part2_result.script.sections)}行) = {len(scripting_result.script.sections)}行")
-                else:
-                    # 通常の単一部台本生成
-                    scripting_result = await _execute_gradio_scripting_phase(
-                        theme=theme,
-                        mode=overrides_obj.research_mode or "trivia",
-                        queries=queries,
-                        config=config,
-                        output_dir=output_base,
-                        enable_research=should_enable_research,
-                        preloaded_research_data=preloaded_research,
-                        avoid_topics=avoid_topics,
-                        provider=provider,
-                        callbacks=callbacks
-                    )
+                # 旧 LLM 自動経路は削除済み。外部台本モードを必須とする。
+                error_msg = (
+                    "Step 4 v2 (2026-05-10): 旧 Gemini 自動台本生成経路は削除されました。"
+                    "external_script_path (VerifiedScript JSON) を指定してください。"
+                    "Mac 側 radio_director の出力を `output/imports/<run_id>/verified_script.json` に配置し、"
+                    "UI の 🎬 外部台本モード または CLI `--phase external --verified-script <path>` で実行してください。"
+                )
+                callbacks.log(f"❌ {error_msg}")
+                return WorkflowResult(success=False, error_message=error_msg)
 
             # Usage記録
             if scripting_result.perplexity_usage:
@@ -2194,25 +1263,17 @@ def run_workflow_sync(
                 effective_script = _resolve_script_for_metadata(
                     output_base, scripting_result.script, log_fn=callbacks.log
                 )
-                # 外部台本モードでは Gemini packaging prompt を完全 bypass し、
-                # VerifiedScript.metadata から事前構築済みの dict をそのまま採用する
-                ext_metadata_for_packaging = (
-                    external_phase_result.pre_built_metadata
-                    if external_mode and external_phase_result is not None
-                    else None
-                )
+                # 外部台本モード必須 (Step 4 v2): VerifiedScript.metadata から
+                # 事前構築済みの dict をそのまま採用する。
+                ext_metadata_for_packaging = external_phase_result.pre_built_metadata
                 generated_metadata = _generate_youtube_metadata(
                     script=effective_script,
                     chapters=production_result.chapters,
                     output_path=metadata_path,
                     theme=theme,
-                    provider=provider,
                     external_metadata=ext_metadata_for_packaging,
                 )
-                if external_mode:
-                    callbacks.log(f"✓ YouTubeメタデータ生成 (外部台本モード, Gemini API ¥0): {metadata_path.name}")
-                else:
-                    callbacks.log(f"✓ YouTubeメタデータ生成: {metadata_path.name}")
+                callbacks.log(f"✓ YouTubeメタデータ生成 (外部台本モード, LLM ¥0): {metadata_path.name}")
             
             # サムネイル背景を生成（FLUX.1 dynamic mode）
             video_config = getattr(config.yaml, "video_renderer", None)
@@ -2592,207 +1653,67 @@ def _generate_youtube_metadata(
     chapters: list[ChapterMarker],
     output_path: Path,
     theme: str = "",
-    provider: str = "gemini",
+    provider: str = "ollama",
     external_metadata: Optional[dict] = None,
 ) -> dict:
-    """YouTube投稿用のメタデータファイルを生成（packagingプロンプト使用）
+    """YouTube 投稿用メタデータファイルを生成（外部台本モード前提）
+
+    Step 4 v2 (2026-05-10): Gemini packaging prompt 経路は削除済み。
+    外部台本モードで VerifiedScript.metadata から事前構築済みの `external_metadata`
+    を必須引数として受け取る。
 
     Args:
-        script: 台本データ
+        script: 台本データ（タイトル等のフォールバック用）
         chapters: チャプターマーカーリスト
-        output_path: 出力パス
-        theme: 元のテーマ（script.titleが空の場合に使用）
-        provider: LLMプロバイダー名（"gemini" | "openai" | "anthropic"）
-        external_metadata: 外部台本モード (Step 3) で VerifiedScript.metadata から事前構築済みの dict。
-                          指定された場合 Gemini packaging prompt の呼び出しを完全 bypass し、
-                          dict をそのまま採用する。{title, thumbnail_title, description, hashtags} を持つ。
+        output_path: 出力パス（metadata.txt）
+        theme: 元のテーマ（script.title が空の場合に使用）
+        provider: 互換性のため残置（未使用）
+        external_metadata: 外部台本モードの事前構築済み dict (必須)。
+                          {title, thumbnail_title, description, hashtags} を持つ。
 
     Returns:
         生成されたメタデータ辞書 {"title": str, "thumbnail_title": str, "description": str}
     """
-    from core.settings_manager import SettingsManager
-    from core.models.config import load_config
-
-    # 外部台本モード: Gemini API 呼び出しを完全 bypass し、事前構築済みの dict をそのまま採用
-    if external_metadata is not None:
-        import json as _json
-        metadata = {
-            "title": external_metadata.get("title", script.title or theme or ""),
-            "thumbnail_title": external_metadata.get("thumbnail_title", ""),
-            "description": (external_metadata.get("description", "") or "").strip(),
-        }
-        hashtags = list(external_metadata.get("hashtags", []) or [])
-        # ベースとなる metadata.txt 行リストを構築 (旧経路と同じレイアウト)
-        lines = [
-            "=" * 50,
-            "YouTube 投稿用メタデータ (外部台本モード / VerifiedScript)",
-            "=" * 50,
-            "",
-            "【タイトル】",
-            metadata["title"],
-            "",
-            "【サムネイル文字】",
-            metadata["thumbnail_title"],
-            "",
-            "【説明文】",
-            metadata["description"],
-            "",
-            "【ハッシュタグ候補】",
-            " ".join(hashtags),
-            "",
-        ]
-        # YouTube チャプターセクション + VOICEVOX クレジットを追加 (旧経路の処理を踏襲)
-        chapter_block_lines = _build_metadata_chapter_block(chapters)
-        if chapter_block_lines:
-            lines.extend(chapter_block_lines)
-        lines.extend([
-            "【概要欄用テキスト】",
-            "※ 以下をYouTubeの概要欄にコピー＆ペーストしてください",
-            "",
-            metadata["description"],
-            "",
-            "-----------------------------------",
-            "■使用音声",
-            "VOICEVOX:ずんだもん",
-            "VOICEVOX:四国めたん",
-            "-----------------------------------",
-            "",
-            "=" * 50,
-        ])
-        output_path.write_text("\n".join(lines), encoding="utf-8")
-        # video_metadata.json として保存
-        metadata_json_path = output_path.parent / "video_metadata.json"
-        metadata_json_path.write_text(
-            _json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
+    if external_metadata is None:
+        raise ValueError(
+            "Step 4 v2: _generate_youtube_metadata は external_metadata が必須です。"
+            "Gemini packaging prompt 経路は削除されました。外部台本モードを使用してください。"
         )
-        return metadata
 
-    # 設定をロード
-    app_config = load_config()
+    import json as _json
 
-    # 選択されたプロバイダーでクライアントを初期化
-    script_generator = create_script_generator(app_config, provider=provider)
-    settings = SettingsManager().load()
-    
-    # 台本の要約を生成
-    script_summary = ""
-    if script.sections:
-        # ダイアログから主要な内容を要約
-        dialogues = script.get_dialogue_only()
-        dialogue_texts = [d.text for d in dialogues[:10]]  # 最初の10セリフで要約
-        script_summary = " ".join(dialogue_texts)[:200] + "..." if len(" ".join(dialogue_texts)) > 200 else " ".join(dialogue_texts)
-    
-    # packagingプロンプトでメタデータを生成
-    import json
-    metadata = {}
-    try:
-        # script.titleが空の場合は元のthemeを使用
-        effective_theme = script.title or theme or "テーマ不明"
-        
-        metadata_result = script_generator.generate_packaging_prompt(
-            theme=effective_theme,
-            script_summary=script_summary
-        )
-        
-        if metadata_result:
-            # JSONモードでは、レスポンスは常に正しいJSON形式
-            metadata = json.loads(metadata_result.strip())
-            
-            # 概要欄は後工程のmetadata_builderで構造化するため、ここではAI生成本文のみ保持
-            metadata["description"] = (metadata.get("description", "") or "").strip()
-            
-            lines = [
-                "=" * 50,
-                "YouTube 投稿用メタデータ (AI生成)",
-                "=" * 50,
-                "",
-                "【タイトル】",
-                metadata.get("title", script.title or ""),
-                "",
-                "【サムネイル文字】",
-                metadata.get("thumbnail_title", ""),
-                "",
-                "【説明文】",
-                metadata.get("description", ""),
-                "",
-            ]
-            
-            # ハッシュタグ候補（説明文から抽出）
-            description = metadata.get("description", "")
-            hashtags = []
-            if "#" in description:
-                # 説明文からハッシュタグを抽出
-                import re
-                hashtags = re.findall(r"#\w+", description)
-            
-            if not hashtags:
-                hashtags = ["#ずんだもん", "#VOICEVOX", "#AI", "#ラジオ"]
-            
-            lines.extend([
-                "【ハッシュタグ候補】",
-                " ".join(hashtags),
-                "",
-            ])
-            
-        else:
-            # フォールバック：従来方式
-            lines = [
-                "=" * 50,
-                "YouTube 投稿用メタデータ",
-                "=" * 50,
-                "",
-                "【タイトル】",
-                script.title,
-                "",
-                "【説明文】",
-                script.description,
-                "",
-            ]
-            
-    except Exception as e:
-        # エラー時はフォールバックし、詳細をログ出力
-        import traceback
-        error_detail = traceback.format_exc()
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f"メタデータ生成エラー: {str(e)}")
-        logger.debug(f"Traceback:\n{error_detail}")
-        
-        # フォールバック: 台本のタイトル・概要をmetadataに格納
-        metadata = {
-            "title": script.title or theme or "無題",
-            "thumbnail_title": script.title or theme or "",
-            "description": script.description or "",
-        }
-        
-        lines = [
-            "=" * 50,
-            "YouTube 投稿用メタデータ",
-            "=" * 50,
-            "",
-            "【タイトル】",
-            metadata["title"],
-            "",
-            "【説明文】",
-            metadata["description"],
-            "",
-            f"※ メタデータ生成エラー: {str(e)}",
-            "",
-        ]
-    
-    # YouTubeチャプターセクション（視聴者向け目次）
-    # 2026-05-06: chapters 引数が来ているのに metadata.txt に反映されていなかった。
-    # _build_metadata_chapter_block で 0:00 起点の YouTube 互換形式に整形して挿入する。
+    metadata = {
+        "title": external_metadata.get("title", script.title or theme or ""),
+        "thumbnail_title": external_metadata.get("thumbnail_title", ""),
+        "description": (external_metadata.get("description", "") or "").strip(),
+    }
+    hashtags = list(external_metadata.get("hashtags", []) or [])
+    lines = [
+        "=" * 50,
+        "YouTube 投稿用メタデータ (外部台本モード / VerifiedScript)",
+        "=" * 50,
+        "",
+        "【タイトル】",
+        metadata["title"],
+        "",
+        "【サムネイル文字】",
+        metadata["thumbnail_title"],
+        "",
+        "【説明文】",
+        metadata["description"],
+        "",
+        "【ハッシュタグ候補】",
+        " ".join(hashtags),
+        "",
+    ]
     chapter_block_lines = _build_metadata_chapter_block(chapters)
     if chapter_block_lines:
         lines.extend(chapter_block_lines)
-
-    # VOICEVOXクレジット表記（利用規約準拠）
     lines.extend([
         "【概要欄用テキスト】",
         "※ 以下をYouTubeの概要欄にコピー＆ペーストしてください",
         "",
-        script.description,
+        metadata["description"],
         "",
         "-----------------------------------",
         "■使用音声",
@@ -2802,11 +1723,9 @@ def _generate_youtube_metadata(
         "",
         "=" * 50,
     ])
-
     output_path.write_text("\n".join(lines), encoding="utf-8")
-    
-    # video_metadata.jsonとして保存
     metadata_json_path = output_path.parent / "video_metadata.json"
-    metadata_json_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
-    
+    metadata_json_path.write_text(
+        _json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     return metadata

@@ -53,17 +53,16 @@ def test_external_script_branch_is_after_research_import():
 # ---------------------------------------------------------------------------
 
 def test_phase2_guarded_by_external_mode_check():
+    """Step 4 v2 (2026-05-10): Phase 2 (Gemini 自動台本生成) は run_workflow_sync から
+    物理削除済み。external_mode が False なら早期エラーで return する設計に変更。"""
     src = WORKFLOW_SRC_PATH.read_text(encoding="utf-8")
-    # Phase 2 ヘッダの直後に `if not external_mode:` がある
-    pattern = (
-        r"#\s*=+\s*Phase\s*2:\s*台本作成.*?\n"
-        r"\s*#\s*外部台本モードでは\s*Phase\s*2.*?\n"
-        r"\s*if\s+not\s+external_mode:"
+    # Phase 1+2 (deleted in Step 4 v2) コメントが残っており、external_mode 必須化されている
+    assert "Phase 1+2 (deleted in Step 4 v2)" in src, (
+        "Step 4 v2 マーカー 'Phase 1+2 (deleted in Step 4 v2)' が見当たらない。"
     )
-    m = re.search(pattern, src, re.DOTALL)
-    assert m is not None, (
-        "Phase 2 ヘッダ直後に `if not external_mode:` ガードが見当たらない。"
-        "外部台本モードでは Phase 2 全体を bypass する必要がある (実装プラン B.2.2)"
+    # external_mode が False のとき早期 return する分岐がある
+    assert "Step 4 v2 (2026-05-10): 旧 Gemini 自動台本生成経路は削除されました" in src, (
+        "external_mode 必須化のエラーメッセージが見当たらない。"
     )
 
 
@@ -129,11 +128,11 @@ def test_generate_youtube_metadata_external_path_skips_llm(tmp_path: Path, monke
 
 def test_generate_youtube_metadata_passes_external_metadata_to_external_branch():
     """workflow.py 内の _generate_youtube_metadata 呼び出しに external_metadata=ext_metadata_for_packaging
-    が渡されている (外部モード時の bypass を担保)"""
+    が渡されている (外部モード時の bypass を担保 / Step 4 v2 で必須化)"""
     src = WORKFLOW_SRC_PATH.read_text(encoding="utf-8")
-    # 呼び出し前に ext_metadata_for_packaging が組み立てられている
-    assert "ext_metadata_for_packaging = (" in src, (
-        "外部モード時の事前構築 metadata 変数 ext_metadata_for_packaging が見当たらない"
+    # Step 4 v2: external_metadata は必須化されたので単純な代入になる
+    assert "ext_metadata_for_packaging = external_phase_result.pre_built_metadata" in src, (
+        "Step 4 v2: ext_metadata_for_packaging への単純代入が見当たらない"
     )
     assert "external_metadata=ext_metadata_for_packaging" in src, (
         "_generate_youtube_metadata の呼び出しに external_metadata 引数が渡されていない"
