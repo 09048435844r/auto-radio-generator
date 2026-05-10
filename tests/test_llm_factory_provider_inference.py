@@ -13,9 +13,8 @@ from services.script_generation.llm_factory import get_provider_from_model_name
 # (1) 既存マッピング（回帰防止）
 # ---------------------------------------------------------------------------
 
+# Step 4 v2 (2026-05-10): "gemini-" prefix は削除。
 @pytest.mark.parametrize("model_name,expected", [
-    ("gemini-3.1-pro-preview", "gemini"),
-    ("gemini-2.5-flash", "gemini"),
     ("gpt-5.4", "openai"),
     ("gpt-4o-2024-05-13", "openai"),
     ("o1-mini", "openai"),
@@ -28,8 +27,14 @@ from services.script_generation.llm_factory import get_provider_from_model_name
     ("mixtral:8x7b", "ollama"),
 ])
 def test_existing_provider_mappings_unchanged(model_name, expected):
-    """vLLM 移行前から認識されていたモデル名のマッピングが壊れていない。"""
+    """vLLM 移行前から認識されていたモデル名のマッピングが壊れていない（gemini を除く）。"""
     assert get_provider_from_model_name(model_name) == expected
+
+
+def test_gemini_prefix_no_longer_recognized():
+    """Step 4 v2: 'gemini-' prefix は削除されたため ValueError を発生させる"""
+    with pytest.raises(ValueError, match="Unknown model name"):
+        get_provider_from_model_name("gemini-3.1-pro-preview")
 
 
 def test_gpt_oss_precedence_quirk_returns_openai():

@@ -113,17 +113,10 @@ def test_perplexity_researcher_emits_deprecation_warning_on_init():
         )
 
 
-def test_gemini_client_generate_has_deprecation_warning_in_source():
-    """GeminiClient.generate の冒頭に warnings.warn(DeprecationWarning) が組み込まれている
-
-    (実際に呼ぶには Gemini API キーや網羅的な依存が必要なので source 構造で担保する)
-    """
-    src = (Path(__file__).resolve().parent.parent
-           / "services" / "script_generation" / "gemini_client.py").read_text(encoding="utf-8")
-    # async def generate(...) の本体に warnings.warn が含まれる
-    pattern = r"async def generate\([^)]+\) -> Script:.*?warnings\.warn\("
-    assert re.search(pattern, src, re.DOTALL), (
-        "GeminiClient.generate の本体に warnings.warn(DeprecationWarning) が見当たらない"
+def test_gemini_client_file_is_deleted():
+    """Step 4 v2 (2026-05-10): gemini_client.py は物理削除されている"""
+    gemini_path = (Path(__file__).resolve().parent.parent
+                   / "services" / "script_generation" / "gemini_client.py")
+    assert not gemini_path.exists(), (
+        f"Step 4 v2 で削除されるべき gemini_client.py が残っている: {gemini_path}"
     )
-    # DeprecationWarning がカテゴリで指定されている
-    assert "DeprecationWarning" in src

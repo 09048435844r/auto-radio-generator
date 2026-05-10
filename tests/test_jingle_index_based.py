@@ -154,77 +154,10 @@ class TestSegmentPausesList:
         assert last.duration_sec == pytest.approx(5.0)
 
 
-class TestUniqueIdExtraction:
-    """Tests that _extract_segments_from_script produces unique segment_ids."""
-    
-    def test_duplicate_section_names_get_unique_ids(self):
-        """When Gemini emits same section name multiple times, IDs should be disambiguated."""
-        from services.script_generation.gemini_client import GeminiClient
-        from core.models import Script
-        from core.models.script import DialogueTurn
-        
-        # Build a script where "deep_dive" appears 3 times as section marker
-        # Script requires at least 10 turns
-        turns = [
-            DialogueTurn(speaker="A", text="intro line", section="intro"),
-            DialogueTurn(speaker="B", text="reply 1"),
-            DialogueTurn(speaker="A", text="topic 1 start", section="deep_dive"),
-            DialogueTurn(speaker="B", text="reply 2"),
-            DialogueTurn(speaker="A", text="topic 2 start", section="deep_dive"),  # duplicate
-            DialogueTurn(speaker="B", text="reply 3"),
-            DialogueTurn(speaker="A", text="topic 3 start", section="deep_dive"),  # duplicate
-            DialogueTurn(speaker="B", text="reply 4"),
-            DialogueTurn(speaker="A", text="conclusion line", section="conclusion"),
-            DialogueTurn(speaker="B", text="goodbye"),
-        ]
-        script = Script(title="t", theme="test", thumbnail_title="t", sections=turns)
-        
-        # Call _extract_segments_from_script without constructing full GeminiClient
-        # (bypass __init__ by using __new__)
-        client = GeminiClient.__new__(GeminiClient)
-        segments = client._extract_segments_from_script(script)
-        
-        # All segment_ids must be unique
-        ids = [s.segment_id for s in segments]
-        assert len(ids) == len(set(ids)), f"Duplicate IDs found: {ids}"
-        
-        # Verify expected disambiguation pattern (double-underscore separator)
-        assert ids == ["intro", "deep_dive", "deep_dive__2", "deep_dive__3", "conclusion"]
-
-    def test_collision_with_raw_suffix_name(self):
-        """If Gemini raw sections include ``deep_dive`` AND ``deep_dive_2`` AND ``deep_dive`` again,
-        disambiguation must NOT collide with the raw suffix-style name.
-        
-        Regression for Issue 2: earlier logic that appended ``_{count}`` could produce
-        a ``deep_dive_2`` that matches a literal section name already in use.
-        """
-        from services.script_generation.gemini_client import GeminiClient
-        from core.models import Script
-        from core.models.script import DialogueTurn
-        
-        turns = [
-            DialogueTurn(speaker="A", text="intro", section="intro"),
-            DialogueTurn(speaker="B", text="r1"),
-            DialogueTurn(speaker="A", text="dd1", section="deep_dive"),
-            DialogueTurn(speaker="B", text="r2"),
-            DialogueTurn(speaker="A", text="dd2-raw", section="deep_dive_2"),  # raw collision
-            DialogueTurn(speaker="B", text="r3"),
-            DialogueTurn(speaker="A", text="dd3", section="deep_dive"),       # needs disambig
-            DialogueTurn(speaker="B", text="r4"),
-            DialogueTurn(speaker="A", text="end", section="conclusion"),
-            DialogueTurn(speaker="B", text="bye"),
-        ]
-        script = Script(title="t", theme="test", thumbnail_title="t", sections=turns)
-        
-        client = GeminiClient.__new__(GeminiClient)
-        segments = client._extract_segments_from_script(script)
-        
-        ids = [s.segment_id for s in segments]
-        # All IDs must be unique even with the raw "deep_dive_2" collision risk
-        assert len(ids) == len(set(ids)), f"Duplicate IDs found: {ids}"
-        # And the raw "deep_dive_2" section name must survive verbatim
-        assert "deep_dive_2" in ids
-        assert "deep_dive" in ids
+# Step 4 v2 (2026-05-10): TestUniqueIdExtraction は GeminiClient._extract_segments_from_script
+# を直接呼ぶ Gemini 専用テストだったため、GeminiClient 物理削除に伴い削除。
+# segment_id 一意性は外部台本モード経路 (RadioDirectorScriptLoader.build_script_segments)
+# が担保するためそちらの test_radio_director_loader.py で検証している。
 
 
 class TestTimelineCalculatorIndexBased:

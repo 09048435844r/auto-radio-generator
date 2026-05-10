@@ -31,9 +31,7 @@ from core.models import Script
 from core.interfaces import ResearchResult
 from core.settings_manager import SettingsManager
 from services.research import PerplexityResearcher
-from services.script_generation import GeminiClient
 from services.media_processing import ThumbnailGenerator, ThumbnailBackgroundGenerator
-from google.genai import types
 from app_hitl import create_hitl_tab
 from app_hitl_handlers import (
     hitl_execute_research,
@@ -67,38 +65,17 @@ import asyncio
 
 
 async def check_api_health() -> tuple[str, str, str]:
-    """Check API health for Gemini, Perplexity, and Ollama with actual models from config"""
+    """Check API health for Perplexity and Ollama with actual models from config
+
+    Step 4 v2 (2026-05-10): Gemini ヘルスチェックは GeminiClient 削除に伴い廃止。
+    UI 表示用に "削除済み" 文言だけ残す。
+    """
     app_config = load_config()
-    
-    gemini_status = "🟡チェック中..."
+
+    gemini_status = "⚫ 削除済み (Step 4 v2)"
     perplexity_status = "🟡チェック中..."
     ollama_status = "🟡チェック中..."
-    
-    try:
-        # Gemini health check
-        gemini_client = GeminiClient(app_config)
-        try:
-            # Use minimal request with timeout
-            response = gemini_client.client.models.generate_content(
-                model=gemini_client.model_name,
-                contents="ping",
-                config=types.GenerateContentConfig(
-                    max_output_tokens=1,
-                    temperature=0.1
-                )
-            )
-            gemini_status = f"🟢OK ({gemini_client.model_name})"
-        except Exception as e:
-            error_str = str(e)
-            if "401" in error_str:
-                gemini_status = f"🔴Error (401認証)"
-            elif "429" in error_str:
-                gemini_status = f"🔴Error (429制限)"
-            else:
-                gemini_status = f"🔴Error ({gemini_client.model_name})"
-    except Exception as e:
-        gemini_status = "🔴Error (初期化失敗)"
-    
+
     try:
         # Perplexity health check
         perplexity_client = PerplexityResearcher(app_config)
@@ -652,51 +629,54 @@ def research_only(
     """
     import asyncio
     from services.research import PerplexityResearcher
-    from services.script_generation import GeminiClient
     from datetime import datetime
-    
+
     clear_logs()
     append_log("🔍 リサーチのみモード")
     append_log("=" * 40)
     append_log("リサーチ結果を保存します")
-    
+
     if not theme or not theme.strip():
         return "", "エラー: テーマを入力してください。", ""
-    
+
     try:
         app_config = load_config(PROJECT_ROOT)
         mode = RESEARCH_MODE_MAP.get(research_mode)
-        
+
         if not mode:
             return "", "エラー: リサーチモードを選択してください。", ""
-        
+
         async def execute_research():
-            progress(0.1, desc="Step 0: AIが検索計画を作成中...")
-            append_log(f"\n== Step 0: 検索計画作成 ==")
+            # Step 4 v2 (2026-05-10): GeminiClient.create_research_plan は削除済み。
+            # シンプルに theme をそのままクエリとして Perplexity に渡す。
+            progress(0.1, desc="検索クエリを準備中...")
+            append_log(f"\n== Step 0: 検索クエリ準備（Step 4 v2: AI 検索計画作成は廃止） ==")
             append_log(f"テーマ: {theme.strip()}")
-            
-            script_generator = GeminiClient(app_config)
-            plan = await script_generator.create_research_plan(theme.strip(), mode, instruction=None)
-            
-            append_log(f"\n✓ 検索計画作成完了")
-            append_log(f"切り口: {plan.angle}")
+
+            queries = [theme.strip()]
+            angle = "（自動: テーマをそのままクエリに使用）"
+            append_log(f"切り口: {angle}")
             append_log(f"\n検索クエリ:")
-            for i, q in enumerate(plan.queries, 1):
+            for i, q in enumerate(queries, 1):
                 append_log(f"  {i}. {q}")
-            
+
             progress(0.5, desc="Step 1: 並列リサーチ中...")
             append_log(f"\n== Step 1: 並列リサーチ ({research_mode}) ==")
-            
+
             researcher = PerplexityResearcher(app_config)
             avoid = avoid_topics.strip() if avoid_topics and avoid_topics.strip() else None
             if avoid:
                 append_log(f"除外要件: {avoid}")
-            research_result = await researcher.research_multi(plan.queries, mode, avoid_topics=avoid)
-            
+            research_result = await researcher.research_multi(queries, mode, avoid_topics=avoid)
+
             append_log(f"\n✓ 並列リサーチ完了")
             append_log(f"収集した情報: {len(research_result.content)}文字")
-            
-            return research_result, plan
+
+            # plan 互換 stub を構築（保存処理が plan.queries / plan.angle を参照するため）
+            from types import SimpleNamespace
+            plan_stub = SimpleNamespace(queries=queries, angle=angle)
+
+            return research_result, plan_stub
         
         research_result, plan = asyncio.run(execute_research())
         

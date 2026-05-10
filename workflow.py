@@ -28,7 +28,6 @@ from core.models.script import DialogueTurn  # 追加インポート
 from core.models.visual import VisualIdentity  # Issue #7 fix: Proper type import
 from core.models.execution_context import ExecutionContext
 from core.interfaces import ResearchMode, ChapterMarker, ResearchResult
-from services.script_generation import GeminiClient
 from services.script_generation.orchestrator import ScriptOrchestrator
 from services.research import PerplexityResearcher
 from services.audio_synthesis import VoicevoxClient

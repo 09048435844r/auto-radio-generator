@@ -177,8 +177,9 @@ class TestThumbnailRegeneration:
         from services.media_processing.thumbnail_generator import ThumbnailGenerator
 
         # モックの設定
+        # Step 4 v2 (2026-05-10): Gemini → Ollama (curator_model) に切替
         mock_config = Mock()
-        mock_config.yaml.script_generator.gemini.flash_model = "gemini-2.5-flash"
+        mock_config.yaml.script_generator.orchestrator.curator_model = "qwen3-next-80b"
         mock_load_config.return_value = mock_config
 
         mock_prompt_manager = Mock()
@@ -245,18 +246,18 @@ class TestThumbnailRegeneration:
         assert video_title == "元タイトル"  # base_titleがそのまま返される
         assert thumbnail_title == "新サムネイル"
 
-        # LLMAdapterFactory.create の呼び出し検証
+        # LLMAdapterFactory.create の呼び出し検証 (Step 4 v2: ollama / curator_model)
         mock_factory_create.assert_called_once()
         factory_args = mock_factory_create.call_args
         # provider は位置引数 or kwargs どちらでも許容
-        assert factory_args.args[1] == "gemini" or factory_args.kwargs.get("provider") == "gemini"
-        assert factory_args.kwargs.get("model_override") == "gemini-2.5-flash"
+        assert factory_args.args[1] == "ollama" or factory_args.kwargs.get("provider") == "ollama"
+        assert factory_args.kwargs.get("model_override") == "qwen3-next-80b"
 
         # ポートの generate 呼び出し検証
         mock_port.generate.assert_called_once()
         request = mock_port.generate.call_args.args[0]
         assert isinstance(request, LLMRequest)
-        assert request.model == "gemini-2.5-flash"
+        assert request.model == "qwen3-next-80b"
         assert request.response_format == "json"
         assert "テーマ: テストテーマ" in request.user_prompt
         assert "要約: テスト要約" in request.user_prompt
@@ -332,14 +333,15 @@ class TestThumbnailRegeneration:
         mock_load_config,
         mock_factory_create,
     ):
-        """LLMAdapterFactory 経由で LLMRequest が GeminiClient._call_api 相当の
+        """LLMAdapterFactory 経由で LLMRequest が
         パラメータ (max_tokens=16384, temperature=0.85, response_format=json)
         で呼ばれることを確認する回帰テスト。
+        Step 4 v2 (2026-05-10): provider は ollama / curator_model に切替済み。
         """
         from services.media_processing.thumbnail_generator import ThumbnailGenerator
 
         mock_config = Mock()
-        mock_config.yaml.script_generator.gemini.flash_model = "gemini-2.5-flash"
+        mock_config.yaml.script_generator.orchestrator.curator_model = "qwen3-next-80b"
         mock_load_config.return_value = mock_config
 
         mock_prompt_manager = Mock()
@@ -385,7 +387,7 @@ class TestThumbnailRegeneration:
         request = mock_port.generate.call_args.args[0]
         assert isinstance(request, LLMRequest)
         assert request.system_prompt == ""
-        assert request.model == "gemini-2.5-flash"
+        assert request.model == "qwen3-next-80b"
         assert request.max_tokens == 16384
         assert request.temperature == pytest.approx(0.85)
         assert request.response_format == "json"

@@ -584,24 +584,22 @@ class ThumbnailGenerator:
         try:
             console.print(f"[cyan]🔄 新しいサムネイルタイトルを生成中...[/cyan]")
 
-            # 1. Geminiで新しいタイトル生成（軽量モデル）
+            # 1. Ollama で新しいタイトル生成（軽量モデル）
+            # Step 4 v2 (2026-05-10): Gemini 経路は削除済み。orchestrator.curator_model を再利用。
             app_config = load_config()
             prompt_manager = PromptManager()
 
-            # 軽量プロンプトでタイトル生成
             regeneration_prompt = prompt_manager.get_prompt("thumbnail_regeneration", "default")
             formatted_prompt = regeneration_prompt.format(
                 theme=theme,
                 script_summary=script_summary
             )
 
-            # 軽量モデルで API 呼び出し（LLMAdapterFactory 経由）。
-            # GeminiClient._call_api の挙動と揃えるため max_tokens=16384, temperature=0.85,
-            # response_format=json を指定する。
-            flash_model = app_config.yaml.script_generator.gemini.flash_model
+            # 軽量モデルで API 呼び出し（LLMAdapterFactory 経由 / Ollama）
+            flash_model = app_config.yaml.script_generator.orchestrator.curator_model
             llm_port = LLMAdapterFactory.create(
                 app_config,
-                "gemini",
+                "ollama",
                 model_override=flash_model,
             )
             llm_request = LLMRequest(

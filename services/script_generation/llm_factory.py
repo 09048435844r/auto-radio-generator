@@ -1,6 +1,9 @@
 """LLM Provider Factory
 
 Factory pattern for creating script generation clients based on provider name.
+
+Step 4 v2 (2026-05-10): "gemini" provider は削除。OpenAI / Anthropic / Ollama のみ
+サポート（HITL タブ + provider-agnostic 設計のため残置）。
 """
 from typing import Optional
 from rich.console import Console
@@ -11,40 +14,45 @@ from core.models import AppConfig
 console = Console()
 
 
-def create_script_generator(config: AppConfig, provider: str = "gemini") -> IScriptGenerator:
+def create_script_generator(config: AppConfig, provider: str = "ollama") -> IScriptGenerator:
     """Create script generator client based on provider name
-    
+
+    Step 4 v2: "gemini" branch は削除。デフォルトは "ollama"。
+
     Args:
         config: Application configuration
-        provider: Provider name ("gemini" | "openai" | "anthropic" | "ollama")
-    
+        provider: Provider name ("openai" | "anthropic" | "ollama")
+
     Returns:
         IScriptGenerator: Provider-specific client instance
-    
+
     Raises:
         ValueError: If invalid provider name or missing API key
     """
     provider = provider.lower()
     console.print(f"[dim]Creating LLM client: {provider}[/dim]")
-    
-    if provider == "gemini":
-        from .gemini_client import GeminiClient
-        return GeminiClient(config)
-    
-    elif provider == "openai":
+
+    if provider == "openai":
         from .openai_client import OpenAIClient
         return OpenAIClient(config)
-    
+
     elif provider == "anthropic":
         from .anthropic_client import AnthropicClient
         return AnthropicClient(config)
-    
+
     elif provider == "ollama":
         from .ollama_client import OllamaClient
         return OllamaClient(config)
-    
+
+    elif provider == "gemini":
+        # Step 4 v2: Gemini 経路は物理削除済み
+        raise ValueError(
+            "Step 4 v2 (2026-05-10): 'gemini' provider は削除されました。"
+            "外部台本モード (services/pipeline/external_script_phase.py) を使用してください。"
+        )
+
     else:
-        available = ["gemini", "openai", "anthropic", "ollama"]
+        available = ["openai", "anthropic", "ollama"]
         raise ValueError(
             f"Invalid provider: {provider}. Available: {', '.join(available)}"
         )
@@ -53,19 +61,19 @@ def create_script_generator(config: AppConfig, provider: str = "gemini") -> IScr
 def get_provider_from_model_name(model_name: str) -> str:
     """Infer provider name from model name
 
+    Step 4 v2 (2026-05-10): "gemini-" prefix は削除。
+
     Args:
-        model_name: Model name (e.g., "gpt-5.4", "gemini-3.1-pro", "claude-sonnet-4.6",
+        model_name: Model name (e.g., "gpt-5.4", "claude-sonnet-4.6",
                     "gpt-oss:20b-long", "qwen3-next-80b")
 
     Returns:
-        str: Provider name ("gemini" | "openai" | "anthropic" | "ollama")
+        str: Provider name ("openai" | "anthropic" | "ollama")
 
     Raises:
         ValueError: If unknown model name
     """
-    if model_name.startswith("gemini-"):
-        return "gemini"
-    elif model_name.startswith(("gpt-", "o1-", "o3-")):
+    if model_name.startswith(("gpt-", "o1-", "o3-")):
         return "openai"
     elif model_name.startswith("claude-"):
         return "anthropic"
@@ -80,27 +88,26 @@ def get_provider_from_model_name(model_name: str) -> str:
 
 def get_available_providers(config: AppConfig) -> list[str]:
     """Get list of available providers based on configured API keys
-    
+
+    Step 4 v2 (2026-05-10): "gemini" は削除。
+
     Args:
         config: Application configuration
-    
+
     Returns:
         list[str]: List of available provider names
     """
     available = []
-    
-    if hasattr(config.env, 'gemini_api_key') and config.env.gemini_api_key:
-        available.append("gemini")
-    
+
     if hasattr(config.env, 'openai_api_key') and config.env.openai_api_key:
         available.append("openai")
-    
+
     if hasattr(config.env, 'anthropic_api_key') and config.env.anthropic_api_key:
         available.append("anthropic")
-    
+
     # Ollama is always available (local server, no API key needed)
     available.append("ollama")
-    
+
     return available
 
 
