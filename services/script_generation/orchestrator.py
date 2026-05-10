@@ -6,6 +6,11 @@ Hierarchical Agentic Workflow の司令塔。
 3. すべてのセグメントを統合して最終的な Script オブジェクトを返す
 
 文脈の連続性は各セグメントの context_summary を次セグメントに渡すことで維持する。
+
+
+Step 4 v2 (2026-05-10) @deprecated: 旧 Gemini 自動経路の構成要素のため deprecated 扱い。
+HITL タブからのみ呼ばれる。新規開発では外部台本モード (services/pipeline/external_script_phase.py)
+を推奨。物理削除は Step 5 で再評価予定。
 """
 import asyncio
 import logging

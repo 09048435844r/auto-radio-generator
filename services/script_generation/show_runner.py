@@ -10,6 +10,11 @@ TopicCurator と同型のアーキテクチャ:
   - PromptManager から system_prompt を取得
   - JSON レスポンスをサニタイズ付きでパース
   - last_usage でトークン使用量を公開
+
+
+Step 4 v2 (2026-05-10) @deprecated: 旧 Gemini 自動経路の構成要素のため deprecated 扱い。
+HITL タブからのみ呼ばれる。新規開発では外部台本モード (services/pipeline/external_script_phase.py)
+を推奨。物理削除は Step 5 で再評価予定。
 """
 import json
 import logging

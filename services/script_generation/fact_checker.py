@@ -19,6 +19,11 @@ FactCheckReport を返す。
   - 入力サイズ制限: 台本本文 / リサーチ本文をそれぞれ
     config.fact_checker.script_char_limit / research_char_limit で先頭切り出し。
     Qwen3-Next-80B でもコンテキスト長の暴走を防ぐ。
+
+
+Step 4 v2 (2026-05-10) @deprecated: 旧 Gemini 自動経路の構成要素のため deprecated 扱い。
+HITL タブからのみ呼ばれる。新規開発では外部台本モード (services/pipeline/external_script_phase.py)
+を推奨。物理削除は Step 5 で再評価予定。
 """
 import json
 import logging

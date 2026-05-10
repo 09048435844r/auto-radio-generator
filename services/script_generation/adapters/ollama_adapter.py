@@ -1,4 +1,8 @@
-"""Ollama Provider Adapter - Infrastructure layer implementation"""
+"""Ollama Provider Adapter - Infrastructure layer implementation
+
+Step 4 v2 (2026-05-10) @deprecated: 旧 Gemini 自動経路の provider-agnostic 構成要素として
+残置。HITL 経路でのみ呼ばれる。Step 5 で再評価予定。
+"""
 import logging
 from typing import Optional
 from openai import AsyncOpenAI

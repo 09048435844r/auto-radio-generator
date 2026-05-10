@@ -15,6 +15,11 @@ TopicCurator / ShowRunner と同型のアーキテクチャ:
 後方互換性:
   - fact_extractor.enabled=False ならこのエージェントは一切呼ばれず、
     TopicCurator は fact_sheet=None で従来通り動作する。
+
+
+Step 4 v2 (2026-05-10) @deprecated: 旧 Gemini 自動経路の構成要素のため deprecated 扱い。
+HITL タブからのみ呼ばれる。新規開発では外部台本モード (services/pipeline/external_script_phase.py)
+を推奨。物理削除は Step 5 で再評価予定。
 """
 import json
 import logging

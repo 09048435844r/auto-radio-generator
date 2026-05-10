@@ -9,6 +9,11 @@ Hierarchical Agentic Workflow の後処理（ポストプロセス）。
   - 参考文献URLリスト (references)
 
 セグメント生成ロジックには一切影響を与えない独立した後処理として設計する。
+
+
+Step 4 v2 (2026-05-10) @deprecated: 旧 Gemini 自動経路の構成要素のため deprecated 扱い。
+HITL タブからのみ呼ばれる。新規開発では外部台本モード (services/pipeline/external_script_phase.py)
+を推奨。物理削除は Step 5 で再評価予定。
 """
 import json
 import logging
