@@ -21,7 +21,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.models import (
     load_config, Script, AppConfig,
-    TotalUsage, PerplexityUsage, LLMUsage, GeminiUsage, VoicevoxUsage, CostBreakdown,
+    TotalUsage, PerplexityUsage, LLMUsage, VoicevoxUsage, CostBreakdown,
     ExecutionLogEntry, PromptRecord, ConfigSnapshot, CostLogEntry
 )
 from core.models.script import DialogueTurn  # 追加インポート

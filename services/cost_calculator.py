@@ -16,10 +16,6 @@ logger = logging.getLogger(__name__)
 _FREE_TIER_MIN_REQUESTS = 1
 _FREE_TIER_MAX_REQUESTS = 1
 
-# Backward compatibility alias
-GeminiUsage = LLMUsage
-
-
 class CostCalculator:
     """API cost calculator using AppConfig as SSOT
     

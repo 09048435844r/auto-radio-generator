@@ -3,7 +3,6 @@ from .script import Script, DialogueLine
 from .usage import (
     PerplexityUsage,
     LLMUsage,
-    GeminiUsage,
     VoicevoxUsage,
     TotalUsage,
     CostBreakdown,
@@ -23,7 +22,6 @@ __all__ = [
     "TotalUsage",
     "PerplexityUsage",
     "LLMUsage",
-    "GeminiUsage",
     "VoicevoxUsage",
     "CostBreakdown",
     "ResearchPlan",

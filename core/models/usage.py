@@ -21,7 +21,7 @@ class LLMUsage:
     Supports multiple LLM providers (Gemini, OpenAI, Anthropic) with
     provider-specific tracking for accurate cost calculation.
     """
-    provider: str  # "gemini" | "openai" | "anthropic"
+    provider: str  # "openai" | "anthropic" | "ollama"
     model_name: str
     input_tokens: int = 0
     output_tokens: int = 0
@@ -44,8 +44,8 @@ class LLMUsage:
         )
 
 
-# Backward compatibility alias
-GeminiUsage = LLMUsage
+# Step 4 v2 (2026-05-10): GeminiUsage = LLMUsage alias は削除済み。
+# 残存 import 元は LLMUsage に統一する。
 
 
 @dataclass

@@ -10,9 +10,6 @@ from rich.console import Console
 
 from core.interfaces.script_generator import IScriptGenerator
 from core.models import Script, AppConfig, LLMUsage
-
-# Backward compatibility alias
-GeminiUsage = LLMUsage
 from core.prompt_manager import PromptManager
 
 if TYPE_CHECKING:
@@ -42,7 +39,7 @@ class AnthropicClient(IScriptGenerator):
         self.prompt_manager = PromptManager()
         
         # Usage tracking
-        self.last_usage: Optional[GeminiUsage] = None
+        self.last_usage: Optional[LLMUsage] = None
         self.prompt_records: list = []
     
     async def generate(
@@ -102,7 +99,7 @@ class AnthropicClient(IScriptGenerator):
         user_prompt: str,
         use_tools: bool = False,
         phase: str = "scripting"
-    ) -> tuple[str, Optional[GeminiUsage]]:
+    ) -> tuple[str, Optional[LLMUsage]]:
         """Call Anthropic API with Tool Calling
         
         Args:

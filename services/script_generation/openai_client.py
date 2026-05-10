@@ -10,8 +10,6 @@ from rich.console import Console
 from core.interfaces.script_generator import IScriptGenerator
 from core.models import Script, AppConfig, LLMUsage
 
-# Backward compatibility alias
-GeminiUsage = LLMUsage
 from core.prompt_manager import PromptManager
 
 if TYPE_CHECKING:
@@ -42,7 +40,7 @@ class OpenAIClient(IScriptGenerator):
         self.prompt_manager = PromptManager()
         
         # Usage tracking
-        self.last_usage: Optional[GeminiUsage] = None
+        self.last_usage: Optional[LLMUsage] = None
         self.prompt_records: list = []
     
     async def generate(
@@ -121,7 +119,7 @@ class OpenAIClient(IScriptGenerator):
         use_structured_outputs: bool = False,
         phase: str = "scripting",
         model_override: Optional[str] = None
-    ) -> tuple[str, Optional[GeminiUsage]]:
+    ) -> tuple[str, Optional[LLMUsage]]:
         """Call OpenAI API with Structured Outputs
         
         Args:
