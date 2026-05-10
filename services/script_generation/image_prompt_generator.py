@@ -2,10 +2,9 @@
 import logging
 from typing import Optional
 
-from google import genai
-from google.genai import types
 from rich.console import Console
 
+from core.interfaces.llm_port import LLMRequest
 from core.models import AppConfig
 from core.models.curation import ScriptSegment
 from core.models.visual import (
@@ -15,6 +14,7 @@ from core.models.visual import (
     DEFAULT_SECONDARY_COLOR,
     DEFAULT_AESTHETIC,
 )
+from services.script_generation.adapters.factory import LLMAdapterFactory
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -22,9 +22,9 @@ console = Console()
 
 class ImagePromptGenerator:
     """LLM-based image prompt generator
-    
-    Uses Gemini Flash to generate cinematic English prompts for FLUX.1
-    based on radio script segment content.
+
+    Step 5 (2026-05-10): Mac Studio Proxy (vLLM / Qwen3 系) 経由で
+    FLUX.1 用の英語プロンプトを生成する。Gemini 直叩きから移行済み。
     """
     
     # Default color palette when VisualIdentity is not provided
@@ -137,22 +137,20 @@ Example 3 (Environmental Topic):
     
     def __init__(self, config: AppConfig):
         """Initialize prompt generator
-        
+
         Args:
             config: Application configuration
         """
         self.config = config
-        
-        api_key = config.env.gemini_api_key
-        if not api_key:
-            raise ValueError("GEMINI_API_KEY not set")
-        
-        self.client = genai.Client(api_key=api_key)
-        
-        # Use Gemini Flash for fast, low-cost prompt generation
-        gemini_config = getattr(config.yaml.script_generator, "gemini", None)
-        self.model_name = getattr(gemini_config, "flash_model", "gemini-2.0-flash-exp") if gemini_config else "gemini-2.0-flash-exp"
-        
+
+        # Step 5 (2026-05-10): Gemini → Mac Studio Proxy (vLLM Qwen3 系)。
+        # orchestrator.curator_model を再利用 (ThumbnailGenerator.regenerate_with_new_title
+        # と同じ選択基準で、軽量タスク用のスロットを共有する)。
+        self.model_name = config.yaml.script_generator.orchestrator.curator_model
+        self._llm_port = LLMAdapterFactory.create(
+            config, "ollama", model_override=self.model_name
+        )
+
         logger.info(f"ImagePromptGenerator initialized with model: {self.model_name}")
     
     async def generate_prompt(
@@ -217,35 +215,30 @@ Generate the prompt now:"""
         console.print(f"[cyan]Generating image prompt for {segment.segment_id}...[/cyan]")
         
         try:
-            response = await self.client.aio.models.generate_content(
+            llm_request = LLMRequest(
+                system_prompt=system_prompt,
+                user_prompt=user_message,
                 model=self.model_name,
-                contents=[
-                    types.Content(
-                        role="user",
-                        parts=[types.Part(text=system_prompt + "\n\n" + user_message)]
-                    )
-                ],
-                config=types.GenerateContentConfig(
-                    temperature=0.8,
-                    max_output_tokens=256,
-                )
+                max_tokens=512,
+                temperature=0.8,
+                response_format="text",
             )
-            
-            prompt = response.text.strip()
-            
+            llm_response = await self._llm_port.generate(llm_request)
+            prompt = llm_response.content.strip()
+
             # Ensure "no text, no writing, no watermarks" is at the end
             if "no text" not in prompt.lower():
                 prompt += ", no text, no writing, no watermarks"
-            
+
             logger.info(f"Generated prompt: {prompt[:100]}...")
             console.print(f"[dim]Prompt: {prompt[:80]}...[/dim]")
-            
+
             return prompt
-            
+
         except Exception as e:
             logger.error(f"Prompt generation failed: {e}")
             console.print(f"[red]✗ Prompt generation failed: {e}[/red]")
-            
+
             # Fallback to generic prompt
             fallback = self._get_fallback_prompt(segment, identity)
             console.print(f"[yellow]Using fallback prompt[/yellow]")
@@ -379,37 +372,32 @@ Create an ABSTRACT, ATMOSPHERIC, or METAPHORICAL background (NOT concrete object
         console.print(f"[cyan]Generating thumbnail background prompt...[/cyan]")
         
         try:
-            response = await self.client.aio.models.generate_content(
+            llm_request = LLMRequest(
+                system_prompt=system_prompt,
+                user_prompt=user_message,
                 model=self.model_name,
-                contents=[
-                    types.Content(
-                        role="user",
-                        parts=[types.Part(text=system_prompt + "\n\n" + user_message)]
-                    )
-                ],
-                config=types.GenerateContentConfig(
-                    temperature=0.9,  # Higher creativity for thumbnails
-                    max_output_tokens=256,
-                )
+                max_tokens=512,
+                temperature=0.9,  # Higher creativity for thumbnails
+                response_format="text",
             )
-            
-            prompt = response.text.strip()
-            
+            llm_response = await self._llm_port.generate(llm_request)
+            prompt = llm_response.content.strip()
+
             # Sanitize to remove any Japanese characters
             prompt = self._sanitize_prompt(prompt)
-            
+
             # Enforce mandatory quality keywords only
             prompt = self._enforce_quality_keywords(prompt)
-            
+
             logger.info(f"Generated thumbnail prompt: {prompt[:100]}...")
             console.print(f"[dim]Thumbnail prompt: {prompt[:80]}...[/dim]")
-            
+
             return prompt
-            
+
         except Exception as e:
             logger.error(f"Thumbnail prompt generation failed: {e}")
             console.print(f"[red]✗ Thumbnail prompt generation failed: {e}[/red]")
-            
+
             # Fallback to generic thumbnail prompt
             fallback = self._get_fallback_thumbnail_prompt(theme, identity)
             console.print(f"[yellow]Using fallback thumbnail prompt[/yellow]")
