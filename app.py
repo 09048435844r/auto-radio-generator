@@ -2431,16 +2431,21 @@ def create_ui() -> gr.Blocks:
                     f"Ollama: 🔴Error (チェック失敗)"
                 )
         
-        def check_generate_button_state(gemini_status_text, perplexity_status_text):
-            """Check if both APIs are OK and enable/disable generate button accordingly"""
-            gemini_ok = "🟢OK" in gemini_status_text
+        def check_generate_button_state(perplexity_status_text, ollama_status_text):
+            """Check if Perplexity + Ollama are OK and enable/disable generate button.
+
+            Step 4 v2 (2026-05-10) 以降、Gemini 経路は削除済みのため判定対象から外す。
+            現行依存: Perplexity (リサーチ) + Ollama / Mac Studio Proxy (台本・サムネイル
+            プロンプト生成)。
+            """
             perplexity_ok = "🟢OK" in perplexity_status_text
-            
-            if gemini_ok and perplexity_ok:
+            ollama_ok = "🟢OK" in ollama_status_text
+
+            if perplexity_ok and ollama_ok:
                 return gr.update(interactive=True, variant="primary")
             else:
                 return gr.update(interactive=False, variant="secondary")
-        
+
         generator_components["check_api_btn"].click(
             fn=update_api_status,
             inputs=[],
@@ -2450,22 +2455,24 @@ def create_ui() -> gr.Blocks:
                 generator_components["ollama_status"]
             ]
         )
-        
+
         # Auto-update generate button state when status changes
-        generator_components["gemini_status"].change(
-            fn=check_generate_button_state,
-            inputs=[
-                generator_components["gemini_status"],
-                generator_components["perplexity_status"]
-            ],
-            outputs=[generator_components["generate_btn"]]
-        )
-        
+        # Step 4 v2 以降、gemini_status は常に "削除済み" の固定文言のため
+        # ボタン判定の入力からは外す（perplexity / ollama のみ監視）。
         generator_components["perplexity_status"].change(
             fn=check_generate_button_state,
             inputs=[
-                generator_components["gemini_status"],
-                generator_components["perplexity_status"]
+                generator_components["perplexity_status"],
+                generator_components["ollama_status"]
+            ],
+            outputs=[generator_components["generate_btn"]]
+        )
+
+        generator_components["ollama_status"].change(
+            fn=check_generate_button_state,
+            inputs=[
+                generator_components["perplexity_status"],
+                generator_components["ollama_status"]
             ],
             outputs=[generator_components["generate_btn"]]
         )
