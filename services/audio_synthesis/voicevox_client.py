@@ -1,5 +1,6 @@
 """VOICEVOX APIを使用した音声合成クライアント"""
 import asyncio
+import re
 import shutil
 import wave
 from io import BytesIO
@@ -18,6 +19,24 @@ from services.media_processing import JingleProvider
 from .voicevox_segment_timing import calculate_segment_timings
 
 console = Console()
+
+# verified_script.json の turn テキストに残る引用タグ ([src=3] 等) は
+# fact_checker / research 用の出典参照であり、VOICEVOX に読ませると
+# 「ブラケットエスアールイコール…」と読み上げてしまう。TTS 直前で除去する。
+# verified_script.json 本体は出典トレーサビリティのため変更しない。
+_CITATION_TAG_PATTERN = re.compile(r"\s*\[src=\d+\]")
+
+
+def strip_citation_tags(text: str) -> str:
+    """[src=N] 形式の引用タグを (前後空白ごと) 除去して返す。
+
+    Args:
+        text: 元テキスト (verified_script.json 由来の turn テキスト等)
+
+    Returns:
+        引用タグを除去し、前後の余分な空白を trim した文字列。
+    """
+    return _CITATION_TAG_PATTERN.sub("", text).strip()
 
 
 class VoicevoxClient(IAudioSynthesizer):
@@ -245,6 +264,9 @@ class VoicevoxClient(IAudioSynthesizer):
         speed_scale: float
     ) -> bytes:
         """１フレーズの音声を合成"""
+        # verified_script.json の [src=N] 引用タグは音読対象外。VOICEVOX 直前で除去。
+        text = strip_citation_tags(text)
+
         # 音声クエリを生成
         query_response = await client.post(
             f"{self.base_url}/audio_query",
