@@ -2431,20 +2431,27 @@ def create_ui() -> gr.Blocks:
                     f"Ollama: 🔴Error (チェック失敗)"
                 )
         
-        def check_generate_button_state(perplexity_status_text, ollama_status_text):
-            """Check if Perplexity + Ollama are OK and enable/disable generate button.
+        def check_action_button_states(perplexity_status_text, ollama_status_text):
+            """API ヘルスチェック結果に応じて各アクションボタンの活性を制御する。
 
-            Step 4 v2 (2026-05-10) 以降、Gemini 経路は削除済みのため判定対象から外す。
-            現行依存: Perplexity (リサーチ) + Ollama / Mac Studio Proxy (台本・サムネイル
-            プロンプト生成)。
+            Step 4 v2 (2026-05-10) 以降、Gemini 経路は削除済みのため判定対象外。
+
+            - 動画を生成する (generate_btn): Ollama / Mac Studio Proxy のみ必須。
+              Perplexity NG でも、インポート済み research_brief.json や外部台本
+              モードから生成できるため活性を維持する。
+            - リサーチのみ実行 (research_only_btn): Perplexity API を直接叩くため
+              Perplexity 必須。NG なら非活性化する。
             """
             perplexity_ok = "🟢OK" in perplexity_status_text
             ollama_ok = "🟢OK" in ollama_status_text
 
-            if perplexity_ok and ollama_ok:
-                return gr.update(interactive=True, variant="primary")
-            else:
-                return gr.update(interactive=False, variant="secondary")
+            generate_update = (
+                gr.update(interactive=True, variant="primary")
+                if ollama_ok
+                else gr.update(interactive=False, variant="secondary")
+            )
+            research_only_update = gr.update(interactive=perplexity_ok)
+            return generate_update, research_only_update
 
         generator_components["check_api_btn"].click(
             fn=update_api_status,
@@ -2456,25 +2463,28 @@ def create_ui() -> gr.Blocks:
             ]
         )
 
-        # Auto-update generate button state when status changes
+        # Auto-update action button states when status changes.
         # Step 4 v2 以降、gemini_status は常に "削除済み" の固定文言のため
         # ボタン判定の入力からは外す（perplexity / ollama のみ監視）。
+        # generate_btn は Ollama 依存、research_only_btn は Perplexity 依存。
+        _action_btn_inputs = [
+            generator_components["perplexity_status"],
+            generator_components["ollama_status"],
+        ]
+        _action_btn_outputs = [
+            generator_components["generate_btn"],
+            generator_components["research_only_btn"],
+        ]
         generator_components["perplexity_status"].change(
-            fn=check_generate_button_state,
-            inputs=[
-                generator_components["perplexity_status"],
-                generator_components["ollama_status"]
-            ],
-            outputs=[generator_components["generate_btn"]]
+            fn=check_action_button_states,
+            inputs=_action_btn_inputs,
+            outputs=_action_btn_outputs,
         )
 
         generator_components["ollama_status"].change(
-            fn=check_generate_button_state,
-            inputs=[
-                generator_components["perplexity_status"],
-                generator_components["ollama_status"]
-            ],
-            outputs=[generator_components["generate_btn"]]
+            fn=check_action_button_states,
+            inputs=_action_btn_inputs,
+            outputs=_action_btn_outputs,
         )
         
         # リサーチのみ実行
