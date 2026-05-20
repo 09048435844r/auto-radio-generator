@@ -1179,6 +1179,8 @@ def run_workflow_sync(
             if external_mode and external_phase_result is not None:
                 callbacks.log("[INFO] 外部台本モード: Phase 1 (planning) + Phase 2 (scripting) を完全スキップ")
                 # ScriptingPhaseResult 互換のスタブを構築 (Phase 3 production にそのまま渡せるように)
+                # Step 6 (2026-05-12): external_phase_result で生成済みの visual_identity を伝播。
+                # production_phase → ffmpeg_renderer → ImageProvider に下流配線済み。
                 scripting_result = ScriptingPhaseResult(
                     script=external_phase_result.script,
                     research_content=None,
@@ -1188,7 +1190,7 @@ def run_workflow_sync(
                     research_duration_sec=0.0,
                     script_duration_sec=0.0,
                     segments=external_phase_result.segments,
-                    visual_identity=None,
+                    visual_identity=external_phase_result.visual_identity,
                 )
             else:
                 # 旧 LLM 自動経路は削除済み。外部台本モードを必須とする。

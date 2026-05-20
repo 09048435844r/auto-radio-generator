@@ -1,12 +1,10 @@
 """Visual palette generator for dynamic color-driven image generation"""
-import json
 import logging
 from typing import Optional
 
-from google import genai
-from google.genai import types
 from rich.console import Console
 
+from core.interfaces.llm_port import LLMRequest
 from core.models import AppConfig
 from core.models.visual import (
     VisualIdentity,
@@ -17,6 +15,7 @@ from core.models.visual import (
     DEFAULT_AESTHETIC,
     DEFAULT_VISUAL_KEYWORDS,
 )
+from services.script_generation.adapters.factory import LLMAdapterFactory
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -24,9 +23,9 @@ console = Console()
 
 class VisualPaletteGenerator:
     """LLM-based visual identity generator
-    
-    Uses Gemini Flash to generate a unique visual brand (color palette + aesthetic)
-    for each video, ensuring visual consistency across all segments and thumbnail.
+
+    Step 6 (2026-05-12): Mac Studio Proxy (vLLM / Qwen3 系) 経由でテーマごとの
+    visual brand (color palette + aesthetic) を生成する。Gemini 直叩きから移行済み。
     
     Note: This class generates VisualIdentity but returns VisualPalette for
     backward compatibility. Use generate_identity() for full VisualIdentity.
@@ -115,22 +114,20 @@ Theme: "Lo-fiヒップホップの魅力"
     
     def __init__(self, config: AppConfig):
         """Initialize palette generator
-        
+
         Args:
             config: Application configuration
         """
         self.config = config
-        
-        api_key = config.env.gemini_api_key
-        if not api_key:
-            raise ValueError("GEMINI_API_KEY not set")
-        
-        self.client = genai.Client(api_key=api_key)
-        
-        # Use Gemini Flash for fast, low-cost palette generation
-        gemini_config = getattr(config.yaml.script_generator, "gemini", None)
-        self.model_name = getattr(gemini_config, "flash_model", "gemini-3-flash-preview") if gemini_config else "gemini-3-flash-preview"
-        
+
+        # Step 6 (2026-05-12): Gemini → Mac Studio Proxy (vLLM Qwen3 系)。
+        # orchestrator.curator_model を再利用 (Step 5 の ImagePromptGenerator と
+        # 同じ選択基準で、軽量タスク用のスロットを共有する)。
+        self.model_name = config.yaml.script_generator.orchestrator.curator_model
+        self._llm_port = LLMAdapterFactory.create(
+            config, "ollama", model_override=self.model_name
+        )
+
         logger.info(f"VisualPaletteGenerator initialized with model: {self.model_name}")
     
     async def generate_identity(
@@ -165,65 +162,32 @@ Summary:
 Create a visually distinctive brand (color palette + aesthetic) that captures the essence of this theme."""
         
         try:
-            import asyncio
-            
-            prompt_text = self.SYSTEM_PROMPT + "\n\n" + user_message
-            
-            # Run sync client in a thread to avoid blocking the event loop.
-            # asyncio.wait_for only works reliably with asyncio.to_thread (not aio client).
-            #
-            # Root-cause fix for "Unterminated string" JSONDecodeError:
-            # - Use Structured Output (response_schema=VisualIdentity) so the SDK
-            #   returns a parsed Pydantic instance and JSON validity is guaranteed
-            #   by the model. This removes markdown fence stripping and json.loads.
-            # - Set thinking_budget=0 on gemini-3-flash-preview so internal thinking
-            #   tokens do not consume the output budget (previous 512-token limit
-            #   was being exhausted by ~400 thinking tokens, truncating the JSON).
-            # - Keep max_output_tokens generous (1024) as a safety margin.
-            def _sync_call():
-                return self.client.models.generate_content(
-                    model=self.model_name,
-                    contents=prompt_text,
-                    config=types.GenerateContentConfig(
-                        temperature=0.9,
-                        max_output_tokens=1024,
-                        response_mime_type="application/json",
-                        response_schema=VisualIdentity,
-                        thinking_config=types.ThinkingConfig(thinking_budget=0),
-                    )
-                )
-            
-            response = await asyncio.wait_for(
-                asyncio.to_thread(_sync_call),
-                timeout=30.0
+            # Step 6: Mac Studio Proxy 経由で JSON 出力を取得し、Pydantic で validate。
+            # 旧 Gemini Structured Output (response_schema=VisualIdentity) の代替として、
+            # response_format="json" + model_validate_json で構造担保する。
+            # SYSTEM_PROMPT に JSON フォーマット例 4 件が含まれており Qwen3 系で安定。
+            llm_request = LLMRequest(
+                system_prompt=self.SYSTEM_PROMPT,
+                user_prompt=user_message,
+                model=self.model_name,
+                max_tokens=1024,
+                temperature=0.9,
+                response_format="json",
             )
-            
-            # Structured Output: SDK returns a parsed Pydantic instance directly.
-            identity = response.parsed
-            if not isinstance(identity, VisualIdentity):
-                # Defensive: fall back to manual parsing if parsed is missing
-                # (e.g., empty response due to safety filter or MAX_TOKENS).
-                finish_reason = None
-                try:
-                    finish_reason = response.candidates[0].finish_reason
-                except Exception:
-                    pass
-                raise ValueError(
-                    f"Visual identity response missing parsed payload "
-                    f"(finish_reason={finish_reason}, text={response.text!r:.200})"
-                )
-            
+            llm_response = await self._llm_port.generate(llm_request)
+            identity = VisualIdentity.model_validate_json(llm_response.content)
+
             logger.info(f"Generated visual identity: {identity.primary_color}, {identity.secondary_color}")
             console.print(f"[green]✓ Visual identity generated[/green]")
             console.print(f"[dim]Reasoning: {identity.reasoning}[/dim]")
-            
+
             return identity
-            
+
         except Exception as e:
             logger.error(f"Failed to generate visual identity: {e}")
             logger.debug(f"Theme: {theme}")
             console.print(f"[red]✗ Visual identity generation failed: {e}[/red]")
-            
+
             # Fallback to default cyberpunk identity
             fallback = self._get_fallback_identity(theme)
             console.print(f"[yellow]Using fallback visual identity: {fallback}[/yellow]")

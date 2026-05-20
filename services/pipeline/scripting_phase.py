@@ -442,14 +442,32 @@ async def execute_scripting_phase(
     background_mode = getattr(video_config, "background_mode", "static") if video_config else "static"
     
     if background_mode == "dynamic":
-        # Skip VisualPaletteGenerator for Ollama (Gemini-only feature)
-        if provider.lower() == "ollama":
+        # Step 6 (2026-05-12): VisualPaletteGenerator は Mac Studio Proxy 経由に移行済み。
+        # Ollama スキップ分岐の根拠 (Gemini-only feature) は消えたため統一フローに戻す。
+        try:
             cb.log("\n== Scripting Phase: Visual Identity Generation ==")
-            cb.log("[INFO] Ollama provider detected: Skipping visual identity generation (Gemini-only feature)")
+            cb.log("[INFO] Generating visual brand (color + style) for FLUX.1...")
+            cb.progress(0.70, "🎨 Generating visual identity...")
+            await asyncio.sleep(0)  # Yield to event loop for Gradio progress flush
+
+            from services.script_generation.visual_palette_generator import VisualPaletteGenerator
+
+            palette_generator = VisualPaletteGenerator(config)
+            script_summary = script.description[:300] if script.description else research_brief.theme
+
+            visual_identity = await palette_generator.generate_identity(
+                theme=research_brief.theme,
+                script_summary=script_summary
+            )
+
+            cb.log(f"✓ Visual identity determined: {visual_identity}")
+            cb.progress(0.80, "✅ Visual identity generated")
+            await asyncio.sleep(0)  # Yield to event loop for Gradio progress flush
+        except Exception as e:
+            # PR-F: logger.error も併用して PR-C の processing_log.txt 収集に乗せる。
+            logger.error("Visual identity generation failed: %s", e, exc_info=True)
+            cb.log(f"⚠ Visual identity generation failed: {e}")
             cb.log("[INFO] Using default visual identity")
-            cb.progress(0.70, "⚡ Using default visual identity (Ollama)")
-            await asyncio.sleep(0)
-            
             from core.models.visual import (
                 VisualIdentity,
                 DEFAULT_PRIMARY_COLOR,
@@ -465,48 +483,8 @@ async def execute_scripting_phase(
                 aesthetic=DEFAULT_AESTHETIC,
                 visual_keywords=list(DEFAULT_VISUAL_KEYWORDS)  # Convert tuple to list
             )
-        else:
-            try:
-                cb.log("\n== Scripting Phase: Visual Identity Generation ==")
-                cb.log("[INFO] Generating visual brand (color + style) for FLUX.1...")
-                cb.progress(0.70, "🎨 Generating visual identity...")
-                await asyncio.sleep(0)  # Yield to event loop for Gradio progress flush
-                
-                from services.script_generation.visual_palette_generator import VisualPaletteGenerator
-                
-                palette_generator = VisualPaletteGenerator(config)
-                script_summary = script.description[:300] if script.description else research_brief.theme
-                
-                visual_identity = await palette_generator.generate_palette(
-                    theme=research_brief.theme,
-                    script_summary=script_summary
-                )
-                
-                cb.log(f"✓ Visual identity determined: {visual_identity}")
-                cb.progress(0.80, "✅ Visual identity generated")
-                await asyncio.sleep(0)  # Yield to event loop for Gradio progress flush
-            except Exception as e:
-                # PR-F: logger.error も併用して PR-C の processing_log.txt 収集に乗せる。
-                logger.error("Visual identity generation failed: %s", e, exc_info=True)
-                cb.log(f"⚠ Visual identity generation failed: {e}")
-                cb.log("[INFO] Using default visual identity")
-                from core.models.visual import (
-                    VisualIdentity,
-                    DEFAULT_PRIMARY_COLOR,
-                    DEFAULT_SECONDARY_COLOR,
-                    DEFAULT_COLOR_MOOD,
-                    DEFAULT_AESTHETIC,
-                    DEFAULT_VISUAL_KEYWORDS
-                )
-                visual_identity = VisualIdentity(
-                    primary_color=DEFAULT_PRIMARY_COLOR,
-                    secondary_color=DEFAULT_SECONDARY_COLOR,
-                    color_mood=DEFAULT_COLOR_MOOD,
-                    aesthetic=DEFAULT_AESTHETIC,
-                    visual_keywords=list(DEFAULT_VISUAL_KEYWORDS)  # Convert tuple to list
-                )
-                cb.progress(0.80, "⚠️ Using default visual identity")
-                await asyncio.sleep(0)  # Yield to event loop for Gradio progress flush
+            cb.progress(0.80, "⚠️ Using default visual identity")
+            await asyncio.sleep(0)  # Yield to event loop for Gradio progress flush
     else:
         cb.log("[INFO] Static mode: Skipping visual identity generation")
         cb.progress(0.80, "⏭️ Skipping visual identity generation")

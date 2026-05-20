@@ -24,11 +24,13 @@ from core.models import AppConfig
 from core.models.curation import ScriptSegment
 from core.models.script import RadioScriptArtifact, Script
 from core.models.verified_script import VerifiedScript
+from core.models.visual import VisualIdentity
 from core.session_manager import SessionManager
 from services.script_loading.radio_director_loader import (
     RadioDirectorScriptLoader,
     build_script_segments,
 )
+from services.script_generation.visual_palette_generator import VisualPaletteGenerator
 
 
 @dataclass
@@ -42,9 +44,11 @@ class ExternalScriptPhaseResult:
     script: Script
     segments: List[ScriptSegment]
     pre_built_metadata: Dict[str, Any]
-    # Phase 3 production で使う visual_identity は外部台本モードでは存在しない
-    # (Mac 側で生成しないため None。production_phase 側のフォールバックで処理)
-    visual_identity: Optional[dict] = None
+    # Step 6 (2026-05-12): VerifiedScript.metadata.title から
+    # VisualPaletteGenerator で動的生成する。Mac Studio Proxy 失敗時は
+    # fallback identity (electric cyan + hot magenta) が返るので常に non-None。
+    # 型は ScriptingPhaseResult.visual_identity と合わせて Optional[VisualIdentity]。
+    visual_identity: Optional[VisualIdentity] = None
     # 元の VerifiedScript も保持（HITL / debug / 再実行で参照可能にする）
     verified_script: Optional[VerifiedScript] = field(default=None, repr=False)
 
@@ -96,13 +100,31 @@ async def execute_external_script_phase(
         "hashtags": list(vs.metadata.hashtags),
     }
 
-    # 5. session に RadioScriptArtifact として永続化 (HITL / debug 用)
+    # 5. Step 6 (2026-05-12): テーマ色を Mac Studio Proxy で動的生成。
+    # 旧 (Step 4 v2): visual_identity=None を返し DEFAULT_PRIMARY_COLOR (electric cyan)
+    # + DEFAULT_SECONDARY_COLOR (hot magenta) が全動画に注入されていた。
+    # VisualPaletteGenerator 内部で LLM 失敗時は fallback identity を返すため、
+    # 通常 except には到達しない (構築時例外の保険のみ)。
+    visual_identity: Optional[VisualIdentity] = None
+    try:
+        log("\n== External Script Phase: Visual Identity Generation ==")
+        palette_generator = VisualPaletteGenerator(config)
+        visual_identity = await palette_generator.generate_identity(
+            theme=vs.metadata.title,
+            script_summary=vs.metadata.description[:300],
+        )
+        log(f"✓ Visual identity: {visual_identity}")
+    except Exception as e:
+        log(f"[WARN] Visual identity 生成で予期せぬ例外 (続行): {e}")
+        visual_identity = None
+
+    # 6. session に RadioScriptArtifact として永続化 (HITL / debug 用)
     try:
         artifact = RadioScriptArtifact(
             session_id=session_manager.session_id,
             script=script,
             segments=[seg.model_dump() for seg in segments],
-            visual_identity=None,
+            visual_identity=visual_identity.model_dump() if visual_identity else None,
             research_brief_path=None,
             llm_usage=None,
         )
@@ -116,6 +138,6 @@ async def execute_external_script_phase(
         script=script,
         segments=segments,
         pre_built_metadata=pre_built_metadata,
-        visual_identity=None,
+        visual_identity=visual_identity,
         verified_script=vs,
     )
