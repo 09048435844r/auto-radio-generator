@@ -915,6 +915,98 @@ def _run_metadata_phase(
     return metadata_path, generated_metadata
 
 
+def _upload_to_youtube(
+    *,
+    config: AppConfig,
+    use_mock: bool,
+    upload_override,
+    publishing_config,
+    video_path,
+    formatted_title: str,
+    formatted_description: str,
+    thumbnail_path,
+    callbacks,
+) -> Optional[str]:
+    """YouTube へ動画をアップロードし、アップロード URL を返す（失敗時は None）。
+
+    should_upload の判定（UI 優先フラグ / config 設定 / mock ガード）、アップロード、
+    再生リスト追加までを担う。アップロード失敗・再生リスト追加失敗はいずれも非致命で、
+    ログ出力のうえ動画生成結果は成功扱いとする（原コードと厳密一致）。
+
+    Args:
+        config: アプリ設定(YouTubeClient 生成に使用)
+        use_mock: Mock 実行か（True の場合は強制的にアップロード無効）
+        upload_override: UI 優先のアップロードフラグ（None なら config 設定に従う）
+        publishing_config: publishing 設定(enable_upload / playlist_id)
+        video_path: アップロード対象の動画ファイルパス
+        formatted_title: 動画タイトル
+        formatted_description: 概要欄
+        thumbnail_path: サムネイル画像パス
+        callbacks: ProgressCallback（ログ出力用）
+
+    Returns:
+        アップロード成功時は動画 URL、無効/失敗時は None
+    """
+    uploaded_video_url: Optional[str] = None
+    should_upload = (
+        upload_override
+        if upload_override is not None
+        else bool(publishing_config and getattr(publishing_config, "enable_upload", False))
+    )
+
+    # Safety guard: never upload during mock executions.
+    if use_mock and should_upload:
+        should_upload = False
+        callbacks.log("[INFO] MockモードのためYouTubeアップロードを強制的に無効化しました")
+
+    if should_upload:
+        callbacks.log("[INFO] YouTubeアップロードを開始します...")
+        try:
+            youtube_client = YouTubeClient(config)
+            uploaded_video_url = youtube_client.upload_video(
+                file_path=video_path,
+                title=formatted_title,
+                description=formatted_description,
+                thumbnail_path=thumbnail_path,
+            )
+            callbacks.log(f"✓ YouTubeアップロード完了: {uploaded_video_url}")
+
+            # 設定されている場合は再生リストへ追加（失敗しても非致命）
+            playlist_id = getattr(publishing_config, "playlist_id", None)
+            if isinstance(playlist_id, str):
+                playlist_id = playlist_id.strip()
+
+            if playlist_id:
+                callbacks.log(f"[INFO] 再生リスト追加設定: {playlist_id}")
+                try:
+                    parsed_url = urlparse(uploaded_video_url)
+                    video_id = parse_qs(parsed_url.query).get("v", [None])[0]
+                    if video_id:
+                        youtube_client.add_video_to_playlist(
+                            video_id=video_id,
+                            playlist_id=playlist_id,
+                        )
+                        callbacks.log(f"✓ 再生リストへ追加完了: {playlist_id}")
+                    else:
+                        callbacks.log(
+                            "⚠ 再生リスト追加をスキップ: 動画IDの抽出に失敗しました"
+                        )
+                except Exception as playlist_error:
+                    callbacks.log(
+                        f"⚠ 再生リストへの追加に失敗しました（動画生成は成功）: {playlist_error}"
+                    )
+            else:
+                callbacks.log("[INFO] 再生リスト追加設定: 未設定（playlist_id が空のためスキップ）")
+        except Exception as upload_error:
+            callbacks.log(
+                f"⚠ YouTubeアップロードに失敗しました（動画生成は成功）: {upload_error}"
+            )
+    else:
+        callbacks.log("[INFO] YouTubeアップロード設定: 無効（UI設定優先）")
+
+    return uploaded_video_url
+
+
 def run_workflow_sync(
     theme: str,
     overrides: Optional[UIOverrides] = None,
@@ -1314,63 +1406,18 @@ def run_workflow_sync(
             cost_report = cost_calculator.format_cost_report(total_usage, cost)
 
             # YouTubeアップロード（失敗しても動画生成結果は成功扱い）
-            uploaded_video_url: Optional[str] = None
-            should_upload = (
-                upload_override
-                if upload_override is not None
-                else bool(publishing_config and getattr(publishing_config, "enable_upload", False))
+            uploaded_video_url = _upload_to_youtube(
+                config=config,
+                use_mock=use_mock,
+                upload_override=upload_override,
+                publishing_config=publishing_config,
+                video_path=production_result.video_path,
+                formatted_title=formatted_title,
+                formatted_description=formatted_description,
+                thumbnail_path=thumbnail_path,
+                callbacks=callbacks,
             )
 
-            # Safety guard: never upload during mock executions.
-            if use_mock and should_upload:
-                should_upload = False
-                callbacks.log("[INFO] MockモードのためYouTubeアップロードを強制的に無効化しました")
-
-            if should_upload:
-                callbacks.log("[INFO] YouTubeアップロードを開始します...")
-                try:
-                    youtube_client = YouTubeClient(config)
-                    uploaded_video_url = youtube_client.upload_video(
-                        file_path=production_result.video_path,
-                        title=formatted_title,
-                        description=formatted_description,
-                        thumbnail_path=thumbnail_path,
-                    )
-                    callbacks.log(f"✓ YouTubeアップロード完了: {uploaded_video_url}")
-
-                    # 設定されている場合は再生リストへ追加（失敗しても非致命）
-                    playlist_id = getattr(publishing_config, "playlist_id", None)
-                    if isinstance(playlist_id, str):
-                        playlist_id = playlist_id.strip()
-
-                    if playlist_id:
-                        callbacks.log(f"[INFO] 再生リスト追加設定: {playlist_id}")
-                        try:
-                            parsed_url = urlparse(uploaded_video_url)
-                            video_id = parse_qs(parsed_url.query).get("v", [None])[0]
-                            if video_id:
-                                youtube_client.add_video_to_playlist(
-                                    video_id=video_id,
-                                    playlist_id=playlist_id,
-                                )
-                                callbacks.log(f"✓ 再生リストへ追加完了: {playlist_id}")
-                            else:
-                                callbacks.log(
-                                    "⚠ 再生リスト追加をスキップ: 動画IDの抽出に失敗しました"
-                                )
-                        except Exception as playlist_error:
-                            callbacks.log(
-                                f"⚠ 再生リストへの追加に失敗しました（動画生成は成功）: {playlist_error}"
-                            )
-                    else:
-                        callbacks.log("[INFO] 再生リスト追加設定: 未設定（playlist_id が空のためスキップ）")
-                except Exception as upload_error:
-                    callbacks.log(
-                        f"⚠ YouTubeアップロードに失敗しました（動画生成は成功）: {upload_error}"
-                    )
-            else:
-                callbacks.log("[INFO] YouTubeアップロード設定: 無効（UI設定優先）")
-            
             # ========== 実行ログ・コスト履歴の記録 ==========
             try:
                 from uuid import uuid4
