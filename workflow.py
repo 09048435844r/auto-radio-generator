@@ -572,55 +572,7 @@ async def execute_production_phase(
     
     cb.log(f"✓ 動画生成完了: {render_result.file_size_mb:.1f}MB ({render_duration:.1f}秒)")
     cb.progress(0.95, "✅ 動画生成完了")
-    
-    # ========== Step 3: サムネイル生成 ==========
-    cb.log(f"\n== Phase 3-3: サムネイル生成 ==")
-    
-    # サムネイル背景画像を決定（dynamic/static）
-    thumbnail_bg_mode = config.yaml.video_renderer.thumbnail_background_mode
-    if thumbnail_bg_mode == "dynamic" and visual_identity:
-        # FLUX.1で動的生成
-        cb.log("FLUX.1でサムネイル背景を生成中...")
-        thumbnail_bg_generator = ThumbnailBackgroundGenerator(config, output_dir=output_dir)
-        
-        # Generate script summary for thumbnail prompt
-        # Use actual dialogue content instead of just description for better topic matching
-        dialogue_turns = [
-            turn.text for turn in script.sections[:15] 
-            if turn.is_dialogue() and turn.text
-        ]
-        
-        if dialogue_turns:
-            # Use first 15 dialogue turns (captures intro + main topic introduction)
-            script_summary = " ".join(dialogue_turns)[:500]
-            cb.log(f"サムネイル用に台本の対話内容を使用（{len(dialogue_turns)}ターン、{len(script_summary)}文字）")
-        else:
-            # Fallback to description if no dialogue found
-            script_summary = script.description[:300] if script.description else script.title
-            cb.log("サムネイル用に台本の説明文を使用（フォールバック）")
-        
-        thumbnail_bg_output = output_dir / f"thumbnail_background_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-        thumbnail_bg_path = await thumbnail_bg_generator.generate(
-            theme=script.title,
-            script_summary=script_summary,
-            output_path=thumbnail_bg_output,
-            visual_identity=visual_identity
-        )
-        cb.log(f"✓ サムネイル背景生成完了: {thumbnail_bg_path.name}")
-    else:
-        # 静的背景画像を使用
-        thumbnail_bg_path = background_image
-    
-    thumbnail_generator = ThumbnailGenerator()
-    thumbnail_path = output_dir / "thumbnail.png"
-    thumbnail_generator.generate(
-        title=script.title,
-        thumbnail_title=script.thumbnail_title,
-        background_path=thumbnail_bg_path,
-        output_path=thumbnail_path
-    )
-    cb.log(f"✓ サムネイル画像生成: {thumbnail_path.name}")
-    
+
     return ProductionPhaseResult(
         video_path=render_result.video_path,
         audio_path=synthesis_result.audio_path,
