@@ -1007,6 +1007,117 @@ def _upload_to_youtube(
     return uploaded_video_url
 
 
+def _record_execution_logs(
+    *,
+    config: AppConfig,
+    overrides_obj: UIOverrides,
+    output_base: Path,
+    project_root: Path,
+    theme: str,
+    production_result,
+    thumbnail_path,
+    metadata_path,
+    total_usage,
+    cost,
+    callbacks,
+) -> None:
+    """実行ログ・コスト履歴を記録する（副作用のみ）。
+
+    ExecutionLogEntry / CostLogEntry を構築し ExecutionLogger へ追記する。記録失敗は
+    非致命で、ログ出力のうえ呼び出し元へ例外を伝播しない（原コードと厳密一致）。
+
+    Args:
+        config: アプリ設定
+        overrides_obj: UI 上書き設定(config スナップショット用)
+        output_base: 出力ディレクトリ
+        project_root: プロジェクトルート(logs ディレクトリの親)
+        theme: 動画テーマ
+        production_result: 制作フェーズ結果(生成ファイルパス)
+        thumbnail_path: サムネイルパス
+        metadata_path: metadata.txt パス
+        total_usage: 使用量集計
+        cost: コスト計算結果
+        callbacks: ProgressCallback（ログ出力用）
+    """
+    try:
+        from uuid import uuid4
+        execution_id = str(uuid4())
+
+        # プロンプト記録を収集（実際に使用されたインスタンスから）
+        all_prompt_records = []
+
+        # Note: Mock モードではプロンプト記録が空の場合がある
+        # 実際のAPI呼び出しがあった場合のみ記録される
+
+        # 設定スナップショットをキャプチャ
+        config_snapshot = _capture_config_snapshot(config, overrides_obj)
+
+        # 生成ファイルパスを記録
+        from pathlib import Path as PathLib
+        generated_files = {
+            "script": str(output_base / "script.json"),
+            "video": str(production_result.video_path),
+            "audio": str(production_result.audio_path),
+            "subtitle": str(production_result.subtitle_path),
+            "thumbnail": str(thumbnail_path),
+            "metadata": str(metadata_path)
+        }
+
+        # ExecutionLogEntryを作成
+        execution_log = ExecutionLogEntry(
+            execution_id=execution_id,
+            app_version=APP_VERSION,
+            timestamp=datetime.now().isoformat(),
+            output_directory=str(output_base),
+            theme=theme,
+            config_snapshot=config_snapshot,
+            prompts=[PromptRecord(**rec) for rec in all_prompt_records],
+            generated_files=generated_files,
+            success=True,
+            error_message=None,
+            total_duration_sec=total_usage.total_duration_sec,
+            perplexity_requests=total_usage.perplexity.request_count
+        )
+
+        # CostLogEntryを作成（後方互換性のためgeminiプロパティを使用）
+        # total_usage.geminiは全LLM使用量の合計を返すプロパティ
+        cost_log = CostLogEntry(
+            execution_id=execution_id,
+            timestamp=datetime.now().isoformat(),
+            output_directory=str(output_base),
+            perplexity_requests=total_usage.perplexity.request_count,
+            perplexity_model_name=config.yaml.researcher.model,
+            gemini_input_tokens=total_usage.gemini.input_tokens,
+            gemini_output_tokens=total_usage.gemini.output_tokens,
+            gemini_model_name=total_usage.gemini.model_name,
+            voicevox_phrases=total_usage.voicevox.phrase_count,
+            voicevox_duration_sec=total_usage.voicevox.total_duration_sec,
+            perplexity_usd=cost.perplexity_usd,
+            gemini_input_usd=cost.gemini_input_usd,
+            gemini_output_usd=cost.gemini_output_usd,
+            total_usd=cost.total_usd,
+            total_jpy=cost.total_jpy,
+            is_free_tier=cost.is_free_tier,
+            research_duration_sec=total_usage.research_duration_sec,
+            script_duration_sec=total_usage.script_duration_sec,
+            audio_duration_sec=total_usage.audio_duration_sec,
+            render_duration_sec=total_usage.render_duration_sec,
+            total_duration_sec=total_usage.total_duration_sec
+        )
+
+        # ログを書き込み
+        logger = ExecutionLogger(project_root / "logs")
+        logger.append_execution_log(execution_log)
+        logger.append_cost_log(cost_log)
+
+        callbacks.log(f"✓ 実行ログ記録完了: execution_id={execution_id}")
+
+    except Exception as log_error:
+        import traceback
+        callbacks.log(f"⚠ 実行ログ記録エラー（動画生成は成功）: {log_error}")
+        callbacks.log(f"[DEBUG] Traceback: {traceback.format_exc()}")
+
+
 def run_workflow_sync(
     theme: str,
     overrides: Optional[UIOverrides] = None,
@@ -1419,84 +1530,20 @@ def run_workflow_sync(
             )
 
             # ========== 実行ログ・コスト履歴の記録 ==========
-            try:
-                from uuid import uuid4
-                execution_id = str(uuid4())
-                
-                # プロンプト記録を収集（実際に使用されたインスタンスから）
-                all_prompt_records = []
-                
-                # Note: Mock モードではプロンプト記録が空の場合がある
-                # 実際のAPI呼び出しがあった場合のみ記録される
-                
-                # 設定スナップショットをキャプチャ
-                config_snapshot = _capture_config_snapshot(config, overrides_obj)
-                
-                # 生成ファイルパスを記録
-                from pathlib import Path as PathLib
-                generated_files = {
-                    "script": str(output_base / "script.json"),
-                    "video": str(production_result.video_path),
-                    "audio": str(production_result.audio_path),
-                    "subtitle": str(production_result.subtitle_path),
-                    "thumbnail": str(thumbnail_path),
-                    "metadata": str(metadata_path)
-                }
-                
-                # ExecutionLogEntryを作成
-                execution_log = ExecutionLogEntry(
-                    execution_id=execution_id,
-                    app_version=APP_VERSION,
-                    timestamp=datetime.now().isoformat(),
-                    output_directory=str(output_base),
-                    theme=theme,
-                    config_snapshot=config_snapshot,
-                    prompts=[PromptRecord(**rec) for rec in all_prompt_records],
-                    generated_files=generated_files,
-                    success=True,
-                    error_message=None,
-                    total_duration_sec=total_usage.total_duration_sec,
-                    perplexity_requests=total_usage.perplexity.request_count
-                )
-                
-                # CostLogEntryを作成（後方互換性のためgeminiプロパティを使用）
-                # total_usage.geminiは全LLM使用量の合計を返すプロパティ
-                cost_log = CostLogEntry(
-                    execution_id=execution_id,
-                    timestamp=datetime.now().isoformat(),
-                    output_directory=str(output_base),
-                    perplexity_requests=total_usage.perplexity.request_count,
-                    perplexity_model_name=config.yaml.researcher.model,
-                    gemini_input_tokens=total_usage.gemini.input_tokens,
-                    gemini_output_tokens=total_usage.gemini.output_tokens,
-                    gemini_model_name=total_usage.gemini.model_name,
-                    voicevox_phrases=total_usage.voicevox.phrase_count,
-                    voicevox_duration_sec=total_usage.voicevox.total_duration_sec,
-                    perplexity_usd=cost.perplexity_usd,
-                    gemini_input_usd=cost.gemini_input_usd,
-                    gemini_output_usd=cost.gemini_output_usd,
-                    total_usd=cost.total_usd,
-                    total_jpy=cost.total_jpy,
-                    is_free_tier=cost.is_free_tier,
-                    research_duration_sec=total_usage.research_duration_sec,
-                    script_duration_sec=total_usage.script_duration_sec,
-                    audio_duration_sec=total_usage.audio_duration_sec,
-                    render_duration_sec=total_usage.render_duration_sec,
-                    total_duration_sec=total_usage.total_duration_sec
-                )
-                
-                # ログを書き込み
-                logger = ExecutionLogger(PROJECT_ROOT / "logs")
-                logger.append_execution_log(execution_log)
-                logger.append_cost_log(cost_log)
-                
-                callbacks.log(f"✓ 実行ログ記録完了: execution_id={execution_id}")
-            
-            except Exception as log_error:
-                import traceback
-                callbacks.log(f"⚠ 実行ログ記録エラー（動画生成は成功）: {log_error}")
-                callbacks.log(f"[DEBUG] Traceback: {traceback.format_exc()}")
-            
+            _record_execution_logs(
+                config=config,
+                overrides_obj=overrides_obj,
+                output_base=output_base,
+                project_root=PROJECT_ROOT,
+                theme=theme,
+                production_result=production_result,
+                thumbnail_path=thumbnail_path,
+                metadata_path=metadata_path,
+                total_usage=total_usage,
+                cost=cost,
+                callbacks=callbacks,
+            )
+
             callbacks.log(f"\n== 完了 ==")
             callbacks.log(f"動画: {production_result.video_path}")
             callbacks.log(f"総所要時間: {total_usage.total_duration_sec:.1f}秒")
