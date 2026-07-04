@@ -855,6 +855,66 @@ def _build_publish_fields(
     return formatted_title, formatted_description, publishing_config
 
 
+def _run_metadata_phase(
+    *,
+    config: AppConfig,
+    output_base: Path,
+    script: Script,
+    chapters,
+    external_phase_result,
+    theme: str,
+    log_fn,
+) -> tuple[Path, dict[str, str]]:
+    """Phase 4 のメタデータ生成を実行し (metadata_path, generated_metadata) を返す。
+
+    mock スキップ時は metadata.txt を空文字で書き出す。通常時は FactFix 修正済み
+    台本を優先解決したうえで、外部台本モードの事前構築 metadata から
+    YouTube 用メタデータを生成する。`external_phase_result.pre_built_metadata` へは
+    通常経路（非スキップ）でのみアクセスするため、mock スキップ時に
+    external_phase_result が None でも安全（原コードと厳密一致）。
+
+    Args:
+        config: アプリ設定(mock スキップ判定に使用)
+        output_base: 出力ディレクトリ(metadata.txt の親)
+        script: フォールバック台本(= scripting_result.script)
+        chapters: ChapterMarker のリスト(= production_result.chapters)
+        external_phase_result: 外部台本フェーズ結果(.pre_built_metadata を保持)
+        theme: 動画テーマ
+        log_fn: ログ出力関数(= callbacks.log)
+
+    Returns:
+        (metadata_path, generated_metadata)
+    """
+    skip_metadata_in_mock = bool(
+        config.yaml.dev.mock_mode and getattr(config.yaml.dev, "mock_skip_metadata", False)
+    )
+
+    # YouTube用メタデータを生成
+    metadata_path = output_base / "metadata.txt"
+    generated_metadata: dict[str, str] = {}
+    if skip_metadata_in_mock:
+        metadata_path.write_text("", encoding="utf-8")
+        log_fn("[INFO] Mockモード設定によりメタデータ生成をスキップしました")
+    else:
+        # FactFix 修正済み台本があればそちらを優先（ハルシネーションが概要欄に載るのを防ぐ）
+        effective_script = _resolve_script_for_metadata(
+            output_base, script, log_fn=log_fn
+        )
+        # 外部台本モード必須 (Step 4 v2): VerifiedScript.metadata から
+        # 事前構築済みの dict をそのまま採用する。
+        ext_metadata_for_packaging = external_phase_result.pre_built_metadata
+        generated_metadata = _generate_youtube_metadata(
+            script=effective_script,
+            chapters=chapters,
+            output_path=metadata_path,
+            theme=theme,
+            external_metadata=ext_metadata_for_packaging,
+        )
+        log_fn(f"✓ YouTubeメタデータ生成 (外部台本モード, LLM ¥0): {metadata_path.name}")
+
+    return metadata_path, generated_metadata
+
+
 def run_workflow_sync(
     theme: str,
     overrides: Optional[UIOverrides] = None,
@@ -1158,36 +1218,21 @@ def run_workflow_sync(
             
             # ========== Phase 4: 後処理（メタデータ生成） ==========
             callbacks.progress(0.97, "📦 後処理中...")
-            skip_metadata_in_mock = bool(
-                config.yaml.dev.mock_mode and getattr(config.yaml.dev, "mock_skip_metadata", False)
-            )
             skip_thumbnail_in_mock = bool(
                 config.yaml.dev.mock_mode and getattr(config.yaml.dev, "mock_skip_thumbnail", False)
             )
-            
+
             # YouTube用メタデータを生成
-            metadata_path = output_base / "metadata.txt"
-            generated_metadata: dict[str, str] = {}
-            if skip_metadata_in_mock:
-                metadata_path.write_text("", encoding="utf-8")
-                callbacks.log("[INFO] Mockモード設定によりメタデータ生成をスキップしました")
-            else:
-                # FactFix 修正済み台本があればそちらを優先（ハルシネーションが概要欄に載るのを防ぐ）
-                effective_script = _resolve_script_for_metadata(
-                    output_base, scripting_result.script, log_fn=callbacks.log
-                )
-                # 外部台本モード必須 (Step 4 v2): VerifiedScript.metadata から
-                # 事前構築済みの dict をそのまま採用する。
-                ext_metadata_for_packaging = external_phase_result.pre_built_metadata
-                generated_metadata = _generate_youtube_metadata(
-                    script=effective_script,
-                    chapters=production_result.chapters,
-                    output_path=metadata_path,
-                    theme=theme,
-                    external_metadata=ext_metadata_for_packaging,
-                )
-                callbacks.log(f"✓ YouTubeメタデータ生成 (外部台本モード, LLM ¥0): {metadata_path.name}")
-            
+            metadata_path, generated_metadata = _run_metadata_phase(
+                config=config,
+                output_base=output_base,
+                script=scripting_result.script,
+                chapters=production_result.chapters,
+                external_phase_result=external_phase_result,
+                theme=theme,
+                log_fn=callbacks.log,
+            )
+
             # サムネイル背景を生成（FLUX.1 dynamic mode）
             video_config = getattr(config.yaml, "video_renderer", None)
             thumbnail_bg_mode = getattr(video_config, "thumbnail_background_mode", "static") if video_config else "static"
