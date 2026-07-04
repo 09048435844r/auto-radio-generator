@@ -1118,6 +1118,90 @@ def _record_execution_logs(
         callbacks.log(f"[DEBUG] Traceback: {traceback.format_exc()}")
 
 
+async def _generate_thumbnail_assets(
+    *,
+    config: AppConfig,
+    output_base: Path,
+    project_root: Path,
+    theme: str,
+    script: Script,
+    visual_identity,
+    generated_metadata: dict,
+    skip_thumbnail_in_mock: bool,
+    callbacks,
+) -> tuple[Path, float]:
+    """サムネイル背景(FLUX.1 dynamic / static フォールバック)と thumbnail.png を生成する。
+
+    dynamic モードで FLUX.1 生成に失敗した場合は静的背景へフォールバックする。例外の
+    握り方・ログ出力・フォールバック条件は原コードと厳密一致（本運用 1 本目で踏んだ経路）。
+    背景生成時間は戻り値で返し、呼び出し側で total_usage へ代入する。
+
+    Args:
+        config: アプリ設定
+        output_base: 出力ディレクトリ(thumbnail_bg.png / thumbnail.png の親)
+        project_root: プロジェクトルート(静的背景パスの基点)
+        theme: 動画テーマ(FLUX.1 プロンプト / summary フォールバック)
+        script: 台本(title / description のソース)
+        visual_identity: ビジュアルアイデンティティ(= scripting_result.visual_identity)
+        generated_metadata: メタデータ dict(title / thumbnail_title のソース)
+        skip_thumbnail_in_mock: Mock 設定によるサムネイル生成スキップ
+        callbacks: ProgressCallback（ログ出力用）
+
+    Returns:
+        (thumbnail_path, thumbnail_bg_generation_time)
+    """
+    # サムネイル背景を生成（FLUX.1 dynamic mode）
+    video_config = getattr(config.yaml, "video_renderer", None)
+    thumbnail_bg_mode = getattr(video_config, "thumbnail_background_mode", "static") if video_config else "static"
+    thumbnail_bg_generation_time = 0.0
+
+    if thumbnail_bg_mode == "dynamic":
+        try:
+            callbacks.log("[INFO] サムネイル背景を動的生成中（FLUX.1）...")
+            thumbnail_bg_start = time.time()
+
+            # Generate script summary for prompt
+            script_summary = script.description[:300] if script.description else theme
+
+            # Generate background via FLUX.1
+            thumbnail_bg_generator = ThumbnailBackgroundGenerator(config, output_dir=output_base)
+            thumbnail_bg_path = output_base / "thumbnail_bg.png"
+
+            # Use await instead of asyncio.run() to avoid nested event loop error
+            background_image = await thumbnail_bg_generator.generate(
+                theme=theme,
+                script_summary=script_summary,
+                output_path=thumbnail_bg_path,
+                visual_identity=visual_identity,  # ビジュアルアイデンティティを渡す
+                topic_title=script.title
+            )
+
+            thumbnail_bg_generation_time = time.time() - thumbnail_bg_start
+            callbacks.log(f"✓ サムネイル背景生成完了（FLUX.1）: {thumbnail_bg_path.name} ({thumbnail_bg_generation_time:.1f}秒)")
+        except Exception as e:
+            callbacks.log(f"⚠ サムネイル背景生成失敗、静的背景を使用: {e}")
+            background_image = project_root / config.yaml.paths.background_image
+    else:
+        # Use static background
+        background_image = project_root / config.yaml.paths.background_image
+
+    # サムネイル画像を生成（AI生成のthumbnail_titleを使用）
+    thumbnail_path = output_base / "thumbnail.png"
+    if skip_thumbnail_in_mock:
+        callbacks.log("[INFO] Mockモード設定によりサムネイル生成をスキップしました")
+    else:
+        thumbnail_generator = ThumbnailGenerator()
+        thumbnail_generator.generate(
+            title=generated_metadata.get("title", script.title),
+            thumbnail_title=generated_metadata.get("thumbnail_title", ""),
+            background_path=background_image,
+            output_path=thumbnail_path
+        )
+        callbacks.log(f"✓ サムネイル画像生成: {thumbnail_path.name}")
+
+    return thumbnail_path, thumbnail_bg_generation_time
+
+
 def run_workflow_sync(
     theme: str,
     overrides: Optional[UIOverrides] = None,
@@ -1436,56 +1520,20 @@ def run_workflow_sync(
                 log_fn=callbacks.log,
             )
 
-            # サムネイル背景を生成（FLUX.1 dynamic mode）
-            video_config = getattr(config.yaml, "video_renderer", None)
-            thumbnail_bg_mode = getattr(video_config, "thumbnail_background_mode", "static") if video_config else "static"
-            thumbnail_bg_generation_time = 0.0
-            
-            if thumbnail_bg_mode == "dynamic":
-                try:
-                    callbacks.log("[INFO] サムネイル背景を動的生成中（FLUX.1）...")
-                    thumbnail_bg_start = time.time()
-                    
-                    # Generate script summary for prompt
-                    script_summary = scripting_result.script.description[:300] if scripting_result.script.description else theme
-                    
-                    # Generate background via FLUX.1
-                    thumbnail_bg_generator = ThumbnailBackgroundGenerator(config, output_dir=output_base)
-                    thumbnail_bg_path = output_base / "thumbnail_bg.png"
-                    
-                    # Use await instead of asyncio.run() to avoid nested event loop error
-                    background_image = await thumbnail_bg_generator.generate(
-                        theme=theme,
-                        script_summary=script_summary,
-                        output_path=thumbnail_bg_path,
-                        visual_identity=scripting_result.visual_identity,  # ビジュアルアイデンティティを渡す
-                        topic_title=scripting_result.script.title
-                    )
-                    
-                    thumbnail_bg_generation_time = time.time() - thumbnail_bg_start
-                    total_usage.thumbnail_bg_generation_time = thumbnail_bg_generation_time
-                    callbacks.log(f"✓ サムネイル背景生成完了（FLUX.1）: {thumbnail_bg_path.name} ({thumbnail_bg_generation_time:.1f}秒)")
-                except Exception as e:
-                    callbacks.log(f"⚠ サムネイル背景生成失敗、静的背景を使用: {e}")
-                    background_image = PROJECT_ROOT / config.yaml.paths.background_image
-            else:
-                # Use static background
-                background_image = PROJECT_ROOT / config.yaml.paths.background_image
-            
-            # サムネイル画像を生成（AI生成のthumbnail_titleを使用）
-            thumbnail_path = output_base / "thumbnail.png"
-            if skip_thumbnail_in_mock:
-                callbacks.log("[INFO] Mockモード設定によりサムネイル生成をスキップしました")
-            else:
-                thumbnail_generator = ThumbnailGenerator()
-                thumbnail_generator.generate(
-                    title=generated_metadata.get("title", scripting_result.script.title),
-                    thumbnail_title=generated_metadata.get("thumbnail_title", ""),
-                    background_path=background_image,
-                    output_path=thumbnail_path
-                )
-                callbacks.log(f"✓ サムネイル画像生成: {thumbnail_path.name}")
-            
+            # サムネイル生成（背景: FLUX.1 dynamic / static フォールバック）
+            thumbnail_path, thumbnail_bg_generation_time = await _generate_thumbnail_assets(
+                config=config,
+                output_base=output_base,
+                project_root=PROJECT_ROOT,
+                theme=theme,
+                script=scripting_result.script,
+                visual_identity=scripting_result.visual_identity,
+                generated_metadata=generated_metadata,
+                skip_thumbnail_in_mock=skip_thumbnail_in_mock,
+                callbacks=callbacks,
+            )
+            total_usage.thumbnail_bg_generation_time = thumbnail_bg_generation_time
+
             # ログファイルを完了
             if log_writer:
                 log_writer.finalize()
