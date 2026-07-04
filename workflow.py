@@ -763,6 +763,97 @@ async def check_prerequisites(
     return True, ""
 
 
+def _build_publish_fields(
+    *,
+    config: AppConfig,
+    theme: str,
+    script: Script,
+    research_sources,
+    generated_metadata: dict,
+    chapters,
+    total_usage,
+    footer_text_override,
+    creation_date: str,
+) -> tuple[str, str, Any]:
+    """YouTube 概要欄向けフィールド(タイトル/説明文/publishing_config)を構築する。
+
+    Phase 4 後処理から抽出した純計算ヘルパー(I/O なし)。`creation_date` を引数で
+    受け取ることで `datetime.now()` を排除し、単体テストの決定性を確保する。
+
+    Args:
+        config: アプリ設定(publishing_config の解決に使用)
+        theme: 動画テーマ(references 解決に使用)
+        script: 台本(タイトル/説明/タグ/参考文献のソース)
+        research_sources: リサーチソース(references 解決に使用)
+        generated_metadata: `_generate_youtube_metadata` の戻り(title/description 優先採用)
+        chapters: ChapterMarker のリスト(概要欄チャプター行に整形)
+        total_usage: LLM モデル情報の抽出に使用(読み取りのみ)
+        footer_text_override: UI 入力のフッター(優先)。空なら config フォールバック
+        creation_date: `YYYY.MM.DD` 形式の制作日文字列
+
+    Returns:
+        (formatted_title, formatted_description, publishing_config)
+    """
+    # 日付入りタイトルを生成（AI生成タイトル + 日付）
+    ai_title = generated_metadata.get("title", script.title)
+    formatted_title = f"{ai_title} ({creation_date}制作)"
+
+    publishing_config = getattr(config.yaml, "publishing", None)
+    chapter_lines = _format_chapter_lines(chapters)
+
+    script_description = (
+        generated_metadata.get("description")
+        or script.description
+        or ""
+    )
+
+    dynamic_tags = _resolve_dynamic_tags(
+        script,
+        fallback_description=script_description,
+    )
+    references = _resolve_references(
+        script,
+        theme=theme,
+        fallback_description=script_description,
+        research_sources=research_sources,
+    )
+
+    configured_tags = getattr(publishing_config, "default_tags", []) if publishing_config else []
+    if not isinstance(configured_tags, list):
+        configured_tags = []
+    fixed_tags = _normalize_non_empty_strings([str(tag) for tag in configured_tags])
+
+    configured_footer = (
+        getattr(publishing_config, "footer_text", "") if publishing_config else ""
+    )
+    resolved_footer = (
+        (footer_text_override or "").strip()
+        if isinstance(footer_text_override, str) and footer_text_override.strip()
+        else (configured_footer or "").strip()
+    )
+
+    # 使用モデル情報を生成
+    llm_model_info = ""
+    if total_usage.llm_usage:
+        model_parts = []
+        for provider, usage in total_usage.llm_usage.items():
+            if usage.model_name:
+                model_parts.append(f"{provider.upper()}: {usage.model_name}")
+        if model_parts:
+            llm_model_info = "■台本生成モデル\n" + "\n".join(model_parts)
+
+    formatted_description = build_video_description(
+        script_description=script_description,
+        chapters=chapter_lines,
+        references=references,
+        dynamic_tags=dynamic_tags,
+        fixed_tags=fixed_tags,
+        footer_text=resolved_footer,
+        llm_model_info=llm_model_info,
+    )
+
+    return formatted_title, formatted_description, publishing_config
+
 
 def run_workflow_sync(
     theme: str,
@@ -1157,63 +1248,18 @@ def run_workflow_sync(
             
             # 日付入りタイトルを生成（AI生成タイトル + 日付）
             creation_date = datetime.now().strftime("%Y.%m.%d")
-            ai_title = generated_metadata.get("title", scripting_result.script.title)
-            formatted_title = f"{ai_title} ({creation_date}制作)"
-
-            publishing_config = getattr(config.yaml, "publishing", None)
-            chapter_lines = _format_chapter_lines(production_result.chapters)
-
-            script_description = (
-                generated_metadata.get("description")
-                or scripting_result.script.description
-                or ""
-            )
-
-            dynamic_tags = _resolve_dynamic_tags(
-                scripting_result.script,
-                fallback_description=script_description,
-            )
-            references = _resolve_references(
-                scripting_result.script,
+            formatted_title, formatted_description, publishing_config = _build_publish_fields(
+                config=config,
                 theme=theme,
-                fallback_description=script_description,
+                script=scripting_result.script,
                 research_sources=scripting_result.research_sources,
+                generated_metadata=generated_metadata,
+                chapters=production_result.chapters,
+                total_usage=total_usage,
+                footer_text_override=footer_text_override,
+                creation_date=creation_date,
             )
 
-            configured_tags = getattr(publishing_config, "default_tags", []) if publishing_config else []
-            if not isinstance(configured_tags, list):
-                configured_tags = []
-            fixed_tags = _normalize_non_empty_strings([str(tag) for tag in configured_tags])
-
-            configured_footer = (
-                getattr(publishing_config, "footer_text", "") if publishing_config else ""
-            )
-            resolved_footer = (
-                (footer_text_override or "").strip()
-                if isinstance(footer_text_override, str) and footer_text_override.strip()
-                else (configured_footer or "").strip()
-            )
-
-            # 使用モデル情報を生成
-            llm_model_info = ""
-            if total_usage.llm_usage:
-                model_parts = []
-                for provider, usage in total_usage.llm_usage.items():
-                    if usage.model_name:
-                        model_parts.append(f"{provider.upper()}: {usage.model_name}")
-                if model_parts:
-                    llm_model_info = "■台本生成モデル\n" + "\n".join(model_parts)
-
-            formatted_description = build_video_description(
-                script_description=script_description,
-                chapters=chapter_lines,
-                references=references,
-                dynamic_tags=dynamic_tags,
-                fixed_tags=fixed_tags,
-                footer_text=resolved_footer,
-                llm_model_info=llm_model_info,
-            )
-            
             # 総所要時間
             total_usage.total_duration_sec = time.time() - workflow_start
             
