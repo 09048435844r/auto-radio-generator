@@ -57,9 +57,17 @@ class LLMAdapterFactory:
 
         elif provider == "ollama":
             from .ollama_adapter import OllamaAdapter
-            base_url = config.yaml.script_generator.ollama.base_url
-            model = model_override or config.yaml.script_generator.ollama.model
-            return OllamaAdapter(base_url=base_url, default_model=model)
+            ollama_cfg = config.yaml.script_generator.ollama
+            base_url = ollama_cfg.base_url
+            model = model_override or ollama_cfg.model
+            # 2026-07: DeepSeekV4Flash 移行。/no_think 注入可否を config から配線
+            # （デフォルト True = 旧挙動。shipped config.yaml は false を明示）。
+            inject_no_think = getattr(ollama_cfg, "inject_no_think", True)
+            return OllamaAdapter(
+                base_url=base_url,
+                default_model=model,
+                inject_no_think=inject_no_think,
+            )
 
         elif provider == "gemini":
             # Step 4 v2: Gemini adapter は物理削除済み

@@ -7,6 +7,17 @@
 
 ## [Unreleased]
 
+### 変更（2026-07-13: LLM バックエンド移行 Qwen3.5-122B → DeepSeekV4Flash）
+- **背景**: GX10 の vLLM バックエンドが Qwen3.5-122B（単一ノード）から 2 ノードクラスター構成の DeepSeekV4Flash に移行。Mac Studio Proxy (http://192.168.0.3:11435/v1) は更新済みで、全リクエストのモデル名を `deepseek-v4-flash` に強制上書きし、クライアント送信の `chat_template_kwargs` を除去した上で `reasoning_effort="none"` + `chat_template_kwargs={"thinking": false}` を再注入する（思考抑制は Proxy に一元化）。`base_url` は変更なし
+- **config.yaml**: モデル名 8 箇所（`ollama.model` / `orchestrator.curator_model` / `segment_model` / `json_model` / `show_runner.model` / `fact_extractor.model` / `metadata_generator.model` / `fact_checker.model`）を `qwen3.5-122b-a10b` → `deepseek-v4-flash`（served-model-name、/v1/models 実測）に統一。`ollama.inject_no_think: false` を新規明示
+- **core/models/config.py**: `OllamaConfig.model` デフォルトを `deepseek-v4-flash` へ（SSOT 整合）。`OllamaConfig.inject_no_think: bool = True` を新設（デフォルト True = 旧挙動維持）
+- **services/script_generation/adapters/ollama_adapter.py**: `OllamaAdapter.__init__` に `inject_no_think: bool = True` を追加。`/no_think` は Qwen3 系 chat template 専用の制御トークンで、DeepSeek にはただのリテラルとして届きプロンプト汚染になるため、False で注入を完全に無効化できるようにした（防御的な空 system メッセージ挿入も含む）。デフォルト True で既存テスト 11 件の挙動不変
+- **services/script_generation/adapters/factory.py**: `LLMAdapterFactory` が `OllamaConfig.inject_no_think` を Adapter へ配線
+- **services/script_generation/llm_factory.py**: `get_provider_from_model_name` に `"deepseek-v4-flash"` **完全一致** → `"ollama"` の分岐を追加。`"deepseek-"` 等の広いプレフィックスマッチは意図的に不採用（未対応 deepseek 系モデル名は従来どおり `ValueError` — `test_llm_factory_provider_inference.py` の `"deepseek-r1:14b"` → ValueError 仕様を維持）
+- **変更しない箇所**: `ollama_adapter.py` の `chat_template_kwargs.enable_thinking`（Proxy が除去・再注入するため実害なし）/ `ollama.max_tokens: 32768` 等の max_tokens 群（上流 max_model_len が 200,000 に拡大し 32K 前提のヘッドルーム制約は解消）/ json_schema 基盤（runtime 未使用の dormant 資産）/ HITL 経路コード（config のモデル名変更で自動追従）
+- **テスト**: `tests/test_deepseek_migration.py` 新規 10 件（provider 完全一致マッピング / 非完全一致は ValueError 維持 / inject_no_think の注入抑止・デフォルト挙動・空 system prompt / OllamaConfig デフォルト / Factory 配線）。既存 336 件は無変更（Append-Only）
+- **スモークテスト**: `scripts/manual_tests/smoke_test_deepseek_migration.py` 新規（pytest 対象外・実 LLM 接続）。本運用外部台本モードで発火する全 LLM 3 経路（① VisualPaletteGenerator.generate_identity の json_object + Pydantic validate / ② generate_thumbnail_prompt の text + 日本語 sanitize / ③ セグメント用 generate_prompt）を実機で検証し、finish_reason=length・空 content を fail 判定、reasoning_content 非 null を警告としてログ出力
+
 ### 追加（2026-05-02: Phase 3 / interface_spec.md v1.3.0 - structured_facts を ResearchBrief 経由で TopicCurator に伝播）
 - **背景**: リサーチ側パイプライン（`life-update-radio-specs/interface_spec.md` v1.1.0）が Phase 2 で `structured_facts` フィールドを `research_brief.json` に出力するようになったため、台本側がこれを読み取って `FactExtractor` をスキップする経路を実装。本運用で頻発していた `facts=[]`（qwen3:8b 等の構造化出力能力限界による空配列出力 + reasoning 自己矛盾、PR-G で検出済み）の根本原因を構造的に回避する
 - **実装範囲（4 ファイル + 1 テスト）**:

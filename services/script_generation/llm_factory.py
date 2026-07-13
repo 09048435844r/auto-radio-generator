@@ -73,6 +73,13 @@ def get_provider_from_model_name(model_name: str) -> str:
     Raises:
         ValueError: If unknown model name
     """
+    # 2026-07: DeepSeekV4Flash 移行。served-model-name の完全一致のみを ollama に
+    # マッピングする。"deepseek-" 等の広いプレフィックスマッチは意図的に採用しない
+    # （未対応の deepseek 系モデル名は従来どおり ValueError で防御的に弾く仕様。
+    # test_llm_factory_provider_inference.py の "deepseek-r1:14b" → ValueError 参照）。
+    if model_name == "deepseek-v4-flash":
+        return "ollama"
+
     if model_name.startswith(("gpt-", "o1-", "o3-")):
         return "openai"
     elif model_name.startswith("claude-"):

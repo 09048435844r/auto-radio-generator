@@ -88,10 +88,12 @@ class OllamaConfig(BaseModel):
     """Ollama（ローカルLLM）設定
 
     既定値は shipped config.yaml の現行運用値（GX10 + プロキシ越しの
-    Qwen3-Next-80B / temperature=0.7）に揃える。YAML 欠損時に旧 model
+    DeepSeekV4Flash / temperature=0.7）に揃える。YAML 欠損時に旧 model
     （gpt-oss:20b-long）でアクセスしないよう SSOT 整合を取る。
+    2026-07: バックエンドが DeepSeekV4Flash（2 ノードクラスター）に移行。
+    served-model-name (/v1/models 実測) の deepseek-v4-flash に統一。
     """
-    model: str = "qwen3-next-80b"
+    model: str = "deepseek-v4-flash"
     base_url: str = "http://192.168.0.3:11435/v1"  # Production: Mac server IP (via queue proxy on 11435)
     max_tokens: int = 16384  # Increased for long-form content
     temperature: float = 0.7
@@ -106,6 +108,19 @@ class OllamaConfig(BaseModel):
         description=(
             "True にすると vLLM (OpenAI 互換) 側で thinking token を許可する。"
             "Qwen3.5 系の thinking モデルでは False 推奨（既定）。"
+        ),
+    )
+    # 2026-07: DeepSeekV4Flash 移行対応。/no_think は Qwen3 系 chat template 専用の
+    # 制御トークンで、DeepSeek には制御トークンでなくただのリテラルとして届き
+    # プロンプト汚染になる。デフォルト True は既存挙動（Qwen 系）の維持のため。
+    # shipped config.yaml では false を明示（thinking 抑制は Proxy 側
+    # reasoning_effort="none" で担保）。
+    inject_no_think: bool = Field(
+        default=True,
+        description=(
+            "True にすると enable_thinking=False のリクエストで system prompt 先頭に "
+            "/no_think トークンを注入する（Qwen3 系 chat template 専用）。"
+            "DeepSeek 等 Qwen 以外のバックエンドでは False にすること。"
         ),
     )
 

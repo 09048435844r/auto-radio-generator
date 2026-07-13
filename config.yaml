@@ -357,11 +357,13 @@ script_generator:
     # 2026-05-03: Ollama プロキシが全リクエストを Qwen3-Next-80B にルーティング
     # するよう変更されたため、表記を実態と合わせて統一。プロキシ側で実際の
     # モデル名へ変換するため、ここの文字列はラベル目的で固定値を使う。
-    # 履歴: gemma4:26b → qwen3:32b → qwen3-next-80b → qwen3.5-122b-a10b
+    # 履歴: gemma4:26b → qwen3:32b → qwen3-next-80b → qwen3.5-122b-a10b → deepseek-v4-flash
     # この値は LLMAdapterFactory が model_override 無しで呼ばれた際のフォールバック先 +
     # OllamaClient.__init__（_generate_youtube_metadata 経路）のモデル名として消費される。
     # 2026-05-06: 実態に合わせて Qwen3.5-122B-A10B-NVFP4 に統一。
-    model: "qwen3.5-122b-a10b"  # 旧: qwen3-next-80b（さらに旧: qwen3:32b / gemma4:26b）
+    # 2026-07: GX10 バックエンドが 2 ノードクラスターの DeepSeekV4Flash に移行。
+    # served-model-name (/v1/models 実測) の deepseek-v4-flash に統一。
+    model: "deepseek-v4-flash"  # 2026-07 移行。旧: qwen3.5-122b-a10b（さらに旧: qwen3-next-80b / qwen3:32b / gemma4:26b）
     base_url: "http://192.168.0.3:11435/v1"  # ← MacのIPアドレス + OpenAI互換API　ポート番号11434（ollama本体）→11435（キューシステムMac Studio側での設定）
     max_tokens: 32768                      # 最大トークン数（Gemma4用に増量）
     temperature: 0.7                       # 創造性パラメータ（JSON生成のため低めに）
@@ -372,6 +374,12 @@ script_generator:
     # Ollama 本体は extra_body の未知フィールドを無視するため、混在しても無害。
     # 将来エージェント別に True を渡したい場合は LLMRequest 構築時に上書き可能。
     enable_thinking: false                 # vLLM thinking mode 制御（既定 false）
+    # 2026-07: DeepSeekV4Flash 移行に伴い /no_think 注入を無効化。
+    # /no_think は Qwen3 系 chat template 専用の制御トークンであり、DeepSeek には
+    # 制御トークンでなくただのリテラルとして届きプロンプト汚染になる。
+    # thinking 抑制は Mac Studio Proxy 側の reasoning_effort="none" +
+    # chat_template_kwargs={"thinking": false} 再注入で担保済み。
+    inject_no_think: false                 # /no_think トークン注入（Qwen3 系のみ true）
   
   # 台本の構成比率（合計100%）
   # ラジオ番組の構成を3部に分割します。
@@ -399,10 +407,12 @@ script_generator:
     # するため、表記を qwen3-next-80b に統一（実態と config.yaml の一致）。
     # 2026-05-06: 実態が Qwen3.5-122B-A10B-NVFP4 に切り替わったため qwen3.5-122b-a10b へ更新。
     # MetadataGenerator もこの curator_model を LLMAdapterFactory 経由で使用する。
-    # 履歴: qwen3:8b → qwen3:32b → qwen3-next-80b → qwen3.5-122b-a10b
-    curator_model: "qwen3.5-122b-a10b"  # 旧: qwen3-next-80b（さらに旧: qwen3:32b）。キュレーション・要約用（MetadataGeneratorも兼用）
-    segment_model: "qwen3.5-122b-a10b"  # 旧: qwen3-next-80b（さらに旧: qwen3:32b）。Phase 1（クリエイティブ生成）用モデル
-    json_model: "qwen3.5-122b-a10b"     # 旧: qwen3-next-80b（さらに旧: qwen3:32b）。Phase 2（JSON構造化）専用モデル
+    # 2026-07: バックエンドが DeepSeekV4Flash（2 ノードクラスター）に移行したため
+    # served-model-name の deepseek-v4-flash に統一。
+    # 履歴: qwen3:8b → qwen3:32b → qwen3-next-80b → qwen3.5-122b-a10b → deepseek-v4-flash
+    curator_model: "deepseek-v4-flash"  # 2026-07 移行。旧: qwen3.5-122b-a10b。キュレーション・要約用（MetadataGeneratorも兼用）
+    segment_model: "deepseek-v4-flash"  # 2026-07 移行。旧: qwen3.5-122b-a10b。Phase 1（クリエイティブ生成）用モデル
+    json_model: "deepseek-v4-flash"     # 2026-07 移行。旧: qwen3.5-122b-a10b。Phase 2（JSON構造化）専用モデル
     # 以下は使用可能なモデル名
     # - qwen2.5-coder:14b        9.0 GB
     # - qwen2.5:14b              9.0 GB
@@ -430,7 +440,7 @@ script_generator:
     # 後方互換: enabled=false（既定）なら従来動作と完全同一
     show_runner:
       enabled: true      # true: ShowRunnerを実行 / false: 無効（従来フロー）
-      model: "qwen3.5-122b-a10b"  # 旧: qwen3-next-80b（さらに旧: qwen3:32b / ""→curator_model フォールバック）
+      model: "deepseek-v4-flash"  # 2026-07 移行。旧: qwen3.5-122b-a10b（さらに旧: qwen3-next-80b / qwen3:32b / ""→curator_model フォールバック）
       max_tokens: 4096   # PR-D: LLMの出力上限。length 切り詰め時はフェイルファストで例外
     # Phase 4 施策③: Research 事実抽出エージェント（FactExtractor）
     # リサーチ生文字列から構造化された FactSheet を抽出し、Curator の判断精度を上げる
@@ -438,8 +448,8 @@ script_generator:
     # 無効化したい場合のみ enabled: false を明示（Curator は fact_sheet=None で従来動作）
     fact_extractor:
       enabled: true      # true: FactExtractorを実行（既定） / false: 無効（従来フロー）
-      model: "qwen3.5-122b-a10b"  # 2026-05-06: 実態が Qwen3.5-122B-A10B-NVFP4 に切り替わったため更新。
-                            # 旧履歴: qwen3:8b → gemma4:26b → qwen2.5-coder:14b → qwen2.5-coder:32b → qwen3-next-80b → qwen3.5-122b-a10b。
+      model: "deepseek-v4-flash"  # 2026-07: DeepSeekV4Flash 移行に伴い served-model-name に統一。
+                            # 旧履歴: qwen3:8b → gemma4:26b → qwen2.5-coder:14b → qwen2.5-coder:32b → qwen3-next-80b → qwen3.5-122b-a10b → deepseek-v4-flash。
                             # qwen3:8b は構造化出力能力の限界で自己矛盾出力（reasoning="N件抽出" /
                             # facts=[]）が頻発。gemma4:26b でも改善せず、構造化 JSON タスクに
                             # 適性のある qwen2.5-coder 系を採用、GX10 移行で 32b 版に拡大、
@@ -466,8 +476,8 @@ script_generator:
       # を作るため、ここの model フィールドは今のところ未消費（MetadataGeneratorConfig
       # に未定義）。将来 MetadataGeneratorConfig.model が追加された際の移行先として記載。
       # 2026-05-06: 実態に合わせて Qwen3.5-122B-A10B-NVFP4 に統一。
-      # 履歴: qwen3:32b → qwen3-next-80b → qwen3.5-122b-a10b
-      model: "qwen3.5-122b-a10b"  # 旧: qwen3-next-80b（さらに旧: qwen3:32b）
+      # 履歴: qwen3:32b → qwen3-next-80b → qwen3.5-122b-a10b → deepseek-v4-flash
+      model: "deepseek-v4-flash"  # 2026-07 移行。旧: qwen3.5-122b-a10b（さらに旧: qwen3-next-80b / qwen3:32b）
       max_tokens: 8192   # タイトル/概要/ハッシュタグ用。2026-04-24 に 2048→4096 に
                          # 引き上げた後も本運用で 2 セッション連続 truncation が
                          # 発生したため、2026-04-27 に 4096→8192 へ再引き上げ
@@ -477,7 +487,7 @@ script_generator:
     # パイプラインを止めない（fail-open）。
     fact_checker:
       enabled: true                 # false にすると本エージェントは一切呼ばれない
-      model: "qwen3.5-122b-a10b"    # 旧: qwen3-next-80b。空=curator_model にフォールバック
+      model: "deepseek-v4-flash"    # 2026-07 移行。旧: qwen3.5-122b-a10b（さらに旧: qwen3-next-80b）。空=curator_model にフォールバック
       max_tokens: 8192              # 台本全体 + リサーチ評価で issues が膨らむ余裕
       min_confidence_warning: 60    # overall_confidence ≤ この値で WARNING ログ
       script_char_limit: 8000       # LLM に渡す台本本文の上限（先頭切り出し）

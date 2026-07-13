@@ -26,12 +26,17 @@ class OllamaAdapter(ILLMPort):
     Ollama already provides async API, so this is a thin wrapper.
     """
     
-    def __init__(self, base_url: str, default_model: str):
+    def __init__(self, base_url: str, default_model: str, inject_no_think: bool = True):
+        # 2026-07: inject_no_think は DeepSeekV4Flash 移行対応のオプトアウト。
+        # /no_think は Qwen3 系 chat template 専用の制御トークンで、DeepSeek には
+        # ただのリテラルとして届きプロンプト汚染になる。デフォルト True は
+        # 既存挙動（Qwen 系バックエンド）の完全維持のため。
         self._client = AsyncOpenAI(
             base_url=base_url,
             api_key="ollama"  # Ollama doesn't require API key
         )
         self._default_model = default_model
+        self._inject_no_think = inject_no_think
     
     async def generate(self, request: LLMRequest) -> LLMResponse:
         """Generate content with Ollama (already async)"""
@@ -45,7 +50,9 @@ class OllamaAdapter(ILLMPort):
         # があるため、system プロンプトの先頭に /no_think トークンも付与する。
         # これは Qwen3 系の chat template が解釈する制御トークンで、prompt-level で
         # thinking を確実に無効化できる。enable_thinking=True の時は付与しない。
-        if not request.enable_thinking:
+        # 2026-07: inject_no_think=False（DeepSeek 等 Qwen 以外のバックエンド）の
+        # 場合も付与しない。thinking 抑制は Proxy 側 reasoning_effort で担保。
+        if self._inject_no_think and not request.enable_thinking:
             system_msg_found = False
             for msg in messages:
                 if msg["role"] == "system":
