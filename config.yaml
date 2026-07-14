@@ -364,7 +364,8 @@ script_generator:
     # 2026-07: GX10 バックエンドが 2 ノードクラスターの DeepSeekV4Flash に移行。
     # served-model-name (/v1/models 実測) の deepseek-v4-flash に統一。
     model: "deepseek-v4-flash"  # 2026-07 移行。旧: qwen3.5-122b-a10b（さらに旧: qwen3-next-80b / qwen3:32b / gemma4:26b）
-    base_url: "http://192.168.0.3:11435/v1"  # ← MacのIPアドレス + OpenAI互換API　ポート番号11434（ollama本体）→11435（キューシステムMac Studio側での設定）
+    # 2026-07-14: 無線停止に伴い有線 IP (en0) へ変更。旧値は無線 en1 の 192.168.0.3。
+    base_url: "http://192.168.0.86:11435/v1"  # ← Mac の有線 IP (en0) + OpenAI互換API　ポート番号11434（ollama本体）→11435（キューシステムMac Studio側での設定）
     max_tokens: 32768                      # 最大トークン数（Gemma4用に増量）
     temperature: 0.7                       # 創造性パラメータ（JSON生成のため低めに）
     costs: {}                              # ローカル実行なのでコスト0

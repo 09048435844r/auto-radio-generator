@@ -94,7 +94,8 @@ class OllamaConfig(BaseModel):
     served-model-name (/v1/models 実測) の deepseek-v4-flash に統一。
     """
     model: str = "deepseek-v4-flash"
-    base_url: str = "http://192.168.0.3:11435/v1"  # Production: Mac server IP (via queue proxy on 11435)
+    # 2026-07-14: 無線停止に伴い有線 IP (en0) へ変更。旧値は無線 en1 の 192.168.0.3。
+    base_url: str = "http://192.168.0.86:11435/v1"  # Production: Mac 有線 IP (via queue proxy on 11435)
     max_tokens: int = 16384  # Increased for long-form content
     temperature: float = 0.7
     costs: Dict[str, ModelCost] = Field(default_factory=dict)
