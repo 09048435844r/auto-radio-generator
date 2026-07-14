@@ -1977,9 +1977,13 @@ def create_generator_tab(saved_settings, assets: dict) -> dict[str, object]:
                     with gr.Row():
                         generate_btn = gr.Button(
                             "🚀 動画を生成する",
-                            variant="primary",
+                            # 外部台本モード必須 (Step 4 v2): VerifiedScript JSON が
+                            # 選択されるまで非活性。verified_script_file.change →
+                            # check_generate_button_state が活性/非活性を切り替える。
+                            variant="secondary",
                             size="lg",
                             elem_classes="primary-btn",
+                            interactive=False,
                         )
                     
                     with gr.Row():
@@ -2431,27 +2435,30 @@ def create_ui() -> gr.Blocks:
                     f"Ollama: 🔴Error (チェック失敗)"
                 )
         
-        def check_action_button_states(perplexity_status_text, ollama_status_text):
-            """API ヘルスチェック結果に応じて各アクションボタンの活性を制御する。
+        def check_action_button_states(perplexity_status_text):
+            """API ヘルスチェック結果に応じてリサーチ実行ボタンの活性を制御する。
 
             Step 4 v2 (2026-05-10) 以降、Gemini 経路は削除済みのため判定対象外。
+            generate_btn は外部台本 (external_script_path) 必須。動画生成は
+            LLM 不使用のため Ollama 非依存となり、本関数の判定対象から外した
+            (check_generate_button_state が verified_script_file の有無で判定)。
 
-            - 動画を生成する (generate_btn): Ollama / Mac Studio Proxy のみ必須。
-              Perplexity NG でも、インポート済み research_brief.json や外部台本
-              モードから生成できるため活性を維持する。
             - リサーチのみ実行 (research_only_btn): Perplexity API を直接叩くため
               Perplexity 必須。NG なら非活性化する。
             """
             perplexity_ok = "🟢OK" in perplexity_status_text
-            ollama_ok = "🟢OK" in ollama_status_text
+            return gr.update(interactive=perplexity_ok)
 
-            generate_update = (
-                gr.update(interactive=True, variant="primary")
-                if ollama_ok
-                else gr.update(interactive=False, variant="secondary")
-            )
-            research_only_update = gr.update(interactive=perplexity_ok)
-            return generate_update, research_only_update
+        def check_generate_button_state(verified_script_path):
+            """外部台本 (VerifiedScript JSON) の有無で generate_btn の活性を制御する。
+
+            generate_btn: 外部台本 (external_script_path) 必須。動画生成は
+            VerifiedScript を入力に動画化するのみで LLM を使わないため、
+            Ollama / Perplexity のヘルスチェック結果には依存しない。
+            """
+            if verified_script_path:
+                return gr.update(interactive=True, variant="primary")
+            return gr.update(interactive=False, variant="secondary")
 
         generator_components["check_api_btn"].click(
             fn=update_api_status,
@@ -2465,26 +2472,20 @@ def create_ui() -> gr.Blocks:
 
         # Auto-update action button states when status changes.
         # Step 4 v2 以降、gemini_status は常に "削除済み" の固定文言のため
-        # ボタン判定の入力からは外す（perplexity / ollama のみ監視）。
-        # generate_btn は Ollama 依存、research_only_btn は Perplexity 依存。
-        _action_btn_inputs = [
-            generator_components["perplexity_status"],
-            generator_components["ollama_status"],
-        ]
-        _action_btn_outputs = [
-            generator_components["generate_btn"],
-            generator_components["research_only_btn"],
-        ]
+        # ボタン判定の入力からは外す。
+        # research_only_btn は Perplexity 依存（ヘルスチェック結果を監視）。
+        # generate_btn は外部台本モード必須化に伴い Ollama 依存を撤去し、
+        # verified_script_file の有無のみで判定する（動画生成は LLM 不使用）。
         generator_components["perplexity_status"].change(
             fn=check_action_button_states,
-            inputs=_action_btn_inputs,
-            outputs=_action_btn_outputs,
+            inputs=[generator_components["perplexity_status"]],
+            outputs=[generator_components["research_only_btn"]],
         )
 
-        generator_components["ollama_status"].change(
-            fn=check_action_button_states,
-            inputs=_action_btn_inputs,
-            outputs=_action_btn_outputs,
+        generator_components["verified_script_file"].change(
+            fn=check_generate_button_state,
+            inputs=[generator_components["verified_script_file"]],
+            outputs=[generator_components["generate_btn"]],
         )
         
         # リサーチのみ実行
