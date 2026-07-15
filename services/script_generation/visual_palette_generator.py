@@ -40,8 +40,14 @@ REQUIREMENTS:
 1. COLOR PALETTE - Select TWO neon colors that:
    - Are VISUALLY DISTINCTIVE and create strong contrast
    - Reflect the video's theme and mood
-   - Use RICH, EVOCATIVE descriptors (e.g., "electric cyan" NOT "blue")
-   - Examples: "electric cyan", "hot magenta", "toxic green", "neon pink", "acid yellow"
+   - Use RICH, EVOCATIVE descriptors (e.g., "golden amber" NOT "yellow")
+   - Examples: "toxic green", "golden amber", "deep violet", "warm coral", "ice blue", "neon pink"
+   - READABILITY GUARD (MANDATORY):
+     - primary and secondary MUST contrast strongly in both hue and brightness
+     - Keep brightness and saturation high enough for clear visibility — NEVER pick
+       dark-on-dark, muddy, or washed-out pairs
+     - The palette becomes a thumbnail BACKGROUND with title text overlaid on top,
+       so legibility of the overall image comes first
 
 2. COLOR MOOD - Capture the color-based atmosphere in 2-4 words:
    - Examples: "futuristic medical", "warm nostalgic", "mysterious paranormal"
@@ -59,6 +65,12 @@ REQUIREMENTS:
 4. VISUAL KEYWORDS - Provide 3-5 keywords defining the aesthetic:
    - Examples: ["clinical", "sterile", "high-tech"], ["warm", "vintage", "cozy"]
 
+COLOR DIVERSITY CONSTRAINTS (MANDATORY - HIGHEST PRIORITY):
+- The EXAMPLES below illustrate the OUTPUT FORMAT only — do NOT copy their colors
+- Reusing the exact color pair of ANY example below is FORBIDDEN
+- Always derive a NEW, theme-specific color combination; two different themes
+  should receive visibly different palettes
+
 OUTPUT FORMAT (JSON):
 {
   "primary_color": "<rich color descriptor>",
@@ -73,12 +85,12 @@ EXAMPLES:
 
 Theme: "持続血糖測定器CGMについて"
 {
-  "primary_color": "electric cyan",
-  "secondary_color": "hot magenta",
+  "primary_color": "soft teal",
+  "secondary_color": "warm coral",
   "color_mood": "futuristic medical",
   "aesthetic": "Clean Minimalist Modern",
   "visual_keywords": ["clinical", "sterile", "high-tech", "precision"],
-  "reasoning": "Medical theme requires clean, professional aesthetic with tech-forward colors"
+  "reasoning": "Medical theme requires a calming clinical teal balanced by a warm, humane accent"
 }
 
 Theme: "都市伝説の真相"

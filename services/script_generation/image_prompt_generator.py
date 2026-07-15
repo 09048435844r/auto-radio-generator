@@ -68,6 +68,8 @@ CREATIVE FREEDOM:
 CONSTRAINTS (MANDATORY):
 - ALWAYS start with a SPECIFIC, CONCRETE subject description (not abstract spaces)
 - ALWAYS incorporate the color palette and aesthetic
+- Use ONLY the Color Palette given above — NEVER reuse colors from the EXAMPLE
+  OUTPUTS below (their colors are placeholders illustrating structure only)
 - ALWAYS end with: "no text, no writing, no watermarks"
 - ALWAYS include film quality keywords
 
@@ -77,24 +79,24 @@ Return ONLY the English prompt text, no explanations.
 EXAMPLE OUTPUTS (Subject-Driven):
 
 Example 1 (Medical Topic):
-"A doctor in a white coat examining a patient's continuous glucose monitor display showing real-time blood sugar data with trend arrows and alerts, with an insulin pump visible on the patient's belt and medical charts on a tablet nearby, bathed in electric cyan and hot magenta neon glow, Clean Minimalist Modern aesthetic, clinical and high-tech atmosphere, shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
+"A doctor in a white coat examining a patient's continuous glucose monitor display showing real-time blood sugar data with trend arrows and alerts, with an insulin pump visible on the patient's belt and medical charts on a tablet nearby, bathed in soft teal and warm coral neon glow, Clean Minimalist Modern aesthetic, clinical and high-tech atmosphere, shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
 
 Example 2 (Technology Topic):
-"A software engineer's hands typing code on a laptop with multiple terminal windows showing AI model training progress bars and loss curves, surrounded by reference books on machine learning and a whiteboard with neural network diagrams, bathed in electric cyan and hot magenta neon glow, Clean Minimalist Modern aesthetic, focused and innovative atmosphere, shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
+"A software engineer's hands typing code on a laptop with multiple terminal windows showing AI model training progress bars and loss curves, surrounded by reference books on machine learning and a whiteboard with neural network diagrams, bathed in golden amber and deep violet neon glow, Clean Minimalist Modern aesthetic, focused and innovative atmosphere, shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
 
 Example 3 (Environmental Topic):
-"A climate scientist analyzing satellite imagery of melting ice caps on a large monitor, with data visualization showing temperature anomalies and CO2 concentration graphs, research papers and core sample tubes on the desk, bathed in electric cyan and hot magenta neon glow, Clean Minimalist Modern aesthetic, urgent and analytical atmosphere, shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
+"A climate scientist analyzing satellite imagery of melting ice caps on a large monitor, with data visualization showing temperature anomalies and CO2 concentration graphs, research papers and core sample tubes on the desk, bathed in emerald green and ice blue neon glow, Clean Minimalist Modern aesthetic, urgent and analytical atmosphere, shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
 """
     
     THUMBNAIL_SYSTEM_PROMPT_TEMPLATE = """You are a professional cinematographer specializing in creating ABSTRACT, METAPHORICAL, and ATMOSPHERIC YouTube thumbnail backgrounds for radio content.
 
-Your task is to generate a detailed English prompt for FLUX.1 that creates a visually striking background featuring ABSTRACT LANDSCAPES, CYBERPUNK AESTHETICS, or METAPHORICAL IMAGERY - NOT specific objects or people.
+Your task is to generate a detailed English prompt for FLUX.1 that creates a visually striking background featuring ABSTRACT LANDSCAPES, ATMOSPHERIC SCENERY, or METAPHORICAL IMAGERY - NOT specific objects or people. The imagery style MUST follow the Aesthetic specified in the UNIFIED VISUAL BRAND below (do not default to any particular genre).
 
 PRIMARY FOCUS (MANDATORY - Radio Background Suitability):
 1. CREATE ABSTRACT OR METAPHORICAL VISUALS:
-   - Landscapes: Futuristic cityscapes, neon-lit environments, abstract natural scenery
+   - Landscapes: Expansive cityscapes, natural scenery, or dreamlike environments that fit the Aesthetic below
    - Abstract art: Flowing energy patterns, geometric shapes, light and color compositions
-   - Cyberpunk objects: Glowing circuits, holographic interfaces, neon signs (without text)
+   - Stylized elements: Light patterns, textures, and environmental details drawn from the Aesthetic below (no text or signage)
    - Metaphorical imagery: Visual metaphors that evoke the theme's essence without literal representation
 
 2. AVOID CONCRETE SUBJECTS:
@@ -117,6 +119,8 @@ REQUIREMENTS:
 - Focus: Create ABSTRACT, ATMOSPHERIC, or METAPHORICAL imagery (NOT concrete objects)
 - Impact: Maximum visual impact through color, lighting, and mood
 - Composition: Clean, uncluttered background suitable for text overlay
+- Colors: Use ONLY the Color Palette given above — NEVER reuse colors from the
+  EXAMPLE OUTPUTS below (their colors are placeholders illustrating structure only)
 - ALWAYS end with: "no text, no writing, no watermarks" (MANDATORY)
 
 OUTPUT FORMAT:
@@ -126,13 +130,13 @@ DO NOT include any Japanese characters in your output.
 EXAMPLE OUTPUTS (Abstract/Metaphorical Backgrounds):
 
 Example 1 (Medical/Health Topic):
-"An abstract flowing energy field with pulsing waves of light representing vitality and health, transitioning from deep blue to vibrant cyan, with soft particle effects and ethereal glow, bathed in electric cyan and hot magenta neon lighting, Clean Minimalist Modern aesthetic, serene and hopeful atmosphere, shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
+"An abstract flowing energy field with pulsing waves of light representing vitality and health, transitioning from deep violet to gentle lavender, with soft particle effects and ethereal glow, bathed in gentle lavender and pale gold lighting, Clean Minimalist Modern aesthetic, serene and hopeful atmosphere, shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
 
 Example 2 (Technology Topic):
-"A futuristic cyberpunk cityscape at dusk with towering neon-lit skyscrapers and holographic light beams cutting through misty atmosphere, geometric patterns of glowing circuits floating in the foreground, bathed in electric cyan and hot magenta neon glow, Clean Minimalist Modern aesthetic, innovative and dynamic atmosphere, shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
+"A futuristic cityscape at dusk with towering illuminated skyscrapers and light beams cutting through misty atmosphere, geometric patterns of light floating in the foreground, bathed in crimson red and steel blue glow, Clean Minimalist Modern aesthetic, innovative and dynamic atmosphere, shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
 
 Example 3 (Environmental Topic):
-"An abstract representation of Earth's atmosphere with swirling aurora-like energy patterns in vivid greens and blues, cosmic background with distant stars, flowing light trails suggesting movement and change, bathed in electric cyan and hot magenta accents, Clean Minimalist Modern aesthetic, majestic and contemplative atmosphere, shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
+"An abstract representation of Earth's atmosphere with swirling aurora-like energy patterns in vivid greens and blues, cosmic background with distant stars, flowing light trails suggesting movement and change, bathed in sunset orange and dusk purple accents, Clean Minimalist Modern aesthetic, majestic and contemplative atmosphere, shot on Kodak Portra 400 film, subtle film grain, highly detailed, no text"
 """
     
     def __init__(self, config: AppConfig):
