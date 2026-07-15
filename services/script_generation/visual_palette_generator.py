@@ -181,6 +181,16 @@ Create a visually distinctive brand (color palette + aesthetic) that captures th
             console.print(f"[green]✓ Visual identity generated[/green]")
             console.print(f"[dim]Reasoning: {identity.reasoning}[/dim]")
 
+            # 監査用 (2026-07-15): LLM 生成/フォールバックを実行ログから後追いで
+            # 切り分けられるよう、採用 identity の主要フィールドを明示記録する。
+            # フォールバック時は except 側の logger.warning が対になる。
+            logger.info(
+                "[VisualPaletteGenerator] Visual identity 採用 (LLM生成): "
+                f"{identity.primary_color} × {identity.secondary_color} "
+                f"({identity.color_mood}) | {identity.aesthetic}"
+                + (f" | reasoning: {identity.reasoning}" if identity.reasoning else "")
+            )
+
             return identity
 
         except Exception as e:
@@ -191,6 +201,15 @@ Create a visually distinctive brand (color palette + aesthetic) that captures th
             # Fallback to default cyberpunk identity
             fallback = self._get_fallback_identity(theme)
             console.print(f"[yellow]Using fallback visual identity: {fallback}[/yellow]")
+            # 監査用 (2026-07-15): WARNING は LogFileWriter (PR-C) の root handler
+            # 経由でセッションの processing_log.txt にも自動記録されるため、
+            # フォールバック発動が実行ログから後追いで判別できる。
+            logger.warning(
+                "[VisualPaletteGenerator] Visual identity: LLM生成失敗、"
+                f"フォールバック配色を使用 (theme={theme}): "
+                f"{fallback.primary_color} × {fallback.secondary_color} "
+                f"({fallback.color_mood}) | {fallback.aesthetic}"
+            )
             return fallback
     
     async def generate_palette(

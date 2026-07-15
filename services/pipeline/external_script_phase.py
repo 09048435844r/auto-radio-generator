@@ -114,6 +114,11 @@ async def execute_external_script_phase(
             script_summary=vs.metadata.description[:300],
         )
         log(f"✓ Visual identity: {visual_identity}")
+        # 監査用 (2026-07-15): reasoning を processing_log.txt に残す。
+        # フォールバック時は "Fallback visual identity for theme: ..." になるため
+        # LLM 生成かフォールバックかをこの行だけでも判別できる。
+        if visual_identity.reasoning:
+            log(f"  reasoning: {visual_identity.reasoning}")
     except Exception as e:
         log(f"[WARN] Visual identity 生成で予期せぬ例外 (続行): {e}")
         visual_identity = None
