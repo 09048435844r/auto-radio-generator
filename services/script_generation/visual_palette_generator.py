@@ -70,6 +70,19 @@ COLOR DIVERSITY CONSTRAINTS (MANDATORY - HIGHEST PRIORITY):
 - Reusing the exact color pair of ANY example below is FORBIDDEN
 - Always derive a NEW, theme-specific color combination; two different themes
   should receive visibly different palettes
+- CYAN × MAGENTA FAMILY SUPPRESSION: cyan-with-magenta pairings — including ALL
+  synonyms and adjective variations (icy/neon/chill/electric cyan, and
+  fuchsia/magenta/hot pink, etc.) — are HEAVILY OVERUSED for science and tech
+  themes. Swapping adjectives while keeping the same two hues does NOT count as
+  avoiding this. Unless the theme itself gives a clear, explicit reason for this
+  exact family, prefer hues OUTSIDE it.
+- Science, medical, and molecular themes work well beyond cyan — directions such
+  as deep emerald × warm amber (organic biochemistry), rich indigo × soft gold
+  (precision and trust), or burnt sienna × pale mint (human warmth in medicine).
+  These are directions only, NOT answers to copy — the no-copy rule above applies
+- AESTHETIC VARIETY: do not default to the same aesthetic every time — pick the
+  one that genuinely fits THIS theme, not the one most commonly associated with
+  the genre
 
 OUTPUT FORMAT (JSON):
 {
