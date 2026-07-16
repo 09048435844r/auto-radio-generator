@@ -17,3 +17,9 @@
 1. `/mnt/e/windsurf/life-update-radio-specs/interface_spec.md` を編集
 2. git commit & push
 3. リサーチ側パイプラインに変更を共有する
+
+補足 (2026-07-16): specs リポジトリ (SSOT) は commit 後に**即 push** すること。
+未 push 期間は複数クローン・複数セッション間の分岐リスク期間となるため
+(2026-07-15 の分岐事故で実証)。コード系リポジトリの「push は手動」運用の例外。
+編集前の標準手順 (status / log / pull --rebase / backlog 節構造確認) は
+specs リポジトリ側の CLAUDE.md を参照。
