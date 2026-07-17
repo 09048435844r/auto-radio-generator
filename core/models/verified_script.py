@@ -142,6 +142,9 @@ class SourceRef(BaseModel):
     url: HttpUrl
     title: Optional[str] = None
     tier: Optional[Literal["AAA", "AA", "A", "B"]] = None
+    # spec v1.8.1 (2026-07-16) で追加されたフィールドへの追従。
+    # 概要欄の参考文献表記 (タイトル + 日付 + URL) に使用する。
+    published_date: Optional[str] = None
 
 
 class VideoMetadata(BaseModel):

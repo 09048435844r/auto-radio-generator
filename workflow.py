@@ -35,6 +35,11 @@ from services.video_rendering import FfmpegRenderer
 from services.media_processing import ThumbnailGenerator, ThumbnailBackgroundGenerator
 from services.cost_calculator import CostCalculator
 from services.publishing import YouTubeClient, build_video_description
+from services.publishing.metadata_builder import (
+    MEDICAL_DISCLAIMER,
+    format_reference_text_lines,
+    normalize_hashtags,
+)
 from services.publishing.text_sanitizer import validate_url, normalize_url
 from core.models.research import ResearchSource
 from services.execution_logger import ExecutionLogger
@@ -350,6 +355,29 @@ def _resolve_references(
         deduped.append(ref)
 
     return deduped
+
+
+def _verified_refs_to_research_sources(references) -> list[ResearchSource]:
+    """VerifiedScript.metadata.references (SourceRef) を ResearchSource へ変換する。
+
+    外部台本モードで概要欄/metadata.txt の参考文献を
+    「タイトル + 日付 + URL」表記にするための橋渡し (2026-07-17)。
+    title 欠落は空文字にして metadata_builder 側の「参考文献N」
+    フォールバックに委ねる。
+    """
+    sources: list[ResearchSource] = []
+    for ref in references or []:
+        url = str(getattr(ref, "url", "") or "").strip()
+        if not url:
+            continue
+        sources.append(
+            ResearchSource(
+                title=(getattr(ref, "title", None) or "").strip(),
+                url=url,
+                published_date=getattr(ref, "published_date", None),
+            )
+        )
+    return sources
 
 
 def _capture_config_snapshot(config: AppConfig, overrides: UIOverrides) -> ConfigSnapshot:
@@ -848,6 +876,19 @@ def _run_metadata_phase(
         metadata_path.write_text("", encoding="utf-8")
         log_fn("[INFO] Mockモード設定によりメタデータ生成をスキップしました")
     else:
+        # 2026-07-17: 参考文献 (タイトル + 日付 + URL) と固定タグを metadata.txt
+        # にも反映する。verified_script 属性を持たないテストスタブでも安全な
+        # よう getattr で解決する。
+        _vs_for_metadata = getattr(external_phase_result, "verified_script", None)
+        vs_references = _verified_refs_to_research_sources(
+            _vs_for_metadata.metadata.references if _vs_for_metadata is not None else []
+        )
+        _publishing_config = getattr(config.yaml, "publishing", None)
+        _configured_tags = (
+            getattr(_publishing_config, "default_tags", []) if _publishing_config else []
+        )
+        if not isinstance(_configured_tags, list):
+            _configured_tags = []
         # FactFix 修正済み台本があればそちらを優先（ハルシネーションが概要欄に載るのを防ぐ）
         effective_script = _resolve_script_for_metadata(
             output_base, script, log_fn=log_fn
@@ -861,6 +902,8 @@ def _run_metadata_phase(
             output_path=metadata_path,
             theme=theme,
             external_metadata=ext_metadata_for_packaging,
+            references=vs_references,
+            fixed_tags=[str(tag) for tag in _configured_tags],
         )
         log_fn(f"✓ YouTubeメタデータ生成 (外部台本モード, LLM ¥0): {metadata_path.name}")
 
@@ -1392,10 +1435,17 @@ def run_workflow_sync(
                 # ScriptingPhaseResult 互換のスタブを構築 (Phase 3 production にそのまま渡せるように)
                 # Step 6 (2026-05-12): external_phase_result で生成済みの visual_identity を伝播。
                 # production_phase → ffmpeg_renderer → ImageProvider に下流配線済み。
+                # 2026-07-17: VerifiedScript.metadata.references (title/published_date)
+                # を ResearchSource に変換して伝播し、概要欄の参考文献を
+                # 「タイトル + 日付 + URL」表記にする (従来は URL のみ)。
+                _vs_for_refs = getattr(external_phase_result, "verified_script", None)
+                external_ref_sources = _verified_refs_to_research_sources(
+                    _vs_for_refs.metadata.references if _vs_for_refs is not None else []
+                )
                 scripting_result = ScriptingPhaseResult(
                     script=external_phase_result.script,
                     research_content=None,
-                    research_sources=None,
+                    research_sources=external_ref_sources or None,
                     perplexity_usage=None,
                     gemini_usage=None,
                     research_duration_sec=0.0,
@@ -1662,6 +1712,8 @@ def _generate_youtube_metadata(
     theme: str = "",
     provider: str = "ollama",
     external_metadata: Optional[dict] = None,
+    references: Optional[list[ResearchSource]] = None,
+    fixed_tags: Optional[list[str]] = None,
 ) -> dict:
     """YouTube 投稿用メタデータファイルを生成（外部台本モード前提）
 
@@ -1677,6 +1729,10 @@ def _generate_youtube_metadata(
         provider: 互換性のため残置（未使用）
         external_metadata: 外部台本モードの事前構築済み dict (必須)。
                           {title, thumbnail_title, description, hashtags} を持つ。
+        references: 参考文献 (ResearchSource)。概要欄用テキストに
+                    「タイトル + 日付 + URL」表記で出力する (2026-07-17)
+        fixed_tags: 固定タグ (config publishing.default_tags)。テーマ由来タグの
+                    後ろに結合し、# 付与・60 個上限の正規化をかける
 
     Returns:
         生成されたメタデータ辞書 {"title": str, "thumbnail_title": str, "description": str}
@@ -1695,6 +1751,10 @@ def _generate_youtube_metadata(
         "description": (external_metadata.get("description", "") or "").strip(),
     }
     hashtags = list(external_metadata.get("hashtags", []) or [])
+    # 2026-07-17: テーマ由来タグに # を付与し先頭へ、固定タグを末尾へ、60 個上限
+    normalized_hashtags = normalize_hashtags(hashtags, list(fixed_tags or []))
+    # 2026-07-17: 参考文献を「タイトル + 日付 + URL」表記で概要欄用テキストに載せる
+    reference_lines = format_reference_text_lines(list(references or []))
     lines = [
         "=" * 50,
         "YouTube 投稿用メタデータ (外部台本モード / VerifiedScript)",
@@ -1710,7 +1770,7 @@ def _generate_youtube_metadata(
         metadata["description"],
         "",
         "【ハッシュタグ候補】",
-        " ".join(hashtags),
+        " ".join(normalized_hashtags),
         "",
     ]
     chapter_block_lines = _build_metadata_chapter_block(chapters)
@@ -1721,6 +1781,14 @@ def _generate_youtube_metadata(
         "※ 以下をYouTubeの概要欄にコピー＆ペーストしてください",
         "",
         metadata["description"],
+        "",
+    ])
+    if reference_lines:
+        lines.append("【参考文献】")
+        lines.extend(reference_lines)
+        lines.append("")
+    lines.extend([
+        MEDICAL_DISCLAIMER,
         "",
         "-----------------------------------",
         "■使用音声",

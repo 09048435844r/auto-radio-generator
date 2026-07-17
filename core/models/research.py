@@ -11,6 +11,10 @@ class ResearchSource(BaseModel):
     title: str = Field(..., description="ソースのタイトル")
     url: str = Field(..., description="ソースのURL")
     snippet: Optional[str] = Field(None, description="引用スニペット（オプション）")
+    published_date: Optional[str] = Field(
+        None,
+        description="公開日 (VerifiedScript.references.published_date 由来、概要欄の参考文献表記用)",
+    )
 
 
 class ResearchResult(BaseModel):

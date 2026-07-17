@@ -11,6 +11,9 @@ logger = logging.getLogger(__name__)
 
 ReferenceEntry = str | ResearchSource
 
+# 免責文 (全動画一律)。説明欄末尾 (使用音声クレジット = footer の直前) に挿入する。
+MEDICAL_DISCLAIMER = "※本動画は一般的な情報提供を目的としており、医学的助言ではありません。"
+
 
 def _normalize_non_empty(items: List[str]) -> List[str]:
     """Trim values, drop empties, and preserve order while deduplicating."""
@@ -62,6 +65,58 @@ def _normalize_references(items: List[ReferenceEntry]) -> List[ReferenceEntry]:
     return normalized
 
 
+def normalize_hashtags(
+    dynamic_tags: List[str],
+    fixed_tags: List[str],
+    max_total: int = 60,
+) -> List[str]:
+    """テーマ由来タグ先頭 + 固定タグ末尾の # 付きハッシュタグ列を構築する。
+
+    - # 未付与のタグには # を付与する (既に付いていれば二重付与しない)
+    - 順序: dynamic (テーマ由来) → fixed (固定)。YouTube はタイトル上に
+      先頭 3 つを表示するため、動画ごとに変わるテーマ由来タグを先頭に置く
+    - YouTube 仕様 (ハッシュタグ 60 個超で全タグ無効) に合わせ、
+      合計が max_total を超える分は末尾から落とす
+    """
+    def _hashify(tag: str) -> str:
+        value = (tag or "").strip()
+        if not value:
+            return ""
+        return value if value.startswith("#") else f"#{value}"
+
+    merged = _normalize_non_empty([_hashify(t) for t in [*dynamic_tags, *fixed_tags]])
+    return merged[:max_total]
+
+
+def format_reference_text_lines(references: List[ReferenceEntry]) -> List[str]:
+    """metadata.txt 向けの「タイトル + 日付 + URL」参考文献行を構築する。
+
+    1 文献 2 行 (見出し行 + URL 行) + 区切り空行:
+        参考文献1: 環状オリゴ糖の脂質吸収抑制効果(2026-06-28)
+        https://...
+    published_date が無いソースは日付を省略 (空カッコを出さない)。
+    title が無いソースは現行どおり「参考文献N + URL」のみ。
+    """
+    lines: List[str] = []
+    for idx, ref in enumerate(_normalize_references(references), start=1):
+        if isinstance(ref, ResearchSource):
+            title = (ref.title or "").strip()
+            heading = f"参考文献{idx}: {title}" if title else f"参考文献{idx}"
+            published = (getattr(ref, "published_date", None) or "").strip()
+            if published:
+                heading = f"{heading}({published})"
+            url = (ref.url or "").strip()
+        else:
+            heading = f"参考文献{idx}"
+            url = (ref or "").strip()
+        lines.append(heading)
+        lines.append(url)
+        lines.append("")
+    while lines and lines[-1] == "":
+        lines.pop()
+    return lines
+
+
 def build_video_description(
     script_description: str,
     chapters: List[str],
@@ -90,7 +145,8 @@ def build_video_description(
     chapter_lines = _normalize_non_empty(chapters)
     reference_lines = _normalize_references(references)
 
-    merged_tags = _normalize_non_empty([*dynamic_tags, *fixed_tags])
+    # 2026-07-17: # 付与 + テーマ由来先頭/固定末尾 + 60 個上限の正規化に変更
+    merged_tags = normalize_hashtags(dynamic_tags, fixed_tags)
     footer = (footer_text or "").strip() or "（フッター未設定）"
 
     lines: List[str] = ["【動画の概要】", description_text]
@@ -105,6 +161,11 @@ def build_video_description(
         for idx, ref in enumerate(reference_lines, start=1):
             if isinstance(ref, ResearchSource):
                 title = (ref.title or "").strip() or f"参考文献{idx}"
+                # published_date があればタイトル行に付与 (無ければ日付を省略し
+                # 空カッコを出さない)。1 文献 2 行 (タイトル + URL) を維持する
+                published = (getattr(ref, "published_date", None) or "").strip()
+                if published:
+                    title = f"{title}({published})"
                 url = (ref.url or "").strip()
                 lines.append(f"📄 {title}")
                 lines.append(f"🔗 {url}")
@@ -128,6 +189,10 @@ def build_video_description(
         lines.append("")
         lines.append(llm_model_info)
 
+    # 免責文 (全動画一律)。footer = 使用音声クレジットの直前に置く
+    lines.append("")
+    lines.append(MEDICAL_DISCLAIMER)
+    lines.append("")
     lines.append(footer)
 
     # 最終的なサニタイズと検証
